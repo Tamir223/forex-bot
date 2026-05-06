@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🏗️ Agentic Prop Firm Execution Engine (APFEE)
 ### Complete Step-by-Step Build Guide
 
@@ -616,3 +617,6 @@ You are ready. Real signals, real money, system is live.
 ---
 
 *APFEE v1.0 — Built by Tamir*
+=======
+# prop-firm-engine
+>>>>>>> 72036321f9039318b81e37c6e29ecf7ddf4ecc80
