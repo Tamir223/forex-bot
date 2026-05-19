@@ -1,0 +1,167 @@
+"""
+APFEE Claude Module - SaaS version
+Passes market context and per-user provider stats to Claude.
+"""
+
+import json
+import logging
+import re
+import anthropic
+from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS, SYSTEM_PROMPT
+from market import get_live_price, get_atr, check_entry_validity
+from calendar import check_news_window
+
+logger = logging.getLogger(__name__)
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+
+def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -> dict | None:
+    try:
+        # Quick parse for market data
+        quick = _quick_parse(signal_text)
+        pair = quick.get("pair")
+        entry = quick.get("entry_zone")
+        direction = quick.get("direction")
+        provider = quick.get("provider")
+
+        # Market context
+        market_ctx = {}
+        price_data = get_live_price(pair) if pair else None
+        if price_data:
+            market_ctx["current_price"] = price_data["price"]
+
+        atr_data = get_atr(pair) if pair else None
+        if atr_data:
+            market_ctx["atr"] = atr_data["atr"]
+            market_ctx["low_volatility"] = atr_data["is_low_volatility"]
+
+        news_data = check_news_window(pair) if pair else {"has_news": False}
+        market_ctx["news_in_window"] = news_data["has_news"]
+        market_ctx["news_detail"] = news_data.get("warning_message", "")
+
+        entry_check = check_entry_validity(pair, entry, None, direction)
+        market_ctx["entry_valid"] = entry_check["valid"]
+        market_ctx["entry_reason"] = entry_check.get("reason", "")
+        market_ctx["pips_to_entry"] = entry_check.get("pips_away")
+
+        # Per-user provider stats
+        if user_id and provider:
+            from database import get_provider_stats
+            stats = get_provider_stats(user_id, provider)
+            market_ctx["provider_win_rate"] = stats.get("win_rate")
+            market_ctx["provider_trades"] = stats.get("total_trades", 0)
+            market_ctx["provider_modifier"] = stats.get("confidence_modifier", 0)
+
+        # Early exits
+        if market_ctx.get("low_volatility"):
+            return _block_response(pair, direction, provider,
+                                   f"Low volatility session. ATR {market_ctx.get('atr')} below minimum.")
+
+        if not market_ctx.get("entry_valid", True):
+            return _block_response(pair, direction, provider,
+                                   f"Entry missed. {market_ctx.get('entry_reason', '')}")
+
+        # Build full message
+        full_message = _build_message(account_state, market_ctx, signal_text)
+
+        message = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=CLAUDE_MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": full_message}]
+        )
+
+        raw = message.content[0].text
+        cleaned = re.sub(r"```json|```", "", raw).strip()
+        result = json.loads(cleaned)
+
+        # Apply provider modifier
+        modifier = market_ctx.get("provider_modifier", 0)
+        if modifier and "confidence" in result:
+            result["confidence"] = max(1, min(10, result["confidence"] + modifier))
+
+        if market_ctx.get("news_in_window"):
+            result["news_warning"] = True
+
+        logger.info(f"[user:{user_id}] {result.get('decision')} {result.get('pair')} "
+                    f"grade={result.get('grade')} conf={result.get('confidence')}")
+        return result
+
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parse error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Claude error: {e}")
+        return None
+
+
+def _block_response(pair, direction, provider, reason):
+    return {
+        "pair": pair, "direction": direction,
+        "signal_source": provider or "UNKNOWN",
+        "signal_format": "UNKNOWN",
+        "grade": "BLOCK", "decision": "BLOCK",
+        "risk_percent": 0, "confidence": 1,
+        "news_warning": False, "signal_complete": False,
+        "reason": reason, "trend": "unclear",
+        "confirmation": False, "structure": False, "zone": False,
+        "liquidity": False, "retracement_valid": False,
+        "correlation_conflict": False, "session_valid": False,
+        "disclaimer_present": False, "entry_zone": None,
+        "stop_loss": None, "stop_loss_pts": None,
+        "tp1": None, "tp2": None, "tp3": None, "tp4": None,
+        "tp1_rr": None, "tp2_rr": None, "tp3_rr": None,
+        "timeframe": None, "trade_type": None, "setup_type": None,
+    }
+
+
+def _build_message(account_state, market_ctx, signal_text):
+    lines = ["=== ACCOUNT STATE ==="]
+    for k, v in account_state.items():
+        lines.append(f"{k}={v}")
+
+    lines.append("\n=== MARKET CONTEXT ===")
+    if market_ctx.get("current_price"):
+        lines.append(f"current_price={market_ctx['current_price']}")
+    if market_ctx.get("atr"):
+        lines.append(f"atr={market_ctx['atr']}")
+        lines.append(f"low_volatility={market_ctx.get('low_volatility', False)}")
+    lines.append(f"news_in_next_2h={market_ctx.get('news_in_window', False)}")
+    if market_ctx.get("news_detail"):
+        lines.append(f"news_detail={market_ctx['news_detail']}")
+    if market_ctx.get("pips_to_entry") is not None:
+        lines.append(f"pips_to_entry={market_ctx['pips_to_entry']}")
+        lines.append(f"entry_valid={market_ctx.get('entry_valid', True)}")
+    if market_ctx.get("provider_win_rate") is not None:
+        lines.append(f"provider_win_rate={market_ctx['provider_win_rate']}")
+        lines.append(f"provider_trades={market_ctx['provider_trades']}")
+
+    lines.append("\n=== SIGNAL ===")
+    lines.append(signal_text)
+    return "\n".join(lines)
+
+
+def _quick_parse(signal_text):
+    import re
+    result = {}
+    pairs = ["XAUUSD", "GBPUSD", "EURUSD", "USDJPY", "USDCAD",
+             "AUDUSD", "NZDUSD", "USDCHF", "EURGBP", "EURJPY",
+             "GBPJPY", "US30", "NAS100"]
+    text_upper = signal_text.upper()
+    for pair in pairs:
+        if pair in text_upper:
+            result["pair"] = pair
+            break
+    if "BUY" in text_upper:
+        result["direction"] = "BUY"
+    elif "SELL" in text_upper:
+        result["direction"] = "SELL"
+    m = re.search(r"ENTRY\s*ZONE\s*:?\s*([\d.]+)", signal_text, re.IGNORECASE)
+    if m:
+        result["entry_zone"] = m.group(1)
+    for kw, name in [("DON PIPS", "DON PIPS VIP"), ("ICT", "ICT"),
+                     ("FTMO", "FTMO Signals"), ("GOLD SCALPERS", "Gold Scalpers")]:
+        if kw in text_upper:
+            result["provider"] = name
+            break
+    return result

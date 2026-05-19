@@ -1,0 +1,140 @@
+"""
+APFEE Report Module - SaaS version
+"""
+
+from filter import calculate_confluence
+
+
+def fmt(value, fallback="--"):
+    if value is None or value == "" or str(value).lower() == "null":
+        return fallback
+    return str(value)
+
+
+def confluence_bar(score):
+    return f"{'█' * score}{'░' * (6 - score)} {score}/6"
+
+
+def execute_report(analysis: dict) -> str:
+    confluence = calculate_confluence(analysis)
+    return (
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 TRADE SIGNAL REPORT\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"SOURCE:     {fmt(analysis.get('signal_source'))}\n"
+        f"PAIR:       {fmt(analysis.get('pair'))} | {fmt(analysis.get('direction'))}\n"
+        f"TIMEFRAME:  {fmt(analysis.get('timeframe'))}\n"
+        f"TYPE:       {fmt(analysis.get('trade_type'))}\n"
+        f"SETUP:      {fmt(analysis.get('setup_type'))}\n"
+        f"GRADE:      {fmt(analysis.get('grade'))}\n"
+        f"CONFIDENCE: {fmt(analysis.get('confidence'))}/10\n"
+        f"CONFLUENCE: {confluence_bar(confluence)}\n"
+        f"DECISION:   ✅ EXECUTE\n\n"
+        f"📍 LEVELS\n"
+        f"Entry:      {fmt(analysis.get('entry_zone'))}\n"
+        f"Stop Loss:  {fmt(analysis.get('stop_loss'))} ({fmt(analysis.get('stop_loss_pts'))} pts)\n"
+        f"TP1:        {fmt(analysis.get('tp1'))} ({fmt(analysis.get('tp1_rr'))})\n"
+        f"TP2:        {fmt(analysis.get('tp2'))} ({fmt(analysis.get('tp2_rr'))})\n"
+        f"TP3:        {fmt(analysis.get('tp3'))} ({fmt(analysis.get('tp3_rr'))})\n"
+        f"TP4:        {fmt(analysis.get('tp4'))}\n\n"
+        f"📈 ANALYSIS\n"
+        f"Trend:        {fmt(analysis.get('trend'))}\n"
+        f"Structure:    {fmt(analysis.get('structure'))}\n"
+        f"Zone:         {fmt(analysis.get('zone'))}\n"
+        f"Liquidity:    {fmt(analysis.get('liquidity'))}\n"
+        f"Confirmation: {fmt(analysis.get('confirmation'))}\n\n"
+        f"💰 RISK\n"
+        f"Risk %:     {fmt(analysis.get('risk_percent'))}%\n\n"
+        f"📝 REASON\n"
+        f"{fmt(analysis.get('reason'))}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Reply YES to execute\n"
+        f"Reply NO to skip\n"
+        f"⏱ Expires in 5 minutes\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+
+
+def blocked_report(analysis: dict, reason: str) -> str:
+    pair = fmt(analysis.get("pair"))
+    direction = fmt(analysis.get("direction"))
+    msgs = {
+        "incomplete_signal": (
+            f"⚠️ INCOMPLETE SIGNAL\n{pair} {direction} missing key levels.\n"
+            f"Entry: {fmt(analysis.get('entry_zone'))}\n"
+            f"Stop Loss: {fmt(analysis.get('stop_loss'))}\n"
+            f"Wait for the full signal."
+        ),
+        "news_warning": (
+            f"📰 NEWS WARNING — BLOCKED\n{pair} {direction}\n"
+            f"High impact news detected in next 2 hours.\n"
+            f"Reason: {fmt(analysis.get('reason'))}"
+        ),
+        "low_confidence": (
+            f"⛔ {pair} {direction} — LOW CONFIDENCE ({fmt(analysis.get('confidence'))}/10)\n"
+            f"Reason: {fmt(analysis.get('reason'))}"
+        ),
+        "low_confluence": (
+            f"⛔ {pair} {direction} — LOW CONFLUENCE\n"
+            f"Not enough technical factors aligned.\n"
+            f"Reason: {fmt(analysis.get('reason'))}"
+        ),
+        "correlation_conflict": (
+            f"⛔ {pair} {direction} — CORRELATION CONFLICT\n"
+            f"Reason: {fmt(analysis.get('reason'))}"
+        ),
+        "claude_block": (
+            f"⛔ {pair} {direction} — BLOCKED\n"
+            f"Reason: {fmt(analysis.get('reason'))}"
+        ),
+    }
+    return msgs.get(reason, f"⛔ {pair} {direction} — BLOCKED\n{fmt(analysis.get('reason'))}")
+
+
+def fast_gate_blocked(reason: str) -> str:
+    return f"🚫 SIGNAL BLOCKED\n{reason}"
+
+
+def not_subscribed_message() -> str:
+    return (
+        "You don't have an active APFEE subscription.\n\n"
+        "Subscribe at apfee.io to get started.\n"
+        "Plans from $47/month."
+    )
+
+
+def status_report(state, plan_tier: str) -> str:
+    return (
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 ACCOUNT STATUS\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Plan:           {plan_tier.upper()}\n"
+        f"Trades today:   {state.trades_today}\n"
+        f"Open trades:    {state.open_trades}\n"
+        f"Live exposure:  {state.live_exposure}%\n"
+        f"Session losses: {state.session_losses}\n"
+        f"Weekly losses:  {state.weekly_losses}\n"
+        f"Win streak:     {state.win_streak}\n"
+        f"Daily PnL:      {state.daily_pnl}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+
+
+def trade_executed() -> str:
+    return "✅ Trade logged.\nGood luck! 💰"
+
+
+def trade_skipped() -> str:
+    return "⏭ Trade skipped."
+
+
+def trade_logged_win() -> str:
+    return "✅ WIN logged. Keep going! 💰"
+
+
+def trade_logged_loss() -> str:
+    return "❌ LOSS logged.\nReview before next signal."
+
+
+def weekly_reset() -> str:
+    return "🔄 Weekly reset complete. New week, clean slate."
