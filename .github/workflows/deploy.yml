@@ -1,4 +1,4 @@
-name: Deploy to AWS EC2
+name: Deploy to Production
 
 on:
   push:
@@ -7,7 +7,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Deploy to EC2
         uses: appleboy/ssh-action@master
@@ -18,7 +17,4 @@ jobs:
           script: |
             cd /home/ubuntu/apfee
             git pull origin main
-            source venv/bin/activate
-            pip install -q -r requirements.txt
             sudo systemctl restart apfee
-            echo "APFEE deployed successfully"

@@ -1,0 +1,243 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
+  <defs>
+    <!-- Deep space background gradient -->
+    <radialGradient id="spaceBg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0a0a1a"/>
+      <stop offset="60%" stop-color="#04040f"/>
+      <stop offset="100%" stop-color="#000005"/>
+    </radialGradient>
+
+    <!-- Planet glow -->
+    <radialGradient id="planetGlow" cx="50%" cy="45%" r="50%">
+      <stop offset="0%" stop-color="#1a3a6e"/>
+      <stop offset="40%" stop-color="#0d1f40"/>
+      <stop offset="100%" stop-color="#050a18"/>
+    </radialGradient>
+
+    <!-- Atmosphere rim glow -->
+    <radialGradient id="atmosphereGlow" cx="50%" cy="45%" r="52%">
+      <stop offset="85%" stop-color="transparent"/>
+      <stop offset="92%" stop-color="#3a7bd5" stop-opacity="0.6"/>
+      <stop offset="96%" stop-color="#5b9fff" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#7db8ff" stop-opacity="0.4"/>
+    </radialGradient>
+
+    <!-- Nebula / galaxy band -->
+    <linearGradient id="nebulaGrad" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#1a0530" stop-opacity="0"/>
+      <stop offset="20%" stop-color="#2d0a55" stop-opacity="0.7"/>
+      <stop offset="45%" stop-color="#1a0a3a" stop-opacity="0.9"/>
+      <stop offset="65%" stop-color="#3a1060" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#1a0530" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- TNL text gradient - silver/chrome -->
+    <linearGradient id="tnlGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="20%" stop-color="#e8e8e8"/>
+      <stop offset="50%" stop-color="#c0c0c0"/>
+      <stop offset="80%" stop-color="#a0a0a0"/>
+      <stop offset="100%" stop-color="#d0d0d0"/>
+    </linearGradient>
+
+    <!-- TRADER text gradient - gold accent -->
+    <linearGradient id="traderGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="30%" stop-color="#e0e0e0"/>
+      <stop offset="100%" stop-color="#b0b0b0"/>
+    </linearGradient>
+
+    <!-- Chart line glow -->
+    <filter id="glowBlue" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <filter id="glowGold" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <filter id="textGlow" x="-10%" y="-20%" width="120%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <clipPath id="planetClip">
+      <circle cx="300" cy="270" r="175"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="600" height="600" fill="url(#spaceBg)"/>
+
+  <!-- Stars layer -->
+  <g opacity="0.8">
+    <!-- Scattered stars -->
+    <circle cx="45" cy="30" r="1.2" fill="white" opacity="0.9"/>
+    <circle cx="120" cy="55" r="0.8" fill="white" opacity="0.6"/>
+    <circle cx="200" cy="25" r="1" fill="white" opacity="0.8"/>
+    <circle cx="310" cy="40" r="0.6" fill="white" opacity="0.5"/>
+    <circle cx="420" cy="20" r="1.1" fill="white" opacity="0.9"/>
+    <circle cx="510" cy="60" r="0.7" fill="white" opacity="0.6"/>
+    <circle cx="565" cy="35" r="1" fill="white" opacity="0.8"/>
+    <circle cx="30" cy="100" r="0.8" fill="white" opacity="0.5"/>
+    <circle cx="80" cy="150" r="1.2" fill="white" opacity="0.7"/>
+    <circle cx="160" cy="120" r="0.6" fill="white" opacity="0.4"/>
+    <circle cx="490" cy="90" r="0.9" fill="white" opacity="0.7"/>
+    <circle cx="545" cy="130" r="1.1" fill="white" opacity="0.6"/>
+    <circle cx="570" cy="180" r="0.7" fill="white" opacity="0.5"/>
+    <circle cx="25" cy="200" r="1" fill="white" opacity="0.6"/>
+    <circle cx="60" cy="250" r="0.8" fill="white" opacity="0.4"/>
+    <circle cx="20" cy="350" r="1.2" fill="white" opacity="0.7"/>
+    <circle cx="55" cy="420" r="0.7" fill="white" opacity="0.5"/>
+    <circle cx="100" cy="480" r="1" fill="white" opacity="0.6"/>
+    <circle cx="150" cy="520" r="0.8" fill="white" opacity="0.4"/>
+    <circle cx="220" cy="545" r="1.1" fill="white" opacity="0.7"/>
+    <circle cx="350" cy="565" r="0.7" fill="white" opacity="0.5"/>
+    <circle cx="450" cy="540" r="1" fill="white" opacity="0.6"/>
+    <circle cx="520" cy="510" r="0.9" fill="white" opacity="0.4"/>
+    <circle cx="560" cy="460" r="1.2" fill="white" opacity="0.7"/>
+    <circle cx="580" cy="380" r="0.6" fill="white" opacity="0.5"/>
+    <circle cx="575" cy="300" r="1" fill="white" opacity="0.6"/>
+    <!-- Brighter accent stars -->
+    <circle cx="95" cy="70" r="1.8" fill="white" opacity="1"/>
+    <circle cx="385" cy="45" r="1.5" fill="#b0d0ff" opacity="0.9"/>
+    <circle cx="530" cy="170" r="1.6" fill="white" opacity="0.9"/>
+    <circle cx="40" cy="440" r="1.7" fill="#ffd0a0" opacity="0.8"/>
+    <circle cx="555" cy="390" r="1.5" fill="white" opacity="0.9"/>
+  </g>
+
+  <!-- Nebula band behind planet -->
+  <ellipse cx="300" cy="310" rx="290" ry="80" fill="url(#nebulaGrad)" opacity="0.8"/>
+  <!-- Purple haze -->
+  <ellipse cx="280" cy="320" rx="240" ry="55" fill="#2a0850" opacity="0.4"/>
+  <!-- Pink/red outer nebula -->
+  <ellipse cx="320" cy="305" rx="260" ry="45" fill="#4a1020" opacity="0.25"/>
+
+  <!-- Planet shadow/dark side -->
+  <circle cx="300" cy="270" r="175" fill="#030810"/>
+
+  <!-- Planet surface -->
+  <circle cx="300" cy="270" r="175" fill="url(#planetGlow)"/>
+
+  <!-- Planet surface detail - subtle continent shapes clipped to sphere -->
+  <g clip-path="url(#planetClip)" opacity="0.3">
+    <ellipse cx="240" cy="220" rx="80" ry="50" fill="#1e4080" opacity="0.5"/>
+    <ellipse cx="360" cy="290" rx="60" ry="40" fill="#1e4080" opacity="0.4"/>
+    <ellipse cx="280" cy="330" rx="90" ry="35" fill="#162d5a" opacity="0.6"/>
+    <ellipse cx="340" cy="180" rx="50" ry="30" fill="#1e4080" opacity="0.3"/>
+  </g>
+
+  <!-- Trading chart line ON the planet surface -->
+  <g clip-path="url(#planetClip)">
+    <!-- Chart grid lines subtle -->
+    <line x1="160" y1="300" x2="440" y2="300" stroke="#1e3a6e" stroke-width="0.5" opacity="0.4"/>
+    <line x1="160" y1="260" x2="440" y2="260" stroke="#1e3a6e" stroke-width="0.5" opacity="0.3"/>
+    <line x1="160" y1="340" x2="440" y2="340" stroke="#1e3a6e" stroke-width="0.5" opacity="0.3"/>
+
+    <!-- Main glowing chart line -->
+    <polyline
+      points="170,320 200,310 225,325 255,285 275,295 295,265 320,270 345,245 375,255 405,230 430,238"
+      fill="none"
+      stroke="#00d4ff"
+      stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      filter="url(#glowBlue)"
+      opacity="0.9"
+    />
+    <!-- Accent dot at peak -->
+    <circle cx="405" cy="230" r="5" fill="#00d4ff" filter="url(#glowBlue)" opacity="0.95"/>
+
+    <!-- Green fill under chart -->
+    <polygon
+      points="170,320 200,310 225,325 255,285 275,295 295,265 320,270 345,245 375,255 405,230 430,238 430,380 170,380"
+      fill="#00d4ff"
+      opacity="0.06"
+    />
+  </g>
+
+  <!-- Planet atmosphere rim glow -->
+  <circle cx="300" cy="270" r="175" fill="url(#atmosphereGlow)"/>
+  <!-- Extra bright rim -->
+  <circle cx="300" cy="270" r="175" fill="none" stroke="#4a9fff" stroke-width="2" opacity="0.5"/>
+  <circle cx="300" cy="270" r="177" fill="none" stroke="#7bc4ff" stroke-width="1" opacity="0.3"/>
+
+  <!-- Lens flare / light source top-left -->
+  <circle cx="195" cy="155" r="25" fill="#5090ff" opacity="0.15" filter="url(#softGlow)"/>
+  <circle cx="195" cy="155" r="8" fill="#90c0ff" opacity="0.3"/>
+  <circle cx="195" cy="155" r="3" fill="white" opacity="0.8"/>
+
+  <!-- TNL main text - bold italic condensed style -->
+  <g filter="url(#textGlow)">
+    <!-- Shadow/depth layer -->
+    <text
+      x="302" y="228"
+      font-family="'Arial Black', 'Impact', sans-serif"
+      font-size="115"
+      font-weight="900"
+      font-style="italic"
+      text-anchor="middle"
+      fill="#001030"
+      opacity="0.8"
+      transform="skewX(-5)"
+    >TNL</text>
+
+    <!-- Main TNL text -->
+    <text
+      x="300" y="225"
+      font-family="'Arial Black', 'Impact', sans-serif"
+      font-size="115"
+      font-weight="900"
+      font-style="italic"
+      text-anchor="middle"
+      fill="url(#tnlGrad)"
+      transform="skewX(-5)"
+    >TNL</text>
+  </g>
+
+  <!-- Decorative bars framing TRADER -->
+  <rect x="95" y="458" width="160" height="3" fill="#888" opacity="0.6" rx="1.5"/>
+  <rect x="95" y="500" width="160" height="3" fill="#888" opacity="0.6" rx="1.5"/>
+  <rect x="345" y="458" width="160" height="3" fill="#888" opacity="0.6" rx="1.5"/>
+  <rect x="345" y="500" width="160" height="3" fill="#888" opacity="0.6" rx="1.5"/>
+
+  <!-- TRADER text -->
+  <g filter="url(#textGlow)">
+    <text
+      x="302" y="495"
+      font-family="'Arial Black', 'Impact', sans-serif"
+      font-size="48"
+      font-weight="900"
+      letter-spacing="12"
+      text-anchor="middle"
+      fill="#111"
+      opacity="0.7"
+    >TRADER</text>
+    <text
+      x="300" y="493"
+      font-family="'Arial Black', 'Impact', sans-serif"
+      font-size="48"
+      font-weight="900"
+      letter-spacing="12"
+      text-anchor="middle"
+      fill="url(#traderGrad)"
+    >TRADER</text>
+  </g>
+
+  <!-- Small signal/AI indicator dots -->
+  <g filter="url(#glowBlue)" opacity="0.8">
+    <circle cx="170" cy="385" r="3" fill="#00d4ff"/>
+    <circle cx="185" cy="385" r="2" fill="#00d4ff" opacity="0.6"/>
+    <circle cx="196" cy="385" r="1.5" fill="#00d4ff" opacity="0.4"/>
+    <circle cx="430" cy="385" r="3" fill="#00d4ff"/>
+    <circle cx="415" cy="385" r="2" fill="#00d4ff" opacity="0.6"/>
+    <circle cx="404" cy="385" r="1.5" fill="#00d4ff" opacity="0.4"/>
+  </g>
+</svg>

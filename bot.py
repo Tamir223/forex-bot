@@ -141,7 +141,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state.trades_today >= daily_limit:
         await send(context, chat_id, f"Daily signal limit reached for your {user.plan_tier} plan.\nUpgrade at tnltrader.com for more signals.")
         return
-    passed, gate_reason = run_fast_gates(state)
+    passed, gate_reason = run_fast_gates(state.__dict__ if hasattr(state, "__dict__") else state)
     if not passed:
         await send(context, chat_id, fast_gate_blocked(gate_reason))
         return

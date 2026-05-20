@@ -1,16 +1,15 @@
 """
 TNL Trader Stripe Webhook Handler
-Handles subscription events from Stripe.
-Automatically activates and deactivates user accounts.
 """
 
 import os
 import logging
 import stripe
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import RedirectResponse, HTMLResponse
 from database import (
     get_user_by_email, get_user_by_stripe_customer,
-    create_user, set_user_active, link_telegram
+    create_user, set_user_active
 )
 from notifications import send_welcome_message, send_cancellation_message
 
@@ -19,7 +18,6 @@ logger = logging.getLogger(__name__)
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 
-# Map Stripe price IDs to plan tiers
 PRICE_TO_PLAN = {
     os.getenv("STRIPE_PRICE_BASIC"):  "basic",
     os.getenv("STRIPE_PRICE_PRO"):    "pro",
@@ -38,7 +36,7 @@ async def stripe_webhook(request: Request):
         event = stripe.Webhook.construct_event(
             payload, sig_header, STRIPE_WEBHOOK_SECRET
         )
-    except stripe.error.SignatureVerificationError:
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     event_type = event["type"]
@@ -46,74 +44,183 @@ async def stripe_webhook(request: Request):
 
     logger.info(f"Stripe event: {event_type}")
 
-    # ── New subscription created ──────────────────────────────────────────────
     if event_type == "checkout.session.completed":
-        email = data.get("customer_email") or data.get("customer_details", {}).get("email")
-        customer_id = data.get("customer")
-        subscription_id = data.get("subscription")
-        price_id = None
-
-        # Get price from line items
         try:
-            session = stripe.checkout.Session.retrieve(
-                data["id"], expand=["line_items"]
-            )
-            items = session.line_items.data
-            if items:
-                price_id = items[0].price.id
-        except Exception as e:
-            logger.error(f"Could not get price from session: {e}")
-
-        plan = PRICE_TO_PLAN.get(price_id, "pro")
-
-        if email:
-            existing = get_user_by_email(email)
-            if existing:
-                set_user_active(existing.id, True)
-                logger.info(f"Reactivated user {email}")
+            email = None
+            if isinstance(data, dict):
+                email = data.get("customer_email")
+                if not email:
+                    details = data.get("customer_details")
+                    if isinstance(details, dict):
+                        email = details.get("email")
+                customer_id = data.get("customer")
+                subscription_id = data.get("subscription")
+                session_id = data.get("id")
             else:
-                user = create_user(
-                    email=email,
-                    stripe_customer_id=customer_id,
-                    stripe_subscription_id=subscription_id,
-                    plan_tier=plan
+                email = getattr(data, "customer_email", None)
+                if not email:
+                    details = getattr(data, "customer_details", None)
+                    email = getattr(details, "email", None) if details else None
+                customer_id = getattr(data, "customer", None)
+                subscription_id = getattr(data, "subscription", None)
+                session_id = getattr(data, "id", None)
+
+            price_id = None
+            try:
+                session = stripe.checkout.Session.retrieve(
+                    session_id, expand=["line_items"]
                 )
-                if user:
-                    logger.info(f"Created new user {email} on {plan} plan")
-                    await send_welcome_message(user)
+                items = session.line_items.data
+                if items:
+                    price_id = items[0].price.id
+            except Exception as e:
+                logger.error(f"Could not get price: {e}")
 
-    # ── Subscription cancelled or payment failed ──────────────────────────────
+            plan = PRICE_TO_PLAN.get(price_id, "pro")
+            logger.info(f"New subscriber: {email} on {plan} plan")
+
+            if email:
+                existing = get_user_by_email(email)
+                if existing:
+                    set_user_active(existing.id, True)
+                    logger.info(f"Reactivated {email}")
+                else:
+                    user = create_user(
+                        email=email,
+                        stripe_customer_id=customer_id,
+                        stripe_subscription_id=subscription_id,
+                        plan_tier=plan
+                    )
+                    if user:
+                        logger.info(f"Created user {email}")
+                        await send_welcome_message(user)
+                    else:
+                        logger.error(f"Failed to create user {email}")
+            else:
+                logger.error("No email found in checkout session")
+
+        except Exception as e:
+            logger.error(f"Checkout handler error: {e}", exc_info=True)
+
     elif event_type in ["customer.subscription.deleted", "invoice.payment_failed"]:
-        customer_id = data.get("customer")
-        user = get_user_by_stripe_customer(customer_id)
-        if user:
-            set_user_active(user.id, False)
-            await send_cancellation_message(user)
-            logger.info(f"Deactivated user {user.email}")
+        try:
+            customer_id = data.get("customer") if isinstance(data, dict) else getattr(data, "customer", None)
+            user = get_user_by_stripe_customer(customer_id)
+            if user:
+                set_user_active(user.id, False)
+                await send_cancellation_message(user)
+                logger.info(f"Deactivated {user.email}")
+        except Exception as e:
+            logger.error(f"Cancellation handler error: {e}")
 
-    # ── Subscription updated (plan change) ───────────────────────────────────
     elif event_type == "customer.subscription.updated":
-        customer_id = data.get("customer")
-        user = get_user_by_stripe_customer(customer_id)
-        if user:
-            items = data.get("items", {}).get("data", [])
-            if items:
-                price_id = items[0].get("price", {}).get("id")
-                new_plan = PRICE_TO_PLAN.get(price_id, user.plan_tier)
-                if new_plan != user.plan_tier:
-                    from database import get_conn
-                    with get_conn() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute(
-                                "UPDATE users SET plan_tier = %s WHERE id = %s",
-                                (new_plan, user.id)
-                            )
-                        conn.commit()
-                    logger.info(f"User {user.email} upgraded to {new_plan}")
+        try:
+            customer_id = data.get("customer") if isinstance(data, dict) else getattr(data, "customer", None)
+            user = get_user_by_stripe_customer(customer_id)
+            if user:
+                items = data.get("items", {}).get("data", []) if isinstance(data, dict) else []
+                if items:
+                    price_id = items[0].get("price", {}).get("id")
+                    new_plan = PRICE_TO_PLAN.get(price_id, user.plan_tier)
+                    if new_plan != user.plan_tier:
+                        from database import get_conn
+                        with get_conn() as conn:
+                            with conn.cursor() as cur:
+                                cur.execute(
+                                    "UPDATE users SET plan_tier = %s WHERE id = %s",
+                                    (new_plan, user.id)
+                                )
+                            conn.commit()
+                        logger.info(f"User {user.email} changed to {new_plan}")
+        except Exception as e:
+            logger.error(f"Update handler error: {e}")
 
     return {"status": "ok"}
+
+
+@app.get("/checkout")
+async def checkout(plan: str = "pro"):
+    price_map = {
+        "basic": os.getenv("STRIPE_PRICE_BASIC"),
+        "pro": os.getenv("STRIPE_PRICE_PRO"),
+        "elite": os.getenv("STRIPE_PRICE_ELITE"),
+    }
+    price_id = price_map.get(plan, price_map["pro"])
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            subscription_data={"trial_period_days": 14},
+            success_url="https://tnltrader.com/success",
+            cancel_url="https://tnltrader.com/#pricing",
+        )
+        return RedirectResponse(url=session.url)
+    except Exception as e:
+        logger.error(f"Checkout error: {e}")
+        raise HTTPException(status_code=500, detail="Checkout failed")
+
+
+@app.get("/success")
+async def success():
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Welcome to TNL Trader</title>
+        <meta http-equiv="refresh" content="5;url=https://tnltrader.com">
+        <style>
+            body { background: #04040f; color: #f0f4ff; font-family: sans-serif;
+                   display: flex; align-items: center; justify-content: center;
+                   height: 100vh; text-align: center; }
+            h1 { font-size: 48px; margin-bottom: 16px; }
+            p { color: #7080a0; font-size: 18px; }
+            span { color: #00d4ff; }
+        </style>
+    </head>
+    <body>
+        <div>
+            <h1>✅ You're in.</h1>
+            <p>Check your email for your activation link.<br/>
+            Redirecting to <span>tnltrader.com</span> in 5 seconds...</p>
+        </div>
+    </body>
+    </html>
+    """)
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "3.0", "service": "TNL Trader"}
+
+
+@app.get("/api/stats")
+async def stats():
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) as count FROM trades")
+                signals = cur.fetchone()["count"]
+                cur.execute("SELECT COUNT(*) as count FROM users WHERE is_active = TRUE")
+                traders = cur.fetchone()["count"]
+        return {"signals": signals, "traders": traders}
+    except Exception as e:
+        logger.error(f"Stats error: {e}")
+        return {"signals": 0, "traders": 0}
+
+
+@app.get("/api/stats")
+async def stats():
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) as count FROM trades")
+                signals = cur.fetchone()["count"]
+                cur.execute("SELECT COUNT(*) as count FROM users WHERE is_active = TRUE")
+                traders = cur.fetchone()["count"]
+        return {"signals": signals, "traders": traders}
+    except Exception as e:
+        logger.error(f"Stats error: {e}")
+        return {"signals": 0, "traders": 0}
