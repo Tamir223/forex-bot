@@ -75,7 +75,11 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user or not user.is_active:
         await update.message.reply_text(not_subscribed_message())
         return
-    trades = get_user_trades(user.id, limit=10)
+    plan = user.plan_tier
+    if plan == "basic":
+        trades = _get_recent_trades(user.id, days=30, limit=10)
+    else:
+        trades = get_user_trades(user.id, limit=10)
     if not trades:
         await update.message.reply_text("No trades logged yet. Start forwarding signals.")
         return
@@ -83,12 +87,44 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for t in trades:
         result_emoji = {"WIN": "✅", "LOSS": "❌", "PENDING": "⏳", "SKIPPED": "⏭"}.get(t["result"], "")
         lines.append(f"{result_emoji} {t['pair']} {t['direction']} | {t['grade']} | {t['confidence']}/10 | {t['signal_source']}")
+    if plan in ("pro", "elite"):
+        providers = list({t["signal_source"] for t in trades
+                          if t.get("signal_source") and t["signal_source"] != "UNKNOWN"})
+        if providers:
+            lines.append("\n📈 PROVIDER PERFORMANCE\n")
+            for p in sorted(providers):
+                stats = get_provider_stats(user.id, p)
+                if stats.get("total_trades", 0) > 0:
+                    lines.append(f"{p}: {stats.get('win_rate', 0)}% WR | {stats.get('total_trades', 0)} trades")
+    else:
+        lines.append(
+            "\n📊 Provider performance stats are available on Pro and Elite plans. "
+            "Upgrade at tnltrader.com"
+        )
     await update.message.reply_text("\n".join(lines))
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "TNL Trader Commands\n\n/status — account state and limits\n/stats — last 10 trades\n/help — this menu\n\nReplies after a report:\nYES — execute the trade\nNO — skip the trade\nWIN — mark last trade as win\nLOSS — mark last trade as loss"
+        "TNL Trader Commands\n\n"
+        "/status — account state and limits\n"
+        "/stats — recent trades and performance\n"
+        "/cancel — manage or cancel your subscription\n"
+        "/help — this menu\n\n"
+        "Replies after a report:\n"
+        "YES — execute the trade\n"
+        "NO — skip the trade\n"
+        "WIN — mark last trade as win\n"
+        "LOSS — mark last trade as loss"
+    )
+
+
+async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "To cancel your TNL Trader subscription, visit your billing portal below. "
+        "You will keep full access until the end of your current billing period.\n\n"
+        "https://billing.stripe.com/p/login/fZu3cwesK8NEflccqOfjG00\n\n"
+        "If you have any issues email support@tnltrader.com"
     )
 
 
@@ -158,6 +194,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not analysis:
         await send(context, chat_id, "⚠️ Analysis failed. Please try again.")
         return
+    # Elite priority: lower effective confidence threshold by 1
+    if user.plan_tier == "elite" and analysis.get("confidence") is not None:
+        analysis["confidence"] = min(10, analysis["confidence"] + 1)
     last_analysis[chat_id] = analysis
     trade = Trade(
         user_id=user.id,
@@ -187,7 +226,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update_trade_result(trade_id, "BLOCKED")
         return
     report = execute_report(analysis)
+    if user.plan_tier == "elite":
+        report = "⚡ ELITE PRIORITY ANALYSIS\n" + report
     await send(context, chat_id, report)
+
+
+def _get_recent_trades(user_id: int, days: int = 30, limit: int = 10) -> list:
+    try:
+        from datetime import datetime, timedelta
+        from database import get_conn
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT pair, direction, grade, confidence, signal_source, result
+                       FROM trades
+                       WHERE user_id = %s AND created_at > %s
+                       ORDER BY created_at DESC
+                       LIMIT %s""",
+                    (user_id, cutoff, limit)
+                )
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+    except Exception as e:
+        logger.error(f"Recent trades query failed: {e}")
+    return []
 
 
 def _verify_activation_token(token: str):
@@ -219,6 +282,7 @@ async def start_bot():
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("TNL Trader multi-user bot started")
     async with app:

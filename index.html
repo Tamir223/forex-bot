@@ -108,7 +108,7 @@
     .plan-features li.locked{opacity:.35}
     .plan-features li.locked::before{content:'—';color:var(--gray)}
     .btn-plan{width:100%;padding:15px;border-radius:4px;font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border:none;transition:all .2s;text-decoration:none;display:block;text-align:center}
-    .btn-plan-outline{background:transparent;border:1px solid var(--border);color:var(--white)}
+    .btn-plan-outline{background:transparent;border:1px solid var(--blue);color:var(--blue)}
     .btn-plan-outline:hover{border-color:var(--blue);color:var(--blue)}
     .btn-plan-primary{background:var(--blue);color:var(--black);box-shadow:0 0 20px rgba(0,212,255,.2)}
     .btn-plan-primary:hover{background:#33ddff}
@@ -171,7 +171,7 @@
 <section class="hero">
   <div class="hero-badge">Now Live — AI Signal Intelligence</div>
   <h1>STOP TRADING<br/><em>BAD SIGNALS</em></h1>
-  <p class="hero-sub">TNL Trader analyzes every signal you receive, grades the setup, checks your prop firm rules, and tells you exactly whether to take the trade.</p>
+  <p class="hero-sub">TNL Trader grades every signal A+ to F, blocks bad setups automatically, and makes the YES or NO decision for you — so you finally pass your challenge.</p>
   <div class="hero-ctas">
     <a href="#pricing" class="btn-primary">Start 14-Day Free Trial</a>
     <a href="#how" class="btn-outline">See How It Works</a>
@@ -362,6 +362,13 @@
   let exitShown=false;
   document.addEventListener('mouseleave',(e)=>{if(e.clientY<=0&&!exitShown){exitShown=true;document.getElementById('exitOverlay').classList.add('show');}});
   document.getElementById('exitOverlay').addEventListener('click',(e)=>{if(e.target===e.currentTarget)e.currentTarget.classList.remove('show');});
+</script>
+<script>
+document.addEventListener("DOMContentLoaded",()=>{
+const els=document.querySelectorAll(".section,.plan,.feature,.step,.testimonial,.trust-item,.faq-item");
+const obs=new IntersectionObserver((entries)=>{entries.forEach(e=>{if(e.isIntersecting){e.target.style.opacity="1";e.target.style.transform="translateY(0)";}});},{threshold:0.1});
+els.forEach(el=>{el.style.opacity="0";el.style.transform="translateY(30px)";el.style.transition="opacity 0.6s ease, transform 0.6s ease";obs.observe(el);});
+});
 </script>
 </body>
 </html>
