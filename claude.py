@@ -14,6 +14,21 @@ from trading_calendar import check_news_window
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
+CORRELATED_USD_LONGS = {"GBPUSD", "EURUSD", "AUDUSD", "NZDUSD"}
+
+_PIP_SIZE = {
+    "USDJPY": 0.01, "EURJPY": 0.01, "GBPJPY": 0.01,
+    "XAUUSD": 1.0, "US30": 1.0, "NAS100": 1.0,
+}
+_DEFAULT_PIP_SIZE = 0.0001
+
+_PIP_VALUE = {
+    "XAUUSD": 100.0,
+    "US30": 1.0,
+    "NAS100": 1.0,
+}
+_DEFAULT_PIP_VALUE = 10.0
+
 
 def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -> dict | None:
     try:
@@ -23,9 +38,10 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         entry = quick.get("entry_zone")
         direction = quick.get("direction")
         provider = quick.get("provider")
+        sl_raw = quick.get("stop_loss")
 
         # Market context
-        market_ctx = {}
+        market_ctx = {"pair": pair, "direction": direction}
         price_data = get_live_price(pair) if pair else None
         if price_data:
             market_ctx["current_price"] = price_data["price"]
@@ -51,6 +67,24 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
             market_ctx["provider_win_rate"] = stats.get("win_rate")
             market_ctx["provider_trades"] = stats.get("total_trades", 0)
             market_ctx["provider_modifier"] = stats.get("confidence_modifier", 0)
+
+        # Historical win rate for this pair+direction
+        if pair and direction:
+            wr = _get_historical_win_rate(pair, direction)
+            market_ctx["hist_win_rate"] = wr.get("win_rate")
+            market_ctx["hist_total"] = wr.get("total", 0)
+
+        # Correlation warning (BUY on correlated USD pairs only)
+        market_ctx["correlation_warning"] = _check_correlated_pairs(pair, direction, user_id)
+
+        # Lot size suggestion based on risk % and parsed stop loss
+        sl_pts = _compute_sl_pts(entry, sl_raw, pair)
+        risk_pct = account_state.get("risk_percent") or account_state.get("risk")
+        account_size = float(account_state.get("account_size", 10000))
+        market_ctx["lot_size_suggestion"] = (
+            _calculate_lot_size(float(risk_pct), sl_pts, pair, account_size)
+            if risk_pct and sl_pts else None
+        )
 
         # Early exits
         if market_ctx.get("low_volatility"):
@@ -83,6 +117,20 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         if market_ctx.get("news_in_window"):
             result["news_warning"] = True
 
+        # Backfill new fields if Claude omitted them
+        result.setdefault("correlation_warning", market_ctx.get("correlation_warning", False))
+        result.setdefault("invalidation_level", None)
+        if "lot_size_suggestion" not in result:
+            result["lot_size_suggestion"] = market_ctx.get("lot_size_suggestion")
+        if "win_rate_context" not in result:
+            if market_ctx.get("hist_win_rate") is not None:
+                result["win_rate_context"] = (
+                    f"{market_ctx['hist_win_rate']}% win rate on "
+                    f"{market_ctx['hist_total']} {pair} {direction} trades"
+                )
+            else:
+                result["win_rate_context"] = None
+
         logger.info(f"[user:{user_id}] {result.get('decision')} {result.get('pair')} "
                     f"grade={result.get('grade')} conf={result.get('confidence')}")
         return result
@@ -112,10 +160,15 @@ def _block_response(pair, direction, provider, reason):
         "tp1": None, "tp2": None, "tp3": None, "tp4": None,
         "tp1_rr": None, "tp2_rr": None, "tp3_rr": None,
         "timeframe": None, "trade_type": None, "setup_type": None,
+        "invalidation_level": None, "lot_size_suggestion": None,
+        "correlation_warning": False, "win_rate_context": None,
     }
 
 
 def _build_message(account_state, market_ctx, signal_text):
+    pair = market_ctx.get("pair", "")
+    direction = market_ctx.get("direction", "")
+
     lines = ["=== ACCOUNT STATE ==="]
     for k, v in account_state.items():
         lines.append(f"{k}={v}")
@@ -136,13 +189,147 @@ def _build_message(account_state, market_ctx, signal_text):
         lines.append(f"provider_win_rate={market_ctx['provider_win_rate']}")
         lines.append(f"provider_trades={market_ctx['provider_trades']}")
 
+    # 1. Correlation warning
+    lines.append("\n=== CORRELATION WARNING ===")
+    if market_ctx.get("correlation_warning"):
+        other = ", ".join(sorted(CORRELATED_USD_LONGS - {pair}))
+        lines.append(
+            f"WARNING: Open BUY trades exist on other correlated pairs ({other}). "
+            "Stacked USD-long exposure increases correlated drawdown risk. "
+            "Set correlation_warning=true in your JSON output."
+        )
+    else:
+        lines.append("No correlated pair exposure detected. Set correlation_warning=false.")
+
+    # 2. Historical win rate
+    lines.append("\n=== HISTORICAL WIN RATE ===")
+    if market_ctx.get("hist_win_rate") is not None:
+        lines.append(
+            f"Historical performance: {market_ctx['hist_win_rate']}% win rate across "
+            f"{market_ctx['hist_total']} completed {pair} {direction} trades. "
+            "Include this as win_rate_context in your JSON output."
+        )
+    else:
+        lines.append(
+            "Insufficient historical data for this pair/direction. "
+            "Set win_rate_context to null in your JSON output."
+        )
+
+    # 3. Lot size suggestion
+    lines.append("\n=== LOT SIZE SUGGESTION ===")
+    if market_ctx.get("lot_size_suggestion"):
+        lines.append(
+            f"Recommended position size: {market_ctx['lot_size_suggestion']} "
+            "(calculated from account risk % and estimated stop loss distance). "
+            "Include as lot_size_suggestion in your JSON output."
+        )
+    else:
+        lines.append(
+            "Stop loss distance unavailable — lot size cannot be pre-calculated. "
+            "Calculate lot_size_suggestion yourself if stop loss is present in the signal, "
+            "otherwise set to null."
+        )
+
+    # 4. Market context note + 5. Invalidation level instructions
+    lines.append("\n=== ADDITIONAL INSTRUCTIONS ===")
+    lines.append(
+        "MARKET CONTEXT NOTE: In your 'reason' field, include one sentence noting whether "
+        "the entry zone is near a key technical level (round number, major support/resistance, "
+        "prior high/low, or psychological level)."
+    )
+    lines.append(
+        "INVALIDATION LEVEL: Output 'invalidation_level' as a float — the exact price level "
+        "at which this setup is no longer valid before entry is triggered. If price reaches "
+        "this level first, the trade must be skipped. Set to null only if indeterminate."
+    )
+    lines.append(
+        "REQUIRED JSON OUTPUT FIELDS (add to your existing schema):\n"
+        "  invalidation_level: float or null\n"
+        "  lot_size_suggestion: string (e.g. '0.33 lots on $10k account') or null\n"
+        "  correlation_warning: bool\n"
+        "  win_rate_context: string (e.g. '68% win rate on 11 GBPUSD BUY trades') or null"
+    )
+
     lines.append("\n=== SIGNAL ===")
     lines.append(signal_text)
     return "\n".join(lines)
 
 
+def _get_historical_win_rate(pair: str, direction: str) -> dict:
+    try:
+        from database import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE result = 'WIN') AS wins,
+                COUNT(*) FILTER (WHERE result = 'LOSS') AS losses
+            FROM trades
+            WHERE pair = %s AND direction = %s AND result IN ('WIN', 'LOSS')
+            """,
+            (pair, direction)
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            wins, losses = row[0], row[1]
+            total = wins + losses
+            if total > 0:
+                return {"win_rate": round((wins / total) * 100), "total": total}
+    except Exception as e:
+        logger.warning(f"Win rate query failed: {e}")
+    return {}
+
+
+def _check_correlated_pairs(pair: str, direction: str, user_id: int) -> bool:
+    if not pair or direction != "BUY" or pair not in CORRELATED_USD_LONGS:
+        return False
+    try:
+        from database import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor()
+        other = list(CORRELATED_USD_LONGS - {pair})
+        cur.execute(
+            "SELECT COUNT(*) FROM trades WHERE user_id = %s AND pair = ANY(%s) AND result IS NULL",
+            (user_id, other)
+        )
+        count = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        return count > 0
+    except Exception as e:
+        logger.warning(f"Correlation check failed: {e}")
+    return False
+
+
+def _compute_sl_pts(entry_str, sl_str, pair) -> float | None:
+    try:
+        entry_f = float(entry_str)
+        sl_f = float(sl_str)
+        diff = abs(entry_f - sl_f)
+        pip_size = _PIP_SIZE.get(pair, _DEFAULT_PIP_SIZE)
+        return round(diff / pip_size, 1)
+    except (TypeError, ValueError):
+        return None
+
+
+def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
+                        account_size: float = 10000.0) -> str | None:
+    try:
+        if sl_pts <= 0:
+            return None
+        risk_dollar = account_size * (risk_percent / 100)
+        pip_val = _PIP_VALUE.get(pair, _DEFAULT_PIP_VALUE)
+        lot = round(risk_dollar / (sl_pts * pip_val), 2)
+        acct_k = int(account_size / 1000)
+        return f"{lot} lots on ${acct_k}k account"
+    except Exception:
+        return None
+
+
 def _quick_parse(signal_text):
-    import re
     result = {}
     pairs = ["XAUUSD", "GBPUSD", "EURUSD", "USDJPY", "USDCAD",
              "AUDUSD", "NZDUSD", "USDCHF", "EURGBP", "EURJPY",
@@ -159,6 +346,9 @@ def _quick_parse(signal_text):
     m = re.search(r"ENTRY\s*ZONE\s*:?\s*([\d.]+)", signal_text, re.IGNORECASE)
     if m:
         result["entry_zone"] = m.group(1)
+    m_sl = re.search(r"(?:STOP\s*LOSS|SL)\s*:?\s*([\d.]+)", signal_text, re.IGNORECASE)
+    if m_sl:
+        result["stop_loss"] = m_sl.group(1)
     for kw, name in [("DON PIPS", "DON PIPS VIP"), ("ICT", "ICT"),
                      ("FTMO", "FTMO Signals"), ("GOLD SCALPERS", "Gold Scalpers")]:
         if kw in text_upper:

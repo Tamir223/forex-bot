@@ -16,13 +16,25 @@
     nav{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:16px 48px;background:rgba(4,4,15,.95);backdrop-filter:blur(12px);border-bottom:1px solid rgba(0,212,255,.08)}
     .nav-logo{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:4px;color:var(--white);text-decoration:none}
     .nav-logo span{color:var(--blue)}
-    .nav-links{display:flex;gap:36px;list-style:none}
+    .nav-links{display:flex;gap:36px;list-style:none;align-items:center}
     .nav-links a{color:var(--gray);text-decoration:none;font-size:13px;font-weight:500;letter-spacing:1.5px;text-transform:uppercase;transition:color .2s}
     .nav-links a:hover{color:var(--white)}
     .nav-cta{background:var(--blue);color:var(--black)!important;padding:10px 24px;border-radius:4px;font-weight:700!important}
+    /* HAMBURGER */
+    .hamburger{display:none;flex-direction:column;gap:5px;cursor:pointer;padding:4px;background:none;border:none}
+    .hamburger span{display:block;width:24px;height:2px;background:var(--white);border-radius:2px;transition:all .3s}
+    .hamburger.open span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+    .hamburger.open span:nth-child(2){opacity:0}
+    .hamburger.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+    .mobile-menu{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(4,4,15,.98);z-index:200;flex-direction:column;align-items:center;justify-content:center;gap:32px}
+    .mobile-menu.open{display:flex}
+    .mobile-menu a{color:var(--white);text-decoration:none;font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:3px;transition:color .2s}
+    .mobile-menu a:hover{color:var(--blue)}
+    .mobile-menu .mobile-cta{background:var(--blue);color:var(--black)!important;padding:16px 40px;border-radius:4px;font-size:24px}
+    .mobile-close{position:absolute;top:24px;right:24px;background:none;border:none;color:var(--white);font-size:28px;cursor:pointer}
+    /* HERO */
     .hero{position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:80px 24px 60px;overflow:hidden}
     .hero::before{content:'';position:absolute;top:20%;left:50%;transform:translateX(-50%);width:700px;height:700px;background:radial-gradient(circle,rgba(0,100,200,.12) 0%,transparent 70%);pointer-events:none}
-    .hero-logo{width:min(300px,75vw);margin-bottom:32px;animation:fadeUp .9s ease both;filter:drop-shadow(0 0 30px rgba(0,180,255,.25))}
     .hero-badge{display:inline-flex;align-items:center;gap:8px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.25);color:var(--blue);font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase;padding:6px 16px;border-radius:20px;margin-bottom:24px;animation:fadeUp .9s .1s ease both}
     .hero-badge::before{content:'';width:6px;height:6px;background:var(--blue);border-radius:50%;box-shadow:0 0 8px var(--blue);animation:pulse 2s infinite}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
@@ -102,7 +114,7 @@
     .btn-plan-primary:hover{background:#33ddff}
     .exit-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999;align-items:center;justify-content:center}
     .exit-overlay.show{display:flex}
-    .exit-modal{background:var(--card);border:1px solid rgba(0,212,255,.3);border-radius:12px;padding:48px 40px;max-width:460px;text-align:center;position:relative}
+    .exit-modal{background:var(--card);border:1px solid rgba(0,212,255,.3);border-radius:12px;padding:48px 40px;max-width:460px;text-align:center;position:relative;margin:20px}
     .exit-close{position:absolute;top:16px;right:20px;cursor:pointer;font-size:20px;background:none;border:none;color:var(--gray)}
     .exit-modal h2{font-family:'Bebas Neue',sans-serif;font-size:42px;margin-bottom:12px}
     .exit-modal h2 span{color:var(--blue)}
@@ -118,21 +130,45 @@
     footer a:hover{color:var(--white)}
     .footer-links{display:flex;gap:24px}
     @keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
-    @media(max-width:768px){.two-col{grid-template-columns:1fr}nav{padding:14px 20px}.nav-links{display:none}.live-stats{gap:20px}}
+    @media(max-width:768px){
+      nav{padding:14px 20px}
+      .nav-links{display:none}
+      .hamburger{display:flex}
+      .two-col{grid-template-columns:1fr}
+      .live-stats{gap:20px;flex-wrap:wrap}
+      .trust-bar{gap:20px}
+      footer{padding:24px 20px;flex-direction:column;align-items:flex-start}
+    }
   </style>
 </head>
 <body>
 <div class="stars"></div>
 <div class="urgency-bar">🔥 Limited launch pricing — <span>14 days free</span> on all plans. Lock in your rate before prices increase.</div>
+
 <nav>
   <a href="#" class="nav-logo">TNL <span>TRADER</span></a>
   <ul class="nav-links">
-    <li><a href="#how">How It Works</a></li><li><a href="#features">Features</a></li><li><a href="#pricing">Pricing</a></li><li><a href="#faq">FAQ</a></li>
+    <li><a href="#how">How It Works</a></li>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#pricing">Pricing</a></li>
+    <li><a href="#faq">FAQ</a></li>
     <li><a href="#pricing" class="nav-cta">Start Free Trial</a></li>
   </ul>
+  <button class="hamburger" id="hamburger" aria-label="Menu">
+    <span></span><span></span><span></span>
+  </button>
 </nav>
+
+<div class="mobile-menu" id="mobileMenu">
+  <button class="mobile-close" id="mobileClose">✕</button>
+  <a href="#how" onclick="closeMobile()">How It Works</a>
+  <a href="#features" onclick="closeMobile()">Features</a>
+  <a href="#pricing" onclick="closeMobile()">Pricing</a>
+  <a href="#faq" onclick="closeMobile()">FAQ</a>
+  <a href="#pricing" class="mobile-cta" onclick="closeMobile()">Start Free Trial</a>
+</div>
+
 <section class="hero">
-  <img src="tnl-trader-logo.svg" alt="TNL Trader" class="hero-logo"/>
   <div class="hero-badge">Now Live — AI Signal Intelligence</div>
   <h1>STOP TRADING<br/><em>BAD SIGNALS</em></h1>
   <p class="hero-sub">TNL Trader analyzes every signal you receive, grades the setup, checks your prop firm rules, and tells you exactly whether to take the trade.</p>
@@ -147,6 +183,7 @@
     <div class="stat-item"><div class="stat-num">24/7</div><div class="stat-label">Monitoring</div></div>
   </div>
 </section>
+
 <div class="trust-bar">
   <div class="trust-item"><span>🔒</span> Prop Firm Compliant</div>
   <div class="trust-item"><span>⚡</span> Real-Time Analysis</div>
@@ -154,6 +191,7 @@
   <div class="trust-item"><span>📊</span> All Signal Formats</div>
   <div class="trust-item"><span>📱</span> Telegram Delivery</div>
 </div>
+
 <section class="section" id="how">
   <div class="section-label">The Process</div>
   <div class="section-title">HOW IT WORKS</div>
@@ -165,6 +203,7 @@
     <div class="step"><div class="step-num">04</div><div class="step-icon">✅</div><h3>YES or NO</h3><p>You get a clear report with a grade. Reply YES to take it, NO to skip. Your account state updates automatically.</p></div>
   </div>
 </section>
+
 <section class="section">
   <div class="two-col">
     <div>
@@ -199,6 +238,7 @@
     </div>
   </div>
 </section>
+
 <section class="section" id="features">
   <div class="section-label">What You Get</div>
   <div class="section-title">BUILT FOR PROP<br/>FIRM TRADERS</div>
@@ -212,6 +252,7 @@
     <div class="feature"><div class="feature-icon">⚡</div><h3>All Signal Formats</h3><p>Reads structured signals and plain text freeform signals from any provider automatically.</p></div>
   </div>
 </section>
+
 <section class="section" id="testimonials">
   <div class="section-label">Early Users</div>
   <div class="section-title">TRADERS ARE<br/>TALKING</div>
@@ -234,6 +275,7 @@
     </div>
   </div>
 </section>
+
 <section class="section" id="pricing">
   <div class="section-label">Plans</div>
   <div class="section-title">START FREE.<br/>CANCEL ANYTIME.</div>
@@ -273,6 +315,7 @@
     </div>
   </div>
 </section>
+
 <section class="section" id="faq">
   <div class="section-label">Questions</div>
   <div class="section-title">FAQ</div>
@@ -285,11 +328,17 @@
     <div class="faq-item"><div class="faq-q">What if a signal comes in during news time?</div><div class="faq-a">TNL Trader automatically blocks signals during high-impact news events like NFP, CPI, and FOMC. The system handles it silently.</div></div>
   </div>
 </section>
+
 <footer>
   <div class="footer-brand">TNL <span>TRADER</span></div>
   <p>© 2026 TNL Trader. All rights reserved.</p>
-  <div class="footer-links"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="mailto:support@tnltrader.com">Support</a></div>
+  <div class="footer-links">
+    <a href="/privacy">Privacy Policy</a>
+    <a href="/terms">Terms of Service</a>
+    <a href="mailto:support@tnltrader.com">Support</a>
+  </div>
 </footer>
+
 <div class="exit-overlay" id="exitOverlay">
   <div class="exit-modal">
     <button class="exit-close" onclick="document.getElementById('exitOverlay').classList.remove('show')">✕</button>
@@ -298,6 +347,7 @@
     <a href="#pricing" class="btn-primary" onclick="document.getElementById('exitOverlay').classList.remove('show')" style="display:inline-block">Claim Free Trial</a>
   </div>
 </div>
+
 <script>
   fetch('/api/stats').then(r=>r.json()).then(d=>{
     if(d.signals!==undefined)document.getElementById('signalCount').textContent=d.signals.toLocaleString();
@@ -306,6 +356,9 @@
     document.getElementById('signalCount').textContent='2';
     document.getElementById('traderCount').textContent='1';
   });
+  function closeMobile(){document.getElementById('mobileMenu').classList.remove('open');document.getElementById('hamburger').classList.remove('open');}
+  document.getElementById('hamburger').addEventListener('click',()=>{document.getElementById('mobileMenu').classList.toggle('open');document.getElementById('hamburger').classList.toggle('open');});
+  document.getElementById('mobileClose').addEventListener('click',closeMobile);
   let exitShown=false;
   document.addEventListener('mouseleave',(e)=>{if(e.clientY<=0&&!exitShown){exitShown=true;document.getElementById('exitOverlay').classList.add('show');}});
   document.getElementById('exitOverlay').addEventListener('click',(e)=>{if(e.target===e.currentTarget)e.currentTarget.classList.remove('show');});

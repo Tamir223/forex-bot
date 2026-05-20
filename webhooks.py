@@ -224,3 +224,14 @@ async def stats():
     except Exception as e:
         logger.error(f"Stats error: {e}")
         return {"signals": 0, "traders": 0}
+
+
+@app.get("/privacy")
+async def privacy():
+    from fastapi.responses import FileResponse
+    return FileResponse("/var/www/html/privacy.html")
+
+@app.get("/terms")
+async def terms():
+    from fastapi.responses import FileResponse
+    return FileResponse("/var/www/html/terms.html")
