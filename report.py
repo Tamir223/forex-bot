@@ -109,6 +109,23 @@ def not_subscribed_message() -> str:
 
 
 def status_report(state, plan_tier: str) -> str:
+    from datetime import date as _date
+    daily_pnl = state.daily_pnl
+    challenge_pnl = getattr(state, "challenge_pnl", 0.0) or 0.0
+    challenge_target = getattr(state, "challenge_target", 10.0) or 10.0
+    challenge_start_date = getattr(state, "challenge_start_date", None)
+
+    daily_sign = "+" if daily_pnl >= 0 else ""
+    ch_sign = "+" if challenge_pnl >= 0 else ""
+    daily_limit_remaining = 5.0 - abs(min(0.0, daily_pnl))
+    target_remaining = max(0.0, challenge_target - challenge_pnl)
+
+    if challenge_start_date:
+        days_elapsed = (_date.today() - challenge_start_date).days
+        days_remaining = max(0, 30 - days_elapsed)
+    else:
+        days_remaining = 30
+
     return (
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 ACCOUNT STATUS\n"
@@ -120,7 +137,14 @@ def status_report(state, plan_tier: str) -> str:
         f"Session losses: {state.session_losses}\n"
         f"Weekly losses:  {state.weekly_losses}\n"
         f"Win streak:     {state.win_streak}\n"
-        f"Daily PnL:      {state.daily_pnl}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 CHALLENGE STATUS\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Daily P&L:     {daily_sign}{daily_pnl:.1f}% (limit: -5%)\n"
+        f"Challenge P&L: {ch_sign}{challenge_pnl:.1f}% (target: {challenge_target:.0f}%)\n"
+        f"Remaining:     {target_remaining:.1f}% to target\n"
+        f"Daily limit:   {daily_limit_remaining:.1f}% remaining today\n"
+        f"Days left:     {days_remaining} of 30\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
 

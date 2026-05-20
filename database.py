@@ -49,6 +49,10 @@ class UserState:
     win_streak: int = 0
     last_trade_date: Optional[date] = None
     last_reset_date: Optional[date] = None
+    challenge_target: float = 10.0
+    challenge_start_balance: float = 10000.0
+    challenge_pnl: float = 0.0
+    challenge_start_date: Optional[date] = None
 
 
 @dataclass
@@ -82,16 +86,20 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS user_state (
-    user_id         INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    trades_today    INTEGER NOT NULL DEFAULT 0,
-    open_trades     INTEGER NOT NULL DEFAULT 0,
-    live_exposure   FLOAT NOT NULL DEFAULT 0.0,
-    session_losses  INTEGER NOT NULL DEFAULT 0,
-    weekly_losses   INTEGER NOT NULL DEFAULT 0,
-    daily_pnl       FLOAT NOT NULL DEFAULT 0.0,
-    win_streak      INTEGER NOT NULL DEFAULT 0,
-    last_trade_date DATE,
-    last_reset_date DATE
+    user_id                 INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    trades_today            INTEGER NOT NULL DEFAULT 0,
+    open_trades             INTEGER NOT NULL DEFAULT 0,
+    live_exposure           FLOAT NOT NULL DEFAULT 0.0,
+    session_losses          INTEGER NOT NULL DEFAULT 0,
+    weekly_losses           INTEGER NOT NULL DEFAULT 0,
+    daily_pnl               FLOAT NOT NULL DEFAULT 0.0,
+    win_streak              INTEGER NOT NULL DEFAULT 0,
+    last_trade_date         DATE,
+    last_reset_date         DATE,
+    challenge_target        FLOAT NOT NULL DEFAULT 10.0,
+    challenge_start_balance FLOAT NOT NULL DEFAULT 10000.0,
+    challenge_pnl           FLOAT NOT NULL DEFAULT 0.0,
+    challenge_start_date    DATE
 );
 
 CREATE TABLE IF NOT EXISTS trades (
@@ -136,6 +144,11 @@ def init_db():
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(SCHEMA)
+            # Add challenge columns to existing tables
+            cur.execute("ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_target FLOAT DEFAULT 10.0")
+            cur.execute("ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_start_balance FLOAT DEFAULT 10000.0")
+            cur.execute("ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_pnl FLOAT DEFAULT 0.0")
+            cur.execute("ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_start_date DATE")
         conn.commit()
     logger.info("Database initialized")
 
@@ -364,6 +377,39 @@ def reset_weekly_losses_all():
         logger.info("Weekly losses reset for all users")
     except Exception as e:
         logger.error(f"reset_weekly_losses_all error: {e}")
+
+
+def get_challenge_pnl(user_id: int) -> float:
+    """Returns the current cumulative challenge P&L for a user"""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT challenge_pnl FROM user_state WHERE user_id = %s",
+                    (user_id,)
+                )
+                row = cur.fetchone()
+                if row:
+                    return float(row["challenge_pnl"] or 0.0)
+    except Exception as e:
+        logger.error(f"get_challenge_pnl error: {e}")
+    return 0.0
+
+
+def update_challenge_pnl(user_id: int, pnl_change: float):
+    """Update the running cumulative challenge P&L total"""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE user_state
+                       SET challenge_pnl = challenge_pnl + %s
+                       WHERE user_id = %s""",
+                    (pnl_change, user_id)
+                )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"update_challenge_pnl error: {e}")
 
 
 # ─── TRADE LOGGING ────────────────────────────────────────────────────────────

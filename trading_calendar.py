@@ -138,3 +138,9 @@ def _fallback_check(pair: str) -> dict:
         }
 
     return {"has_news": False, "events": [], "warning_message": None}
+
+
+def is_friday_close_warning() -> bool:
+    """Returns True if it's Friday between 16:00-21:00 UTC"""
+    now = datetime.now(timezone.utc)
+    return now.weekday() == 4 and 16 <= now.hour <= 21

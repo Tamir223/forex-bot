@@ -25,6 +25,8 @@ from report import (
     trade_executed, trade_skipped, trade_logged_win,
     trade_logged_loss, not_subscribed_message, status_report
 )
+from trading_calendar import is_friday_close_warning
+from config import FTMO_MODE, FTMO_MAX_RISK
 import os
 
 logger = logging.getLogger(__name__)
@@ -149,6 +151,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from database import update_trade_result
                 update_trade_result(trade_id, "PENDING")
             await send(context, chat_id, trade_executed())
+            if is_friday_close_warning():
+                await send(context, chat_id, "⚠️ FRIDAY WARNING: FTMO does not allow holding positions over the weekend. Make sure to close this trade before market close at 21:00 UTC tonight.")
         elif reply == "NO":
             if trade_id:
                 from database import update_trade_result
@@ -197,6 +201,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Elite priority: lower effective confidence threshold by 1
     if user.plan_tier == "elite" and analysis.get("confidence") is not None:
         analysis["confidence"] = min(10, analysis["confidence"] + 1)
+
+    # FTMO Mode risk enforcement
+    if FTMO_MODE:
+        risk = analysis.get("risk_percent", 0) or 0
+        if risk > 1.0:
+            analysis["decision"] = "BLOCK"
+            analysis["reason"] = "FTMO risk limit exceeded"
+        elif risk > FTMO_MAX_RISK:
+            analysis["risk_percent"] = FTMO_MAX_RISK
+
     last_analysis[chat_id] = analysis
     trade = Trade(
         user_id=user.id,
@@ -226,6 +240,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update_trade_result(trade_id, "BLOCKED")
         return
     report = execute_report(analysis)
+    if FTMO_MODE:
+        report = "🏆 FTMO MODE ACTIVE — Risk capped at 0.5%\n" + report
     if user.plan_tier == "elite":
         report = "⚡ ELITE PRIORITY ANALYSIS\n" + report
     await send(context, chat_id, report)

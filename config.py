@@ -43,6 +43,10 @@ MAX_WEEKLY_LOSSES = int(os.getenv("MAX_WEEKLY_LOSSES", "4"))
 SESSION_START_HOUR = int(os.getenv("SESSION_START_HOUR", "7"))
 SESSION_END_HOUR = int(os.getenv("SESSION_END_HOUR", "21"))
 
+# FTMO Prop Firm Mode
+FTMO_MODE = os.getenv("FTMO_MODE", "false").lower() == "true"
+FTMO_MAX_RISK = float(os.getenv("FTMO_MAX_RISK", "0.5"))
+
 SYSTEM_PROMPT = """You must respond with ONLY a raw JSON object. No markdown, no code fences, no backticks, no explanation. Just the JSON object starting with { and ending with }. You are a prop firm trade filter. Extract trading intent from any signal format. If a field is not present use null and never fabricate a price level.
 
 You will receive ACCOUNT STATE and MARKET CONTEXT before the signal. Use all of it when grading.
