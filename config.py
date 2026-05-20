@@ -1,5 +1,5 @@
 """
-APFEE SaaS Configuration
+TNL Trader SaaS Configuration
 """
 
 import os
@@ -9,7 +9,7 @@ load_dotenv()
 
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-APFEE_BOT_USERNAME = os.getenv("APFEE_BOT_USERNAME", "APFEESignalBot")
+APFEE_BOT_USERNAME = os.getenv("APFEE_BOT_USERNAME", "TNL TraderSignalBot")
 
 # Claude
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -30,7 +30,7 @@ STRIPE_PRICE_PRO = os.getenv("STRIPE_PRICE_PRO")
 STRIPE_PRICE_ELITE = os.getenv("STRIPE_PRICE_ELITE")
 
 # App
-ONBOARDING_URL = os.getenv("ONBOARDING_URL", "https://apfee.io/setup")
+ONBOARDING_URL = os.getenv("ONBOARDING_URL", "https://tnltrader.com/setup")
 
 # Risk Gate Defaults (users can override per plan)
 CONFIDENCE_THRESHOLD = int(os.getenv("CONFIDENCE_THRESHOLD", "6"))

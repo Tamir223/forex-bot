@@ -1,5 +1,5 @@
 """
-APFEE Claude Module - SaaS version
+TNL Trader Claude Module - SaaS version
 Passes market context and per-user provider stats to Claude.
 """
 
@@ -9,7 +9,7 @@ import re
 import anthropic
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS, SYSTEM_PROMPT
 from market import get_live_price, get_atr, check_entry_validity
-from calendar import check_news_window
+from trading_calendar import check_news_window
 
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)

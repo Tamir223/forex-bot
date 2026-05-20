@@ -1,5 +1,5 @@
 """
-APFEE Filter Module v2
+TNL Trader Filter Module v2
 All gate logic including confluence scoring.
 """
 

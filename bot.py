@@ -1,5 +1,6 @@
+import asyncio
 """
-APFEE Multi-User Bot
+TNL Trader Multi-User Bot
 One central bot serving all subscribers.
 Each message is routed by chat_id to the correct user context.
 """
@@ -30,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# In-memory cache of last analysis per chat_id
 last_analysis = {}
 last_trade_id = {}
 
@@ -42,130 +42,82 @@ async def send(context, chat_id: str, text: str):
         logger.error(f"Send error to {chat_id}: {e}")
 
 
-# ─── COMMANDS ─────────────────────────────────────────────────────────────────
-
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /start — Links user's Telegram to their account.
-    User must have already paid on the website.
-    They type /start <token> where token is emailed to them after payment.
-    """
     chat_id = str(update.message.chat_id)
     args = context.args
-
     if not args:
         await update.message.reply_text(
-            "Welcome to APFEE.\n\n"
-            "To activate your account, use the link sent to your email after purchase.\n"
-            "Visit apfee.io to subscribe."
+            "Welcome to TNL Trader.\n\nTo activate your account, use the link sent to your email after purchase.\nVisit tnltrader.com to subscribe."
         )
         return
-
-    # Token-based activation
     token = args[0]
     user = _verify_activation_token(token)
-
     if not user:
-        await update.message.reply_text(
-            "Invalid or expired activation link.\n"
-            "Please check your email or visit apfee.io for support."
-        )
+        await update.message.reply_text("Invalid or expired activation link.\nPlease check your email or visit tnltrader.com for support.")
         return
-
     link_telegram(user.id, chat_id)
     await send_subscription_confirmed(chat_id, user.plan_tier, user.email)
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/status — Show current account state"""
     chat_id = str(update.message.chat_id)
     user = get_user_by_chat_id(chat_id)
-
     if not user or not user.is_active:
         await update.message.reply_text(not_subscribed_message())
         return
-
     state = get_state(user.id)
     await update.message.reply_text(status_report(state, user.plan_tier))
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/stats — Show recent trade history"""
     chat_id = str(update.message.chat_id)
     user = get_user_by_chat_id(chat_id)
-
     if not user or not user.is_active:
         await update.message.reply_text(not_subscribed_message())
         return
-
     trades = get_user_trades(user.id, limit=10)
     if not trades:
         await update.message.reply_text("No trades logged yet. Start forwarding signals.")
         return
-
     lines = ["📊 RECENT TRADES\n"]
     for t in trades:
         result_emoji = {"WIN": "✅", "LOSS": "❌", "PENDING": "⏳", "SKIPPED": "⏭"}.get(t["result"], "")
-        lines.append(
-            f"{result_emoji} {t['pair']} {t['direction']} "
-            f"| {t['grade']} | {t['confidence']}/10 "
-            f"| {t['signal_source']}"
-        )
-
+        lines.append(f"{result_emoji} {t['pair']} {t['direction']} | {t['grade']} | {t['confidence']}/10 | {t['signal_source']}")
     await update.message.reply_text("\n".join(lines))
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/help — Show available commands"""
     await update.message.reply_text(
-        "APFEE Commands\n\n"
-        "/status — account state and limits\n"
-        "/stats — last 10 trades\n"
-        "/help — this menu\n\n"
-        "Replies after a report:\n"
-        "YES — execute the trade\n"
-        "NO — skip the trade\n"
-        "WIN — mark last trade as win\n"
-        "LOSS — mark last trade as loss"
+        "TNL Trader Commands\n\n/status — account state and limits\n/stats — last 10 trades\n/help — this menu\n\nReplies after a report:\nYES — execute the trade\nNO — skip the trade\nWIN — mark last trade as win\nLOSS — mark last trade as loss"
     )
 
-
-# ─── MAIN MESSAGE HANDLER ─────────────────────────────────────────────────────
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
-
     text = update.message.text.strip()
     chat_id = str(update.message.chat_id)
-
-    # Check subscription
     user = get_user_by_chat_id(chat_id)
     if not user or not user.is_active:
         await update.message.reply_text(not_subscribed_message())
         return
-
-    # APPROVAL REPLIES
     if is_approval_message(text):
         reply = text.upper()
         analysis = last_analysis.get(chat_id, {})
         risk = analysis.get("risk_percent", 0.35)
         provider = analysis.get("signal_source", "UNKNOWN")
         trade_id = last_trade_id.get(chat_id)
-
         if reply == "YES":
             log_trade_opened(user.id, risk)
             if trade_id:
                 from database import update_trade_result
                 update_trade_result(trade_id, "PENDING")
             await send(context, chat_id, trade_executed())
-
         elif reply == "NO":
             if trade_id:
                 from database import update_trade_result
                 update_trade_result(trade_id, "SKIPPED")
             await send(context, chat_id, trade_skipped())
-
         elif reply == "WIN":
             log_trade_win(user.id, risk)
             update_provider_result(user.id, provider, won=True)
@@ -173,7 +125,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from database import update_trade_result
                 update_trade_result(trade_id, "WIN")
             await send(context, chat_id, trade_logged_win())
-
         elif reply == "LOSS":
             log_trade_loss(user.id, risk)
             update_provider_result(user.id, provider, won=False)
@@ -181,33 +132,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from database import update_trade_result
                 update_trade_result(trade_id, "LOSS")
             await send(context, chat_id, trade_logged_loss())
-
         return
-
-    # SIGNAL PROCESSING
     if not is_signal_message(text):
         return
-
-    # Plan limits
     plan_limits = {"basic": 10, "pro": 999, "elite": 999}
     state = get_state(user.id)
     daily_limit = plan_limits.get(user.plan_tier, 10)
     if state.trades_today >= daily_limit:
-        await send(context, chat_id,
-                   f"Daily signal limit reached for your {user.plan_tier} plan.\n"
-                   f"Upgrade at apfee.io for more signals.")
+        await send(context, chat_id, f"Daily signal limit reached for your {user.plan_tier} plan.\nUpgrade at tnltrader.com for more signals.")
         return
-
-    # Fast gates
     passed, gate_reason = run_fast_gates(state)
     if not passed:
         await send(context, chat_id, fast_gate_blocked(gate_reason))
         return
-
-    # Analyzing
     await send(context, chat_id, "⏳ Analyzing signal...")
-
-    # Get provider stats for this user
     state_dict = {
         "trades_today": state.trades_today,
         "open_trades": state.open_trades,
@@ -216,16 +154,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "weekly_losses": state.weekly_losses,
         "daily_pnl": state.daily_pnl
     }
-
     analysis = analyze_signal(text, state_dict, user.id)
-
     if not analysis:
         await send(context, chat_id, "⚠️ Analysis failed. Please try again.")
         return
-
     last_analysis[chat_id] = analysis
-
-    # Log trade to database
     trade = Trade(
         user_id=user.id,
         pair=analysis.get("pair", ""),
@@ -240,16 +173,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     trade_id = log_trade(trade)
     last_trade_id[chat_id] = trade_id
-
-    # Claude block
     if analysis.get("decision") == "BLOCK":
         await send(context, chat_id, blocked_report(analysis, "claude_block"))
         from database import update_trade_result
         if trade_id:
             update_trade_result(trade_id, "BLOCKED")
         return
-
-    # Enforcement
     passed, enforce_reason = run_enforcement_filter(analysis)
     if not passed:
         await send(context, chat_id, blocked_report(analysis, enforce_reason))
@@ -257,19 +186,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if trade_id:
             update_trade_result(trade_id, "BLOCKED")
         return
-
-    # Send execute report
     report = execute_report(analysis)
     await send(context, chat_id, report)
 
 
-# ─── ACTIVATION TOKEN ─────────────────────────────────────────────────────────
-
 def _verify_activation_token(token: str):
-    """
-    Verify a one-time activation token sent via email after payment.
-    Tokens are stored in database and marked used after first use.
-    """
     try:
         from database import get_conn
         with get_conn() as conn:
@@ -283,10 +204,7 @@ def _verify_activation_token(token: str):
                 )
                 row = cur.fetchone()
                 if row:
-                    cur.execute(
-                        "UPDATE activation_tokens SET used = TRUE WHERE token = %s",
-                        (token,)
-                    )
+                    cur.execute("UPDATE activation_tokens SET used = TRUE WHERE token = %s", (token,))
                     conn.commit()
                     from database import User
                     return User(**row)
@@ -295,8 +213,6 @@ def _verify_activation_token(token: str):
     return None
 
 
-# ─── START BOT ────────────────────────────────────────────────────────────────
-
 async def start_bot():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
@@ -304,5 +220,10 @@ async def start_bot():
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    logger.info("APFEE multi-user bot started")
-    await app.run_polling()
+    logger.info("TNL Trader multi-user bot started")
+    async with app:
+        await app.start()
+        await app.updater.start_polling()
+        await asyncio.sleep(float("inf"))
+        await app.updater.stop()
+        await app.stop()

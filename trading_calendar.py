@@ -1,5 +1,5 @@
 """
-APFEE Calendar Module
+TNL Trader Calendar Module
 Checks for high impact news events in the next 2 hours.
 Uses MyFXBook economic calendar (no API key required).
 Falls back gracefully if unavailable.

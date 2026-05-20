@@ -1,5 +1,5 @@
 """
-APFEE SaaS - Main Entry Point
+TNL Trader SaaS - Main Entry Point
 Runs the Telegram bot, Stripe webhook server, and weekly reset together.
 """
 
@@ -30,7 +30,7 @@ async def run_webhook_server():
 
 
 async def main():
-    logger.info("Starting APFEE SaaS...")
+    logger.info("Starting TNL Trader SaaS...")
     init_db()
     logger.info("Database ready")
 

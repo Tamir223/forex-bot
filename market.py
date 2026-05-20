@@ -1,5 +1,5 @@
 """
-APFEE Market Data Module
+TNL Trader Market Data Module
 Fetches live price and ATR from Twelve Data free tier API.
 Free tier: 800 requests/day, 8 requests/minute.
 """

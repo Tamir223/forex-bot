@@ -1,5 +1,5 @@
 """
-APFEE Notifications Module
+TNL Trader Notifications Module
 Sends onboarding, welcome, and system messages to users via Telegram.
 """
 
@@ -13,15 +13,15 @@ import httpx
 logger = logging.getLogger(__name__)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-APFEE_BOT_USERNAME = os.getenv("APFEE_BOT_USERNAME", "APFEESignalBot")
+APFEE_BOT_USERNAME = os.getenv("APFEE_BOT_USERNAME", "TNL TraderSignalBot")
 BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
-ONBOARDING_URL = os.getenv("ONBOARDING_URL", "https://apfee.io/setup")
+ONBOARDING_URL = os.getenv("ONBOARDING_URL", "https://tnltrader.com/setup")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.resend.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "noreply@apfee.io")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "noreply@tnltrader.com")
 
 
 async def send_telegram(chat_id: str, text: str):
@@ -39,7 +39,7 @@ def send_activation_email(to_email: str, activation_link: str, plan: str):
     plan_labels = {"basic": "Basic", "pro": "Pro", "elite": "Elite"}
     plan_name = plan_labels.get(plan, plan.title())
 
-    body = f"""Welcome to APFEE.
+    body = f"""Welcome to TNL Trader.
 
 Your {plan_name} subscription is now active.
 
@@ -49,7 +49,7 @@ To connect your Telegram account and start filtering signals, click below:
 
 This link expires in 48 hours.
 
-Once connected, forward any trading signal to your APFEE bot
+Once connected, forward any trading signal to your TNL Trader bot
 and it will analyze it instantly.
 
 Replies to send after each signal report:
@@ -58,13 +58,13 @@ NO - skip the trade
 WIN - mark trade as winner
 LOSS - mark trade as loser
 
-If you need help visit apfee.io
+If you need help visit tnltrader.com
 
-The APFEE Team"""
+The TNL Trader Team"""
 
     try:
         msg = MIMEMultipart()
-        msg["Subject"] = "Your APFEE account is ready"
+        msg["Subject"] = "Your TNL Trader account is ready"
         msg["From"] = FROM_EMAIL
         msg["To"] = to_email
         msg.attach(MIMEText(body, "plain"))
@@ -96,9 +96,9 @@ async def send_cancellation_message(user):
         return
     await send_telegram(
         user.telegram_chat_id,
-        "Your APFEE subscription has ended.\n"
+        "Your TNL Trader subscription has ended.\n"
         "Your account has been deactivated.\n\n"
-        "To resubscribe visit apfee.io\n"
+        "To resubscribe visit tnltrader.com\n"
         "We hope to see you back soon."
     )
 
@@ -112,11 +112,11 @@ async def send_subscription_confirmed(chat_id: str, plan: str, email: str):
     label = plan_labels.get(plan, plan)
     await send_telegram(
         chat_id,
-        f"✅ APFEE is now active!\n\n"
+        f"✅ TNL Trader is now active!\n\n"
         f"Plan: {label}\n"
         f"Email: {email}\n\n"
         f"Your account is live. Forward any trading signal to this chat "
-        f"and APFEE will analyze it.\n\n"
+        f"and TNL Trader will analyze it.\n\n"
         f"Commands:\n"
         f"/status — view your account state\n"
         f"/stats — view your trade history\n"

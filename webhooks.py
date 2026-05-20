@@ -1,5 +1,5 @@
 """
-APFEE Stripe Webhook Handler
+TNL Trader Stripe Webhook Handler
 Handles subscription events from Stripe.
 Automatically activates and deactivates user accounts.
 """
@@ -116,4 +116,4 @@ async def stripe_webhook(request: Request):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "3.0", "service": "APFEE"}
+    return {"status": "ok", "version": "3.0", "service": "TNL Trader"}

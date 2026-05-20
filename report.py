@@ -1,5 +1,5 @@
 """
-APFEE Report Module - SaaS version
+TNL Trader Report Module - SaaS version
 """
 
 from filter import calculate_confluence
@@ -97,8 +97,8 @@ def fast_gate_blocked(reason: str) -> str:
 
 def not_subscribed_message() -> str:
     return (
-        "You don't have an active APFEE subscription.\n\n"
-        "Subscribe at apfee.io to get started.\n"
+        "You don't have an active TNL Trader subscription.\n\n"
+        "Subscribe at tnltrader.com to get started.\n"
         "Plans from $47/month."
     )
 

@@ -1,5 +1,5 @@
 """
-APFEE Reset Module
+TNL Trader Reset Module
 Resets weekly_losses every Monday at midnight UTC
 """
 

@@ -1,5 +1,5 @@
 """
-APFEE Database Module
+TNL Trader Database Module
 PostgreSQL via Supabase. Handles all user, state, trade, and provider data.
 """
 
