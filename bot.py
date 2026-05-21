@@ -111,6 +111,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "TNL Trader Commands\n\n"
         "/status — account state and limits\n"
         "/stats — recent trades and performance\n"
+        "/upgrade — upgrade your plan\n"
         "/cancel — manage or cancel your subscription\n"
         "/help — this menu\n\n"
         "Replies after a report:\n"
@@ -119,6 +120,64 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "WIN — mark last trade as win\n"
         "LOSS — mark last trade as loss"
     )
+
+
+async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.message.chat_id)
+    user = get_user_by_chat_id(chat_id)
+    if not user or not user.is_active:
+        await update.message.reply_text(not_subscribed_message())
+        return
+    plan = user.plan_tier
+    if plan == "elite":
+        await update.message.reply_text(
+            "✅ You are already on our highest plan — Elite.\n"
+            "You have access to every feature TNL Trader offers."
+        )
+        return
+
+    plan_labels = {"basic": "Basic ($47/mo)", "pro": "Pro ($97/mo)"}
+    current_label = plan_labels.get(plan, plan.capitalize())
+
+    has_stripe_sub = (
+        user.stripe_subscription_id
+        and user.stripe_subscription_id != "founder"
+    )
+
+    if has_stripe_sub:
+        await update.message.reply_text(
+            "📈 UPGRADE YOUR PLAN\n\n"
+            f"Current plan: {current_label}\n\n"
+            "To upgrade your existing subscription visit your billing portal — "
+            "you can switch plans there without being charged again:\n\n"
+            "https://billing.stripe.com/p/login/fZu3cwesK8NEflccqOfjG00\n\n"
+            "Or start a new subscription:\n"
+            "Pro: https://tnltrader.com/checkout?plan=pro\n"
+            "Elite: https://tnltrader.com/checkout?plan=elite"
+        )
+    else:
+        if plan == "basic":
+            await update.message.reply_text(
+                "📈 UPGRADE YOUR PLAN\n\n"
+                "Current plan: Basic ($47/mo)\n\n"
+                "Upgrade options:\n"
+                "- Pro — $97/mo — Unlimited signals + Provider stats\n"
+                "- Elite — $197/mo — Everything + Priority analysis\n\n"
+                "To upgrade:\n"
+                "Pro: https://tnltrader.com/checkout?plan=pro\n"
+                "Elite: https://tnltrader.com/checkout?plan=elite\n\n"
+                "Your billing will be updated automatically."
+            )
+        elif plan == "pro":
+            await update.message.reply_text(
+                "📈 UPGRADE YOUR PLAN\n\n"
+                "Current plan: Pro ($97/mo)\n\n"
+                "Upgrade to Elite — $197/mo\n"
+                "- Priority analysis on every signal\n"
+                "- Highest confidence threshold\n"
+                "- ⚡ Elite badge on every report\n\n"
+                "Upgrade here: https://tnltrader.com/checkout?plan=elite"
+            )
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -298,6 +357,7 @@ async def start_bot():
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("upgrade", cmd_upgrade))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("TNL Trader multi-user bot started")

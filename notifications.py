@@ -123,3 +123,34 @@ async def send_subscription_confirmed(chat_id: str, plan: str, email: str):
         f"/help — full command list\n\n"
         f"Reply YES, NO, WIN, or LOSS after each signal report."
     )
+
+    commands_text = (
+        "📌 TNL TRADER COMMANDS\n\n"
+        "/status — your account state and challenge tracker\n"
+        "/stats — your last 10 trades\n"
+        "/upgrade — upgrade your plan\n"
+        "/cancel — manage or cancel subscription\n"
+        "/help — full command list\n\n"
+        "HOW TO USE:\n"
+        "Forward any trading signal to this chat and TNL Trader will analyze it instantly.\n\n"
+        "Reply after each report:\n"
+        "YES — execute the trade\n"
+        "NO — skip the trade\n"
+        "WIN — mark trade as winner\n"
+        "LOSS — mark trade as loser"
+    )
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{BASE_URL}/sendMessage",
+                json={"chat_id": chat_id, "text": commands_text}
+            )
+            data = resp.json()
+            if data.get("ok"):
+                message_id = data["result"]["message_id"]
+                await client.post(
+                    f"{BASE_URL}/pinChatMessage",
+                    json={"chat_id": chat_id, "message_id": message_id, "disable_notification": True}
+                )
+    except Exception as e:
+        logger.error(f"Commands pin error: {e}")
