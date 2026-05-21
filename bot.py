@@ -35,6 +35,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 last_analysis = {}
 last_trade_id = {}
+signal_queue: asyncio.Queue = asyncio.Queue()
 
 
 async def send(context, chat_id: str, text: str):
@@ -189,6 +190,74 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def process_signal_queue():
+    while True:
+        item = await signal_queue.get()
+        try:
+            text = item["text"]
+            chat_id = item["chat_id"]
+            bot = item["bot"]
+            user = item["user"]
+            state_dict = item["state_dict"]
+
+            analysis = analyze_signal(text, state_dict, user.id)
+            if not analysis:
+                await bot.send_message(chat_id=int(chat_id), text="⚠️ Analysis failed. Please try again.")
+                continue
+
+            if user.plan_tier == "elite" and analysis.get("confidence") is not None:
+                analysis["confidence"] = min(10, analysis["confidence"] + 1)
+
+            if FTMO_MODE:
+                risk = analysis.get("risk_percent", 0) or 0
+                if risk > 1.0:
+                    analysis["decision"] = "BLOCK"
+                    analysis["reason"] = "FTMO risk limit exceeded"
+                elif risk > FTMO_MAX_RISK:
+                    analysis["risk_percent"] = FTMO_MAX_RISK
+
+            last_analysis[chat_id] = analysis
+            trade = Trade(
+                user_id=user.id,
+                pair=analysis.get("pair", ""),
+                direction=analysis.get("direction", ""),
+                grade=analysis.get("grade", ""),
+                confidence=analysis.get("confidence", 0),
+                risk_percent=analysis.get("risk_percent", 0),
+                signal_source=analysis.get("signal_source", "UNKNOWN"),
+                entry_zone=analysis.get("entry_zone"),
+                stop_loss=analysis.get("stop_loss"),
+                result="PENDING"
+            )
+            trade_id = log_trade(trade)
+            last_trade_id[chat_id] = trade_id
+
+            if analysis.get("decision") == "BLOCK":
+                await bot.send_message(chat_id=int(chat_id), text=blocked_report(analysis, "claude_block"))
+                from database import update_trade_result
+                if trade_id:
+                    update_trade_result(trade_id, "BLOCKED")
+            else:
+                passed, enforce_reason = run_enforcement_filter(analysis)
+                if not passed:
+                    await bot.send_message(chat_id=int(chat_id), text=blocked_report(analysis, enforce_reason))
+                    from database import update_trade_result
+                    if trade_id:
+                        update_trade_result(trade_id, "BLOCKED")
+                else:
+                    report = execute_report(analysis)
+                    if FTMO_MODE:
+                        report = "🏆 FTMO MODE ACTIVE — Risk capped at 0.5%\n" + report
+                    if user.plan_tier == "elite":
+                        report = "⚡ ELITE PRIORITY ANALYSIS\n" + report
+                    await bot.send_message(chat_id=int(chat_id), text=report)
+        except Exception as e:
+            logger.error(f"Signal queue worker error: {e}")
+        finally:
+            signal_queue.task_done()
+            await asyncio.sleep(0.5)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -244,7 +313,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not passed:
         await send(context, chat_id, fast_gate_blocked(gate_reason))
         return
-    await send(context, chat_id, "⏳ Analyzing signal...")
     state_dict = {
         "trades_today": state.trades_today,
         "open_trades": state.open_trades,
@@ -253,57 +321,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "weekly_losses": state.weekly_losses,
         "daily_pnl": state.daily_pnl
     }
-    analysis = analyze_signal(text, state_dict, user.id)
-    if not analysis:
-        await send(context, chat_id, "⚠️ Analysis failed. Please try again.")
-        return
-    # Elite priority: lower effective confidence threshold by 1
-    if user.plan_tier == "elite" and analysis.get("confidence") is not None:
-        analysis["confidence"] = min(10, analysis["confidence"] + 1)
-
-    # FTMO Mode risk enforcement
-    if FTMO_MODE:
-        risk = analysis.get("risk_percent", 0) or 0
-        if risk > 1.0:
-            analysis["decision"] = "BLOCK"
-            analysis["reason"] = "FTMO risk limit exceeded"
-        elif risk > FTMO_MAX_RISK:
-            analysis["risk_percent"] = FTMO_MAX_RISK
-
-    last_analysis[chat_id] = analysis
-    trade = Trade(
-        user_id=user.id,
-        pair=analysis.get("pair", ""),
-        direction=analysis.get("direction", ""),
-        grade=analysis.get("grade", ""),
-        confidence=analysis.get("confidence", 0),
-        risk_percent=analysis.get("risk_percent", 0),
-        signal_source=analysis.get("signal_source", "UNKNOWN"),
-        entry_zone=analysis.get("entry_zone"),
-        stop_loss=analysis.get("stop_loss"),
-        result="PENDING"
-    )
-    trade_id = log_trade(trade)
-    last_trade_id[chat_id] = trade_id
-    if analysis.get("decision") == "BLOCK":
-        await send(context, chat_id, blocked_report(analysis, "claude_block"))
-        from database import update_trade_result
-        if trade_id:
-            update_trade_result(trade_id, "BLOCKED")
-        return
-    passed, enforce_reason = run_enforcement_filter(analysis)
-    if not passed:
-        await send(context, chat_id, blocked_report(analysis, enforce_reason))
-        from database import update_trade_result
-        if trade_id:
-            update_trade_result(trade_id, "BLOCKED")
-        return
-    report = execute_report(analysis)
-    if FTMO_MODE:
-        report = "🏆 FTMO MODE ACTIVE — Risk capped at 0.5%\n" + report
-    if user.plan_tier == "elite":
-        report = "⚡ ELITE PRIORITY ANALYSIS\n" + report
-    await send(context, chat_id, report)
+    await signal_queue.put({
+        "text": text,
+        "chat_id": chat_id,
+        "bot": context.bot,
+        "user": user,
+        "state_dict": state_dict,
+    })
+    qsize = signal_queue.qsize()
+    if qsize > 10:
+        await send(context, chat_id, "⚠️ High demand right now — your signal is queued. You will receive your report within 2 minutes.")
+    elif qsize > 2:
+        await send(context, chat_id, "⏳ Signal queued for analysis...")
+    else:
+        await send(context, chat_id, "⏳ Analyzing signal...")
 
 
 def _get_recent_trades(user_id: int, days: int = 30, limit: int = 10) -> list:
@@ -361,6 +392,7 @@ async def start_bot():
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("TNL Trader multi-user bot started")
+    asyncio.create_task(process_signal_queue())
     async with app:
         await app.start()
         await app.updater.start_polling()
