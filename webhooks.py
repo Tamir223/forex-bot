@@ -235,3 +235,38 @@ async def privacy():
 async def terms():
     from fastapi.responses import FileResponse
     return FileResponse("/var/www/html/terms.html")
+
+
+@app.get("/robots.txt")
+async def robots():
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("""User-agent: *
+Allow: /
+Disallow: /checkout
+Disallow: /webhook
+Disallow: /api
+Sitemap: https://tnltrader.com/sitemap.xml""")
+
+
+@app.get("/sitemap.xml")
+async def sitemap():
+    from fastapi.responses import Response
+    content = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://tnltrader.com</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://tnltrader.com/privacy</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://tnltrader.com/terms</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
+  </url>
+</urlset>"""
+    return Response(content=content, media_type="application/xml")
