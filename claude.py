@@ -340,36 +340,59 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
         return None
 
 
-def _quick_parse(signal_text):
-    result = {}
+def _quick_parse(signal_text: str) -> dict:
     from futures_instruments import FUTURES_SYMBOLS
+    import re
 
+    result = {}
+    text_upper = signal_text.upper()
+
+    # Futures symbols checked in priority order (specific before generic)
+    FUTURES_PRIORITY = ["MES", "MNQ", "MCL", "MGC", "ES", "NQ", "CL", "GC", "RTY", "YM", "NG"]
     FOREX_PAIRS = [
         "XAUUSD", "GBPUSD", "EURUSD", "USDJPY", "USDCAD",
         "AUDUSD", "NZDUSD", "USDCHF", "EURGBP", "EURJPY",
         "GBPJPY", "US30", "NAS100", "GBPNZD", "EURNZD",
         "AUDCAD", "AUDCHF", "AUDNZD", "CADJPY", "CHFJPY",
     ]
-    ALL_SYMBOLS = list(FUTURES_SYMBOLS) + FOREX_PAIRS
-    text_upper = signal_text.upper()
-    for symbol in ALL_SYMBOLS:
+
+    # Detect symbol
+    for symbol in FUTURES_PRIORITY:
         if symbol in text_upper:
             result["pair"] = symbol
-            result["is_futures"] = symbol in FUTURES_SYMBOLS
+            result["is_futures"] = True
             break
-    if "BUY" in text_upper:
+    if "pair" not in result:
+        for pair in FOREX_PAIRS:
+            if pair in text_upper:
+                result["pair"] = pair
+                result["is_futures"] = False
+                break
+
+    # Detect direction — support BUY/SELL and LONG/SHORT
+    if "BUY" in text_upper or "LONG" in text_upper:
         result["direction"] = "BUY"
-    elif "SELL" in text_upper:
+    elif "SELL" in text_upper or "SHORT" in text_upper:
         result["direction"] = "SELL"
+
+    # Entry zone
     m = re.search(r"ENTRY\s*ZONE\s*:?\s*([\d.]+)", signal_text, re.IGNORECASE)
     if m:
         result["entry_zone"] = m.group(1)
+
+    # Stop loss
     m_sl = re.search(r"(?:STOP\s*LOSS|SL)\s*:?\s*([\d.]+)", signal_text, re.IGNORECASE)
     if m_sl:
         result["stop_loss"] = m_sl.group(1)
-    for kw, name in [("DON PIPS", "DON PIPS VIP"), ("ICT", "ICT"),
-                     ("FTMO", "FTMO Signals"), ("GOLD SCALPERS", "Gold Scalpers")]:
+
+    # Provider detection
+    for kw, name in [
+        ("DON PIPS", "DON PIPS VIP"), ("ICT", "ICT"),
+        ("FTMO", "FTMO Signals"), ("GOLD SCALPERS", "Gold Scalpers"),
+        ("APEX", "Apex Signals"), ("TOPSTEP", "Topstep Signals"),
+    ]:
         if kw in text_upper:
             result["provider"] = name
             break
+
     return result
