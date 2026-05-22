@@ -585,7 +585,7 @@ def load_challenge_state(user_id: int):
             with conn.cursor() as cur:
                 cur.execute("SELECT state_json FROM challenge_state WHERE user_id = %s", (user_id,))
                 row = cur.fetchone()
-                return row[0] if row else None
+                return row['state_json'] if row else None
     except Exception as e:
         logger.error(f"load_challenge_state error: {e}")
         return None
