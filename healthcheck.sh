@@ -107,6 +107,47 @@ for cmd in ['firmlist','setfirm','challenge','logtrade','history']:
 " 2>/dev/null
 check $? "All 9 Phase 1 bot commands registered"
 
+# 18. Phase 2 futures module loadable
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from futures_instruments import FUTURES_SYMBOLS, get_spec, calculate_contracts, is_futures
+assert len(FUTURES_SYMBOLS) == 11, f'Expected 11 futures symbols, got {len(FUTURES_SYMBOLS)}'
+assert is_futures('ES') == True
+assert is_futures('EURUSD') == False
+spec = get_spec('NQ')
+assert spec['point_value'] == 20.0
+sizing = calculate_contracts(1000, 20, 'NQ', max_contracts=12)
+assert sizing['contracts'] is not None
+print('Futures specs OK')
+" 2>/dev/null
+check $? "Phase 2 futures instruments loaded (11 symbols)"
+
+# 19. Futures position sizing calculation
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from futures_instruments import calculate_contracts, format_sizing
+# ES: \$1000 risk, 8pt stop = \$400/contract = 2 contracts
+sizing = calculate_contracts(1000, 8, 'ES')
+assert sizing['contracts'] == 2, f'Expected 2 ES contracts, got {sizing[\"contracts\"]}'
+# NQ: \$1000 risk, 20pt stop = \$400/contract = 2 contracts
+sizing = calculate_contracts(1000, 20, 'NQ')
+assert sizing['contracts'] == 2
+# Max contracts cap
+sizing = calculate_contracts(50000, 5, 'ES', max_contracts=12)
+assert sizing['contracts'] == 12
+print('Position sizing OK')
+" 2>/dev/null
+check $? "Phase 2 futures position sizing correct"
+
+# 20. Futures signal detection
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from filter import is_signal_message
+assert is_signal_message('ES BUY ENTRY 5800 STOP 5792') == True
+assert is_signal_message('NQ SELL ENTRY 20100 STOP 20120') == True
+assert is_signal_message('GBPUSD BUY') == True
+assert is_signal_message('hello how are you') == False
+print('Signal detection OK')
+" 2>/dev/null
+check $? "Phase 2 futures signal detection working"
+
 echo ""
 echo "======================================"
 echo "RESULTS: $PASS passed, $FAIL failed"
