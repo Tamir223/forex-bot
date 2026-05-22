@@ -374,6 +374,8 @@ def _quick_parse(signal_text: str) -> dict:
                 result["is_futures"] = False
                 break
 
+    logger.info(f"_quick_parse result: pair={result.get('pair')} is_futures={result.get('is_futures')}")
+
     # Detect direction — support BUY/SELL and LONG/SHORT
     if "BUY" in text_upper or "LONG" in text_upper:
         result["direction"] = "BUY"

@@ -48,7 +48,8 @@ def execute_report(analysis: dict) -> str:
         f"💰 RISK\n"
         f"Risk %:       {fmt(analysis.get('risk_percent'))}%\n"
         + (f"Contracts:    {fmt(analysis.get('lot_size_suggestion'))}\n"
-           if analysis.get('is_futures') else
+           if analysis.get('is_futures') and analysis.get('pair', '') in ['ES','MES','NQ','MNQ','CL','MCL','GC','MGC','RTY','YM','NG']
+           else
            f"Lot Size:     {fmt(analysis.get('lot_size_suggestion'))}\n")
         + (f"⚠️ CORRELATION: Multiple correlated USD-long pairs open\n"
            if analysis.get('correlation_warning') else "")
