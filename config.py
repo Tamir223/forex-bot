@@ -40,8 +40,8 @@ MAX_OPEN_TRADES = int(os.getenv("MAX_OPEN_TRADES", "2"))
 MAX_LIVE_EXPOSURE = float(os.getenv("MAX_LIVE_EXPOSURE", "1.0"))
 MAX_SESSION_LOSSES = int(os.getenv("MAX_SESSION_LOSSES", "2"))
 MAX_WEEKLY_LOSSES = int(os.getenv("MAX_WEEKLY_LOSSES", "4"))
-SESSION_START_HOUR = int(os.getenv("SESSION_START_HOUR", "7"))
-SESSION_END_HOUR = int(os.getenv("SESSION_END_HOUR", "21"))
+SESSION_START_HOUR = int(os.getenv("SESSION_START_HOUR", "0"))
+SESSION_END_HOUR = int(os.getenv("SESSION_END_HOUR", "23"))
 
 # FTMO Prop Firm Mode
 FTMO_MODE = os.getenv("FTMO_MODE", "false").lower() == "true"
