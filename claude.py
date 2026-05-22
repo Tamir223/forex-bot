@@ -313,6 +313,11 @@ def _compute_sl_pts(entry_str, sl_str, pair) -> float | None:
         entry_f = float(entry_str)
         sl_f = float(sl_str)
         diff = abs(entry_f - sl_f)
+
+        from futures_instruments import is_futures
+        if is_futures(pair or ""):
+            return round(diff, 2)  # futures use raw point difference
+
         pip_size = _PIP_SIZE.get(pair, _DEFAULT_PIP_SIZE)
         return round(diff / pip_size, 1)
     except (TypeError, ValueError):
@@ -322,6 +327,7 @@ def _compute_sl_pts(entry_str, sl_str, pair) -> float | None:
 def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
                         account_size: float = 10000.0, max_contracts: int = None) -> str | None:
     try:
+        logger.info(f"_calculate_lot_size called: pair={pair} sl_pts={sl_pts} risk_pct={risk_percent} account={account_size}")
         if sl_pts <= 0:
             return None
         risk_dollar = account_size * (risk_percent / 100)
