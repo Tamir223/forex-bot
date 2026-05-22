@@ -556,7 +556,7 @@ def get_user_firm(user_id: int) -> str:
             with conn.cursor() as cur:
                 cur.execute("SELECT firm_code FROM users WHERE id = %s", (user_id,))
                 row = cur.fetchone()
-                return row[0] if row and row[0] else "ftmo"
+                return row['firm_code'] if row and row.get('firm_code') else "ftmo"
     except Exception as e:
         logger.error(f"get_user_firm error: {e}")
         return "ftmo"
