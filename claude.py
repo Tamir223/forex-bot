@@ -81,10 +81,13 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         sl_pts = _compute_sl_pts(entry, sl_raw, pair)
         risk_pct = account_state.get("risk_percent") or account_state.get("risk")
         account_size = float(account_state.get("account_size", 10000))
+        from futures_instruments import is_futures
+        max_contracts = account_state.get("max_contracts") if is_futures(pair or "") else None
         market_ctx["lot_size_suggestion"] = (
-            _calculate_lot_size(float(risk_pct), sl_pts, pair, account_size)
+            _calculate_lot_size(float(risk_pct), sl_pts, pair, account_size, max_contracts)
             if risk_pct and sl_pts else None
         )
+        market_ctx["is_futures"] = is_futures(pair or "")
 
         # Early exits
         if market_ctx.get("low_volatility"):
@@ -316,11 +319,18 @@ def _compute_sl_pts(entry_str, sl_str, pair) -> float | None:
 
 
 def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
-                        account_size: float = 10000.0) -> str | None:
+                        account_size: float = 10000.0, max_contracts: int = None) -> str | None:
     try:
         if sl_pts <= 0:
             return None
         risk_dollar = account_size * (risk_percent / 100)
+
+        from futures_instruments import is_futures, calculate_contracts, format_sizing
+        if is_futures(pair):
+            sizing = calculate_contracts(risk_dollar, sl_pts, pair, max_contracts)
+            return format_sizing(sizing, account_size)
+
+        # Forex lot calculation
         pip_val = _PIP_VALUE.get(pair, _DEFAULT_PIP_VALUE)
         lot = round(risk_dollar / (sl_pts * pip_val), 2)
         acct_k = int(account_size / 1000)
@@ -331,13 +341,20 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
 
 def _quick_parse(signal_text):
     result = {}
-    pairs = ["XAUUSD", "GBPUSD", "EURUSD", "USDJPY", "USDCAD",
-             "AUDUSD", "NZDUSD", "USDCHF", "EURGBP", "EURJPY",
-             "GBPJPY", "US30", "NAS100"]
+    from futures_instruments import FUTURES_SYMBOLS
+
+    FOREX_PAIRS = [
+        "XAUUSD", "GBPUSD", "EURUSD", "USDJPY", "USDCAD",
+        "AUDUSD", "NZDUSD", "USDCHF", "EURGBP", "EURJPY",
+        "GBPJPY", "US30", "NAS100", "GBPNZD", "EURNZD",
+        "AUDCAD", "AUDCHF", "AUDNZD", "CADJPY", "CHFJPY",
+    ]
+    ALL_SYMBOLS = list(FUTURES_SYMBOLS) + FOREX_PAIRS
     text_upper = signal_text.upper()
-    for pair in pairs:
-        if pair in text_upper:
-            result["pair"] = pair
+    for symbol in ALL_SYMBOLS:
+        if symbol in text_upper:
+            result["pair"] = symbol
+            result["is_futures"] = symbol in FUTURES_SYMBOLS
             break
     if "BUY" in text_upper:
         result["direction"] = "BUY"

@@ -13,12 +13,23 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-SIGNAL_KEYWORDS = ["BUY", "buy", "SELL", "sell", "ENTRY ZONE", "entry zone", "TYPE:"]
+from futures_instruments import FUTURES_SYMBOLS
+
+FUTURES_SIGNAL_KEYWORDS = list(FUTURES_SYMBOLS)
+SIGNAL_KEYWORDS = ["BUY", "buy", "SELL", "sell", "ENTRY ZONE", "entry zone", "TYPE:"] + FUTURES_SIGNAL_KEYWORDS
 APPROVAL_KEYWORDS = ["YES", "NO", "WIN", "LOSS"]
 
 
 def is_signal_message(text: str) -> bool:
-    return any(kw in text for kw in SIGNAL_KEYWORDS)
+    text_upper = text.upper()
+    # Standard keywords
+    if any(kw in text for kw in ["BUY", "buy", "SELL", "sell", "ENTRY ZONE", "entry zone", "TYPE:"]):
+        return True
+    # Futures symbols
+    if any(sym in text_upper for sym in FUTURES_SYMBOLS):
+        if any(kw in text_upper for kw in ["BUY", "SELL", "LONG", "SHORT", "ENTRY", "STOP"]):
+            return True
+    return False
 
 
 def is_approval_message(text: str) -> bool:
