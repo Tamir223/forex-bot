@@ -9,7 +9,7 @@ import logging
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder, MessageHandler, CommandHandler,
-    filters, ContextTypes
+    CallbackQueryHandler, filters, ContextTypes
 )
 from database import (
     get_user_by_chat_id, get_state, link_telegram,
@@ -28,6 +28,11 @@ from report import (
 from trading_calendar import is_friday_close_warning
 from config import FTMO_MODE, FTMO_MAX_RISK
 import os
+from bot_commands_phase1 import (
+    cmd_firmlist, cmd_setfirm, cmd_firm,
+    cmd_challenge, cmd_status, cmd_logtrade,
+    cmd_history, cmd_resetfirm, callback_reset
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,16 +65,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     link_telegram(user.id, chat_id)
     await send_subscription_confirmed(chat_id, user.plan_tier, user.email)
-
-
-async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = str(update.message.chat_id)
-    user = get_user_by_chat_id(chat_id)
-    if not user or not user.is_active:
-        await update.message.reply_text(not_subscribed_message())
-        return
-    state = get_state(user.id)
-    await update.message.reply_text(status_report(state, user.plan_tier))
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -385,11 +380,19 @@ def _verify_activation_token(token: str):
 async def start_bot():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("upgrade", cmd_upgrade))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
+    app.add_handler(CommandHandler("firmlist", cmd_firmlist))
+    app.add_handler(CommandHandler("setfirm", cmd_setfirm))
+    app.add_handler(CommandHandler("firm", cmd_firm))
+    app.add_handler(CommandHandler("challenge", cmd_challenge))
+    app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("logtrade", cmd_logtrade))
+    app.add_handler(CommandHandler("history", cmd_history))
+    app.add_handler(CommandHandler("resetfirm", cmd_resetfirm))
+    app.add_handler(CallbackQueryHandler(callback_reset, pattern="^reset_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("TNL Trader multi-user bot started")
     asyncio.create_task(process_signal_queue())

@@ -536,3 +536,82 @@ def update_provider_result(user_id: int, provider: str, won: bool):
             conn.commit()
     except Exception as e:
         logger.error(f"update_provider_result error: {e}")
+
+
+def set_user_firm(user_id: int, firm_code: str) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE users SET firm_code = %s WHERE id = %s", (firm_code, user_id))
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"set_user_firm error: {e}")
+        return False
+
+def get_user_firm(user_id: int) -> str:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT firm_code FROM users WHERE id = %s", (user_id,))
+                row = cur.fetchone()
+                return row[0] if row and row[0] else "ftmo"
+    except Exception as e:
+        logger.error(f"get_user_firm error: {e}")
+        return "ftmo"
+
+def save_challenge_state(user_id: int, firm_code: str, state_json: str) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO challenge_state (user_id, firm_code, state_json, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (user_id) DO UPDATE
+                    SET firm_code = EXCLUDED.firm_code,
+                        state_json = EXCLUDED.state_json,
+                        updated_at = NOW()
+                """, (user_id, firm_code, state_json))
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"save_challenge_state error: {e}")
+        return False
+
+def load_challenge_state(user_id: int):
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT state_json FROM challenge_state WHERE user_id = %s", (user_id,))
+                row = cur.fetchone()
+                return row[0] if row else None
+    except Exception as e:
+        logger.error(f"load_challenge_state error: {e}")
+        return None
+
+def reset_challenge_state(user_id: int) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM challenge_state WHERE user_id = %s", (user_id,))
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"reset_challenge_state error: {e}")
+        return False
+
+def get_recent_trades(user_id: int, limit: int = 10) -> list:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, pair, direction, grade, score, pnl, result, firm_code, created_at
+                    FROM trades
+                    WHERE user_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """, (user_id, limit))
+                return cur.fetchall()
+    except Exception as e:
+        logger.error(f"get_recent_trades error: {e}")
+        return []

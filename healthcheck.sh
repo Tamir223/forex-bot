@@ -77,6 +77,36 @@ MEM=$(free | grep Mem | awk '{printf "%.0f", $3/$2 * 100}')
 [ $MEM -lt 90 ]
 check $? "Memory OK (${MEM}% used)"
 
+# 14. Phase 1 modules loadable
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from prop_firm_profiles import get_profile, PROFILES
+from drawdown_tracker import new_state, state_to_json
+from signal_gate_phase1 import GateResult
+assert len(PROFILES) == 8, f'Expected 8 profiles, got {len(PROFILES)}'
+assert get_profile('apex150') is not None
+assert get_profile('ftmo') is not None
+" 2>/dev/null
+check $? "Phase 1 modules loaded (8 firm profiles)"
+
+# 15. challenge_state table exists
+PGPASSWORD='Tnlnextlevel26$' psql -h tnltrader-db.c8pis6gqsrof.us-east-1.rds.amazonaws.com -U tnltrader -d tnltrader -c "\dt challenge_state" 2>/dev/null | grep -q "challenge_state"
+check $? "challenge_state table exists"
+
+# 16. firm_code column on users table
+PGPASSWORD='Tnlnextlevel26$' psql -h tnltrader-db.c8pis6gqsrof.us-east-1.rds.amazonaws.com -U tnltrader -d tnltrader -c "\d users" 2>/dev/null | grep -q "firm_code"
+check $? "firm_code column on users table"
+
+# 17. New bot commands registered
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import ast, sys
+tree = ast.parse(open('bot.py').read())
+handlers = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+src = open('bot.py').read()
+for cmd in ['firmlist','setfirm','challenge','logtrade','history']:
+    assert cmd in src, f'Missing handler: {cmd}'
+" 2>/dev/null
+check $? "All 9 Phase 1 bot commands registered"
+
 echo ""
 echo "======================================"
 echo "RESULTS: $PASS passed, $FAIL failed"
