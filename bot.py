@@ -377,8 +377,27 @@ def _verify_activation_token(token: str):
     return None
 
 
+async def set_bot_commands(app):
+    from telegram import BotCommand
+    commands = [
+        BotCommand("start", "Get started with TNL Trader"),
+        BotCommand("help", "Show all available commands"),
+        BotCommand("setfirm", "Set your prop firm (e.g. /setfirm apex150)"),
+        BotCommand("firm", "Show your current firm profile"),
+        BotCommand("firmlist", "List all supported prop firms"),
+        BotCommand("challenge", "Start a new challenge tracker"),
+        BotCommand("status", "Check your challenge progress"),
+        BotCommand("logtrade", "Log a trade result (e.g. /logtrade WIN 500)"),
+        BotCommand("history", "View your last 10 trades"),
+        BotCommand("resetfirm", "Reset your challenge tracker"),
+        BotCommand("cancel", "Cancel current operation"),
+    ]
+    await app.bot.set_my_commands(commands)
+
+
 async def start_bot():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app.post_init = set_bot_commands
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("help", cmd_help))
