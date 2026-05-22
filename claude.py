@@ -124,8 +124,8 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         result.setdefault("correlation_warning", market_ctx.get("correlation_warning", False))
         result.setdefault("invalidation_level", None)
         result.setdefault("is_futures", market_ctx.get("is_futures", False))
-        if "lot_size_suggestion" not in result:
-            result["lot_size_suggestion"] = market_ctx.get("lot_size_suggestion")
+        # Always override Claude's lot size with our own calculation — Claude gets it wrong for futures/forex
+        result["lot_size_suggestion"] = market_ctx.get("lot_size_suggestion")
         if "win_rate_context" not in result:
             if market_ctx.get("hist_win_rate") is not None:
                 result["win_rate_context"] = (
