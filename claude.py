@@ -331,8 +331,9 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
             return None
         risk_dollar = account_size * (risk_percent / 100)
 
-        from futures_instruments import is_futures, calculate_contracts, format_sizing
-        if is_futures(pair):
+        FUTURES_SYMBOLS = {"ES","MES","NQ","MNQ","CL","MCL","GC","MGC","RTY","YM","NG"}
+        if pair and pair.upper() in FUTURES_SYMBOLS:
+            from futures_instruments import calculate_contracts, format_sizing
             sizing = calculate_contracts(risk_dollar, sl_pts, pair, max_contracts)
             return format_sizing(sizing, account_size)
 
