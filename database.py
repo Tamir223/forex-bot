@@ -35,6 +35,7 @@ class User:
     created_at: datetime
     stripe_customer_id: Optional[str] = None
     stripe_subscription_id: Optional[str] = None
+    firm_code: str = "ftmo"
 
 
 @dataclass
