@@ -30,6 +30,17 @@ SYMBOL_MAP = {
     "SPX500": "SPX",
     "BTCUSD": "BTC/USD",
     "ETHUSD": "ETH/USD",
+    "ES":     "ES1!",
+    "MES":    "MES1!",
+    "NQ":     "NQ1!",
+    "MNQ":    "MNQ1!",
+    "RTY":    "RTY1!",
+    "YM":     "YM1!",
+    "CL":     "CL1!",
+    "MCL":    "MCL1!",
+    "GC":     "GC1!",
+    "MGC":    "MGC1!",
+    "NG":     "NG1!",
 }
 
 
@@ -152,14 +163,29 @@ def check_entry_validity(pair: str, entry_zone: str, stop_loss: str, direction: 
         distance = abs(current - entry)
 
         # Rough pip/point calculation
-        if "JPY" in pair.upper():
+        MAX_PIPS_AWAY = {
+            "XAUUSD": 15, "XAU/USD": 15,
+            "US30": 50, "DJI": 50,
+            "NAS100": 80, "NDX": 80,
+            "default": 20
+        }
+        from futures_instruments import is_futures, get_spec
+        if is_futures(pair.upper()):
+            spec = get_spec(pair.upper())
+            pips_away = distance  # futures use points directly
+            max_away = spec["typical_sl_pts"] * 3 if spec else 50
+        elif "JPY" in pair.upper():
             pips_away = distance / 0.01
+            max_away = MAX_PIPS_AWAY.get(pair.upper(), MAX_PIPS_AWAY["default"])
         elif pair.upper() in ["XAUUSD", "XAU/USD"]:
-            pips_away = distance  # gold uses points
+            pips_away = distance
+            max_away = MAX_PIPS_AWAY.get(pair.upper(), 15)
         elif pair.upper() in ["US30", "DJI", "NAS100", "NDX"]:
-            pips_away = distance  # indices use points
+            pips_away = distance
+            max_away = MAX_PIPS_AWAY.get(pair.upper(), 80)
         else:
             pips_away = distance / 0.0001
+            max_away = MAX_PIPS_AWAY.get(pair.upper(), MAX_PIPS_AWAY["default"])
 
         # Check if price already blew past stop loss
         if stop_loss and stop_loss not in ["null", "UNSPECIFIED"]:
@@ -182,13 +208,6 @@ def check_entry_validity(pair: str, entry_zone: str, stop_loss: str, direction: 
                 }
 
         # Check if entry is too far away (signal may be stale)
-        MAX_PIPS_AWAY = {
-            "XAUUSD": 15, "XAU/USD": 15,
-            "US30": 50, "DJI": 50,
-            "NAS100": 80, "NDX": 80,
-            "default": 20
-        }
-        max_away = MAX_PIPS_AWAY.get(pair.upper(), MAX_PIPS_AWAY["default"])
 
         if pips_away > max_away:
             return {
