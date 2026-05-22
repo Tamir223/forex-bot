@@ -15,8 +15,9 @@ from database import (
     get_user_by_chat_id, get_state, link_telegram,
     log_trade_opened, log_trade_win, log_trade_loss,
     get_provider_stats, update_provider_result,
-    log_trade, get_user_trades, Trade
+    log_trade, get_user_trades, Trade, get_user_firm
 )
+from prop_firm_profiles import get_profile
 from notifications import send_subscription_confirmed
 from filter import is_signal_message, is_approval_message, run_fast_gates, run_enforcement_filter
 from claude import analyze_signal
@@ -26,7 +27,6 @@ from report import (
     trade_logged_loss, not_subscribed_message, status_report
 )
 from trading_calendar import is_friday_close_warning
-from config import FTMO_MODE, FTMO_MAX_RISK
 import os
 from bot_commands_phase1 import (
     cmd_firmlist, cmd_setfirm, cmd_firm,
@@ -203,13 +203,18 @@ async def process_signal_queue():
             if user.plan_tier == "elite" and analysis.get("confidence") is not None:
                 analysis["confidence"] = min(10, analysis["confidence"] + 1)
 
-            if FTMO_MODE:
-                risk = analysis.get("risk_percent", 0) or 0
-                if risk > 1.0:
-                    analysis["decision"] = "BLOCK"
-                    analysis["reason"] = "FTMO risk limit exceeded"
-                elif risk > FTMO_MAX_RISK:
-                    analysis["risk_percent"] = FTMO_MAX_RISK
+            # Firm-aware risk cap
+            firm_code = get_user_firm(user.id)
+            profile = get_profile(firm_code)
+            if profile:
+                max_daily_pct = profile.max_daily_loss_pct * 100  # e.g. 5.0 for FTMO
+                signal_risk = analysis.get("risk_percent", 0) or 0
+                firm_label = profile.name
+                if max_daily_pct > 0 and signal_risk > (max_daily_pct / 5):
+                    analysis["risk_percent"] = round(max_daily_pct / 5, 2)
+                priority_header = f"⚡ ELITE PRIORITY ANALYSIS\n🏆 {firm_label} MODE ACTIVE — Risk capped at {analysis.get('risk_percent', 1.0)}%\n"
+            else:
+                priority_header = "⚡ ELITE PRIORITY ANALYSIS\n"
 
             last_analysis[chat_id] = analysis
             trade = Trade(
@@ -241,10 +246,8 @@ async def process_signal_queue():
                         update_trade_result(trade_id, "BLOCKED")
                 else:
                     report = execute_report(analysis)
-                    if FTMO_MODE:
-                        report = "🏆 FTMO MODE ACTIVE — Risk capped at 0.5%\n" + report
                     if user.plan_tier == "elite":
-                        report = "⚡ ELITE PRIORITY ANALYSIS\n" + report
+                        report = priority_header + report
                     await bot.send_message(chat_id=int(chat_id), text=report)
         except Exception as e:
             logger.error(f"Signal queue worker error: {e}")
@@ -308,13 +311,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not passed:
         await send(context, chat_id, fast_gate_blocked(gate_reason))
         return
+    firm_code = get_user_firm(user.id)
+    profile = get_profile(firm_code)
     state_dict = {
         "trades_today": state.trades_today,
         "open_trades": state.open_trades,
         "live_exposure": state.live_exposure,
         "session_losses": state.session_losses,
         "weekly_losses": state.weekly_losses,
-        "daily_pnl": state.daily_pnl
+        "daily_pnl": state.daily_pnl,
+        "account_size": profile.account_size if profile else 10000.0,
+        "risk_percent": 1.0,
+        "max_contracts": profile.max_contracts if profile else None,
     }
     await signal_queue.put({
         "text": text,
