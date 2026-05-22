@@ -42,6 +42,10 @@ last_analysis = {}
 last_trade_id = {}
 signal_queue: asyncio.Queue = asyncio.Queue()
 
+# Deduplication cache — prevents same message being processed twice
+_seen_message_ids = set()
+MAX_SEEN_IDS = 500  # keep memory bounded
+
 
 async def send(context, chat_id: str, text: str):
     try:
@@ -324,6 +328,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "risk_percent": 1.0,
         "max_contracts": profile.max_contracts if profile else None,
     }
+    # Deduplicate — skip if we've seen this message ID before
+    msg_id = update.message.message_id
+    if msg_id in _seen_message_ids:
+        logger.info(f"Duplicate message {msg_id} — skipping")
+        return
+    _seen_message_ids.add(msg_id)
+    if len(_seen_message_ids) > MAX_SEEN_IDS:
+        _seen_message_ids.pop()
+
     await signal_queue.put({
         "text": text,
         "chat_id": chat_id,

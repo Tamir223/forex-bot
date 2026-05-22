@@ -327,6 +327,7 @@ def _compute_sl_pts(entry_str, sl_str, pair) -> float | None:
 def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
                         account_size: float = 10000.0, max_contracts: int = None) -> str | None:
     try:
+        logger.info(f"[lot debug] pair={pair} in FUTURES_SYMBOLS={pair.upper() in {'ES','MES','NQ','MNQ','CL','MCL','GC','MGC','RTY','YM','NG'}} sl_pts={sl_pts}")
         if sl_pts <= 0:
             return None
         risk_dollar = account_size * (risk_percent / 100)
