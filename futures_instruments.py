@@ -172,10 +172,10 @@ def calculate_contracts(
 
 
 def format_sizing(sizing: dict, account_size: float) -> str:
-    """Format contract sizing for report display."""
     if not sizing or not sizing.get("contracts"):
         return "--"
     contracts = sizing["contracts"]
     total_risk = sizing["total_risk"]
     risk_pct = round((total_risk / account_size) * 100, 2) if account_size else 0
-    return f"{contracts} contract{'s' if contracts != 1 else ''} (${total_risk:,.0f} risk / {risk_pct}%)"
+    label = "contract" if contracts == 1 else "contracts"
+    return f"{contracts} {label} (${total_risk:,.0f} risk / {risk_pct}%)"
