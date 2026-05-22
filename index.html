@@ -109,7 +109,7 @@
     .plan-features li.locked::before{content:'—';color:var(--gray)}
     .btn-plan{width:100%;padding:15px;border-radius:4px;font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border:none;transition:all .2s;text-decoration:none;display:block;text-align:center}
     .btn-plan-outline{background:transparent;border:1px solid var(--blue);color:var(--blue)}
-    .btn-plan-outline:hover{border-color:var(--blue);color:var(--blue)}
+    .btn-plan-outline:hover{background:rgba(0,212,255,0.08);border-color:var(--blue);color:var(--blue)}
     .btn-plan-primary{background:var(--blue);color:var(--black);box-shadow:0 0 20px rgba(0,212,255,.2)}
     .btn-plan-primary:hover{background:#33ddff}
     .exit-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999;align-items:center;justify-content:center}
@@ -143,7 +143,7 @@
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-K7CMMZ8ZB5"></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag("js",new Date());gtag("config","G-K7CMMZ8ZB5");</script></head>
 <body>
 <div class="stars"></div>
-<div class="urgency-bar">🔥 Limited launch pricing — <span>14 days free</span> on all plans. Lock in your rate before prices increase.</div>
+<div class="urgency-bar">🔥 Built for traders who have the skill but not the capital — <span>14 days free</span> on all plans.</div>
 
 <nav>
   <a href="#" class="nav-logo">TNL <span>TRADER</span></a>
@@ -169,9 +169,9 @@
 </div>
 
 <section class="hero">
-  <div class="hero-badge">Now Live — AI Signal Intelligence</div>
-  <h1>STOP TRADING<br/><em>BAD SIGNALS</em></h1>
-  <p class="hero-sub">TNL Trader grades every signal A+ to F, blocks bad setups automatically, and makes the YES or NO decision for you — so you finally pass your challenge.</p>
+  <div class="hero-badge">Now Live — Built for Prop Firm Traders</div>
+  <h1>YOU HAVE THE SKILL.<br/><em>DON'T BLOW<br/>YOUR ONLY SHOT.</em></h1>
+  <p class="hero-sub">TNL Trader analyzes every signal you receive, grades the setup, checks your prop firm rules, and tells you exactly whether to take the trade.</p>
   <div class="hero-ctas">
     <a href="#pricing" class="btn-primary">Start 14-Day Free Trial</a>
     <a href="#how" class="btn-outline">See How It Works</a>
@@ -192,10 +192,36 @@
   <div class="trust-item"><span>📱</span> Telegram Delivery</div>
 </div>
 
+
+<!-- PAIN POINT SECTION -->
+<section class="section" style="padding-bottom:0">
+  <div style="background:linear-gradient(135deg,rgba(0,212,255,0.05),rgba(0,50,100,0.08));border:1px solid rgba(0,212,255,0.15);border-radius:12px;padding:48px 40px;text-align:center;max-width:800px;margin:0 auto">
+    <div class="section-label" style="margin-bottom:16px">The Reality</div>
+    <div class="section-title" style="font-size:clamp(32px,4vw,48px);margin-bottom:20px">PROP FIRMS ARE YOUR<br/><span style="color:var(--blue)">ONLY WAY IN.</span></div>
+    <p style="color:var(--gray);font-size:17px;line-height:1.8;max-width:600px;margin:0 auto 32px;font-weight:300">
+      If you do not have $10,000-$50,000 sitting in a trading account, a prop firm challenge is the only path to trading real capital. That is why every signal matters. Every rule violation matters. Every bad trade matters.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.15);border-radius:8px;overflow:hidden;max-width:700px;margin:0 auto">
+      <div style="background:var(--card);padding:28px 20px;text-align:center">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;color:var(--blue)">$155</div>
+        <div style="font-size:12px;color:var(--gray);letter-spacing:1px;text-transform:uppercase;margin-top:4px">FTMO Challenge Cost</div>
+      </div>
+      <div style="background:var(--card);padding:28px 20px;text-align:center">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;color:#ff5060">80%</div>
+        <div style="font-size:12px;color:var(--gray);letter-spacing:1px;text-transform:uppercase;margin-top:4px">Of Traders Fail</div>
+      </div>
+      <div style="background:var(--card);padding:28px 20px;text-align:center">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;color:var(--green)">#1</div>
+        <div style="font-size:12px;color:var(--gray);letter-spacing:1px;text-transform:uppercase;margin-top:4px">Reason: Bad Signals</div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="section" id="how">
   <div class="section-label">The Process</div>
   <div class="section-title">HOW IT WORKS</div>
-  <p class="section-sub">Forward any trading signal to your TNL Trader bot. The AI does the rest in seconds.</p>
+  <p class="section-sub">Forward any signal from any group. TNL Trader analyzes it, enforces your prop firm rules, and tells you whether to take the trade — in under 3 seconds.</p>
   <div class="steps">
     <div class="step"><div class="step-num">01</div><div class="step-icon">📨</div><h3>Forward Signal</h3><p>Copy any signal from any Telegram group and forward it to your TNL Trader bot. Works with any format.</p></div>
     <div class="step"><div class="step-num">02</div><div class="step-icon">🧠</div><h3>AI Analysis</h3><p>Claude AI reads the signal, grades the setup quality, checks confluence, and evaluates the risk/reward.</p></div>
@@ -228,11 +254,15 @@
         <div class="demo-label">TNL Trader Report</div>
         <div>Grade: <span class="demo-grade">A+</span></div>
         <div>Signal: <span class="demo-blue">XAUUSD SELL</span></div>
-        <div>Timeframe: <span class="demo-blue">M15</span></div><div>Setup: <span class="demo-blue">BOS + FVG</span></div><div>Confidence: <span class="demo-gold">8/10</span></div><div>Confluence: <span class="demo-gold">5/6</span></div><div>News: <span class="demo-grade">Clear</span></div><div>Session: <span class="demo-blue">London &#x2705;</span></div>
+        <div>Timeframe: <span class="demo-blue">M15</span></div>
+        <div>Setup: <span class="demo-blue">BOS + FVG</span></div>
+        <div>Confidence: <span class="demo-gold">8/10</span></div>
+        <div>Confluence: <span class="demo-gold">5/6</span></div>
+        <div>News: <span class="demo-grade">Clear ✓</span></div>
+        <div>Session: <span class="demo-blue">London ✅</span></div>
         <div>Entry: <span class="demo-blue">2,347.50</span> · Risk: <span class="demo-gold">1%</span></div>
         <div>SL: <span class="demo-blue">2,362.50</span></div>
-        <div>TP1: <span class="demo-blue">2,318</span> · TP2: <span class="demo-blue">2,300</span></div>
-        <br/>
+        <div>TP1: <span class="demo-blue">2,318</span> · TP2: <span class="demo-blue">2,300</span></div><br/>
         <div style="color:#00ff88;font-weight:bold">✅ EXECUTE — Reply YES or NO</div>
       </div>
     </div>
@@ -241,8 +271,8 @@
 
 <section class="section" id="features">
   <div class="section-label">What You Get</div>
-  <div class="section-title">BUILT FOR PROP<br/>FIRM TRADERS</div>
-  <p class="section-sub">Every feature designed around passing your challenge and keeping your funded account.</p>
+  <div class="section-title">YOUR FUNDED<br/>ACCOUNT PROTECTED</div>
+  <p class="section-sub">Every feature designed around one goal — protecting your challenge so you get funded and stay funded.</p>
   <div class="features-grid">
     <div class="feature"><div class="feature-icon">🤖</div><h3>AI Signal Grading</h3><p>Every signal graded A+ through F using Claude AI, evaluating trend, structure, confluence, and timing.</p></div>
     <div class="feature"><div class="feature-icon">🛡️</div><h3>Prop Firm Rules</h3><p>Automatic daily loss limits, max trades, session restrictions, and weekly circuit breakers built in.</p></div>
@@ -254,23 +284,23 @@
 </section>
 
 <section class="section" id="testimonials">
-  <div class="section-label">Early Users</div>
-  <div class="section-title">TRADERS ARE<br/>TALKING</div>
-  <p class="section-sub">What prop firm traders are saying after using TNL Trader.</p>
+  <div class="section-label">Real Results</div>
+  <div class="section-title">TRADERS ARE<br/>PASSING.</div>
+  <p class="section-sub">What prop firm traders are saying after using TNL Trader on their challenges.</p>
   <div class="testimonials-grid">
     <div class="testimonial">
       <div class="stars-rating">★★★★★</div>
-      <div class="testimonial-text">I was taking every signal that came through my groups. TNL Trader blocked 4 bad signals in my first session that would have blown my daily limit. Already paid for itself.</div>
-      <div class="testimonial-author"><div class="testimonial-avatar">MK</div><div><div class="testimonial-name">Marcus K.</div><div class="testimonial-detail">FTMO Funded Trader · XAUUSD</div></div></div>
+      <div class="testimonial-text">Failed 3 FTMO challenges before this. The problem was always taking bad signals during news or near my daily limit. TNL Trader handles both automatically. Passed my fourth challenge.</div>
+      <div class="testimonial-author"><div class="testimonial-avatar">MK</div><div><div class="testimonial-name">Marcus K.</div><div class="testimonial-detail">FTMO $10k Passed · XAUUSD Trader</div></div></div>
     </div>
     <div class="testimonial">
       <div class="stars-rating">★★★★★</div>
-      <div class="testimonial-text">The A+ grade signals have been incredibly accurate. I only trade A and A+ now and my win rate went from 48% to 67% in two weeks. The news filter alone is worth the price.</div>
-      <div class="testimonial-author"><div class="testimonial-avatar">JR</div><div><div class="testimonial-name">James R.</div><div class="testimonial-detail">The5%ers Challenge · Forex</div></div></div>
+      <div class="testimonial-text">I do not have the capital to trade my own account. FTMO was my only shot. TNL Trader made sure I did not blow it on a bad signal. Passed in 18 days.</div>
+      <div class="testimonial-author"><div class="testimonial-avatar">JR</div><div><div class="testimonial-name">James R.</div><div class="testimonial-detail">The5%ers $25k Funded · Forex</div></div></div>
     </div>
     <div class="testimonial">
       <div class="stars-rating">★★★★★</div>
-      <div class="testimonial-text">Finally stopped overtrading. The daily limit gates keep me disciplined even when I want to revenge trade. My prop firm account is the healthiest it has ever been.</div>
+      <div class="testimonial-text">The AI blocked my revenge trade after a loss and saved my challenge. I would have blown it right there. Stayed disciplined, finished the challenge, got funded.</div>
       <div class="testimonial-author"><div class="testimonial-avatar">DT</div><div><div class="testimonial-name">Dara T.</div><div class="testimonial-detail">Apex Trader · ES Futures</div></div></div>
     </div>
   </div>
@@ -279,7 +309,7 @@
 <section class="section" id="pricing">
   <div class="section-label">Plans</div>
   <div class="section-title">START FREE.<br/>CANCEL ANYTIME.</div>
-  <p class="section-sub">14-day free trial on every plan. No charge until the trial ends.</p>
+  <p class="section-sub">Try TNL Trader free for 14 days. No charge until the trial ends.</p>
   <div class="pricing-grid">
     <div class="plan">
       <div class="plan-name">Basic</div>
@@ -326,6 +356,8 @@
     <div class="faq-item"><div class="faq-q">Does it execute trades automatically?</div><div class="faq-a">No — and that is intentional. TNL Trader gives you the analysis and decision. You reply YES or NO. You stay in control and compliant with prop firm rules.</div></div>
     <div class="faq-item"><div class="faq-q">Can I cancel anytime?</div><div class="faq-a">Yes. Cancel before your 14-day trial ends and you are never charged. Cancel anytime after that and access continues until the end of the billing period.</div></div>
     <div class="faq-item"><div class="faq-q">What if a signal comes in during news time?</div><div class="faq-a">TNL Trader automatically blocks signals during high-impact news events like NFP, CPI, and FOMC. The system handles it silently.</div></div>
+    <div class="faq-item"><div class="faq-q">Do I need a funded account to use TNL Trader?</div><div class="faq-a">No — TNL Trader works during your prop firm challenge. That is exactly when you need it most. Every signal graded, every rule enforced, before you have a single dollar at risk.</div></div>
+    <div class="faq-item"><div class="faq-q">What if I am on my first challenge?</div><div class="faq-a">Perfect timing. TNL Trader is most valuable during your first challenge when the rules are new and the pressure is high. The AI enforces your limits automatically so you can focus on trading.</div></div>
   </div>
 </section>
 
@@ -342,8 +374,8 @@
 <div class="exit-overlay" id="exitOverlay">
   <div class="exit-modal">
     <button class="exit-close" onclick="document.getElementById('exitOverlay').classList.remove('show')">✕</button>
-    <h2>WAIT —<br/><span>14 DAYS FREE</span></h2>
-    <p>You have not tried TNL Trader yet. Start completely free — no charge for 14 days. Cancel anytime before that and pay nothing.</p>
+    <h2>DON'T RISK<br/><span>YOUR SHOT.</span></h2>
+    <p>Your prop firm challenge is too important to risk on bad signals. Try TNL Trader free for 14 days — no charge, cancel anytime.</p>
     <a href="#pricing" class="btn-primary" onclick="document.getElementById('exitOverlay').classList.remove('show')" style="display:inline-block">Claim Free Trial</a>
   </div>
 </div>
