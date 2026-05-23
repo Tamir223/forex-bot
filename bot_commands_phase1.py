@@ -200,4 +200,6 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     watchlist_str = get_user_watchlist(user.id)
     watchlist = [s.strip() for s in watchlist_str.split(",")] if watchlist_str else DEFAULT_WATCHLIST
     bot = context.bot
-    await run_scan(watchlist, bot, [str(update.effective_user.id)], force=True)
+    alerts = await run_scan(watchlist, bot, [str(update.effective_user.id)], force=True)
+    if alerts == 0:
+        await update.message.reply_text("✅ Scan complete — no strong setups found right now. Markets may be ranging or in low volatility.")

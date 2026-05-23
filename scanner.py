@@ -13,6 +13,15 @@ from datetime import datetime, timezone
 from market import get_live_price, get_atr, normalize_symbol
 from config import TWELVE_DATA_API_KEY
 import requests
+import yfinance as yf
+import pandas as pd
+
+# yFinance ticker map for futures
+YFINANCE_FUTURES_MAP = {
+    'ES': 'ES=F', 'MES': 'MES=F', 'NQ': 'NQ=F', 'MNQ': 'MNQ=F',
+    'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
+    'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F',
+}
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +46,36 @@ def is_scan_window() -> bool:
     return SCANNER_START_HOUR <= hour <= SCANNER_END_HOUR
 
 
+def get_candles_yfinance(symbol: str, outputsize: int = 50) -> list | None:
+    """Fetch futures candles from yFinance (free, no rate limit)."""
+    try:
+        ticker = YFINANCE_FUTURES_MAP.get(symbol.upper())
+        if not ticker:
+            return None
+        hist = yf.Ticker(ticker).history(period="2d", interval="15m")
+        if hist.empty:
+            return None
+        # Convert to our candle format, newest first
+        result = []
+        for ts, row in hist.iloc[::-1].iterrows():
+            result.append({
+                "datetime": str(ts),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": float(row.get("Volume", 0)),
+            })
+        return result[:outputsize]
+    except Exception as e:
+        logger.error(f"yFinance candle error for {symbol}: {e}")
+        return None
+
+
 def get_candles(symbol: str, interval: str = "15min", outputsize: int = 50) -> list | None:
-    """Fetch recent OHLCV candles from Twelve Data."""
+    """Fetch candles — uses yFinance for futures, Twelve Data for forex."""
+    if symbol.upper() in YFINANCE_FUTURES_MAP:
+        return get_candles_yfinance(symbol, outputsize)
     if not TWELVE_DATA_API_KEY:
         return None
     td_symbol = normalize_symbol(symbol)
@@ -60,7 +97,6 @@ def get_candles(symbol: str, interval: str = "15min", outputsize: int = 50) -> l
             logger.warning(f"Candle fetch failed for {symbol}: {data.get('message', 'unknown')}")
             return None
         candles = data["values"]
-        # Convert to floats
         result = []
         for c in candles:
             result.append({
@@ -71,7 +107,7 @@ def get_candles(symbol: str, interval: str = "15min", outputsize: int = 50) -> l
                 "close": float(c["close"]),
                 "volume": float(c.get("volume", 0)),
             })
-        return result  # newest first
+        return result
     except Exception as e:
         logger.error(f"Candle fetch error for {symbol}: {e}")
         return None
@@ -392,13 +428,16 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                     except Exception as e:
                         logger.error(f"[scanner] Failed to send alert to {chat_id}: {e}")
 
-            # Rate limit — Twelve Data free tier: 8 req/min, 3 calls per symbol
-            await asyncio.sleep(20)
+            # Rate limit — only needed for Twelve Data (forex). yFinance futures have no limit.
+            from futures_instruments import is_futures
+            if not is_futures(symbol):
+                await asyncio.sleep(20)
 
         except Exception as e:
             logger.error(f"[scanner] Symbol scan failed for {symbol}: {e}")
 
     logger.info(f"[scanner] Scan complete — {alerts_sent} alerts sent")
+    return alerts_sent
 
 
 async def start_scanner(bot, get_active_users_fn):
