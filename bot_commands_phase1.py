@@ -166,3 +166,38 @@ async def callback_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"✅ Challenge reset for *{profile.name}*.\n\nUse /status to see your fresh start.", parse_mode="Markdown")
     else:
         await query.edit_message_text("✅ Cleared. Use /setfirm then /challenge to start.")
+
+
+async def cmd_watch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = get_user_by_chat_id(str(update.effective_user.id))
+    if not user:
+        await update.message.reply_text("❌ No active subscription.")
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "Set your watchlist:\n`/watch XAUUSD EURUSD NQ ES`\n\nThe scanner will alert you when setups form on these instruments.",
+            parse_mode="Markdown"
+        )
+        return
+    symbols = [s.upper() for s in context.args]
+    watchlist_str = ",".join(symbols)
+    from database import set_user_watchlist
+    set_user_watchlist(user.id, watchlist_str)
+    await update.message.reply_text(
+        f"✅ Watchlist updated:\n" + "\n".join(f"  • {s}" for s in symbols) +
+        "\n\nYou'll get alerts every 15 minutes when setups form on these.",
+        parse_mode="Markdown"
+    )
+
+async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = get_user_by_chat_id(str(update.effective_user.id))
+    if not user:
+        await update.message.reply_text("❌ No active subscription.")
+        return
+    await update.message.reply_text("🔍 Scanning your watchlist now...")
+    from database import get_user_watchlist
+    from scanner import run_scan, DEFAULT_WATCHLIST
+    watchlist_str = get_user_watchlist(user.id)
+    watchlist = [s.strip() for s in watchlist_str.split(",")] if watchlist_str else DEFAULT_WATCHLIST
+    bot = context.bot
+    await run_scan(watchlist, bot, [str(update.effective_user.id)])

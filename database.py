@@ -616,3 +616,37 @@ def get_recent_trades(user_id: int, limit: int = 10) -> list:
     except Exception as e:
         logger.error(f"get_recent_trades error: {e}")
         return []
+
+
+def set_user_watchlist(user_id: int, watchlist: str) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE users SET watchlist = %s WHERE id = %s", (watchlist, user_id))
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"set_user_watchlist error: {e}")
+        return False
+
+def get_user_watchlist(user_id: int) -> str:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT watchlist FROM users WHERE id = %s", (user_id,))
+                row = cur.fetchone()
+                return row['watchlist'] if row and row.get('watchlist') else None
+    except Exception as e:
+        logger.error(f"get_user_watchlist error: {e}")
+        return None
+
+def get_active_users() -> list:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM users WHERE is_active = true")
+                rows = cur.fetchall()
+                return [User(**row) for row in rows]
+    except Exception as e:
+        logger.error(f"get_active_users error: {e}")
+        return []

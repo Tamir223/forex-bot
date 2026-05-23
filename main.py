@@ -9,7 +9,8 @@ import uvicorn
 from bot import start_bot
 from webhooks import app as stripe_app
 from reset import start_weekly_reset
-from database import init_db
+from database import init_db, get_active_users
+from scanner import start_scanner
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -34,10 +35,13 @@ async def main():
     init_db()
     logger.info("Database ready")
 
+    bot_app = await start_bot()
+
     await asyncio.gather(
-        start_bot(),
+        bot_app.run_polling(),
         run_webhook_server(),
-        start_weekly_reset()
+        start_weekly_reset(),
+        start_scanner(bot_app.bot, get_active_users)
     )
 
 

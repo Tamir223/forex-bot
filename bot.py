@@ -31,7 +31,8 @@ import os
 from bot_commands_phase1 import (
     cmd_firmlist, cmd_setfirm, cmd_firm,
     cmd_challenge, cmd_status, cmd_logtrade,
-    cmd_history, cmd_resetfirm, callback_reset
+    cmd_history, cmd_resetfirm, callback_reset,
+    cmd_watch, cmd_scan
 )
 
 logger = logging.getLogger(__name__)
@@ -411,6 +412,8 @@ async def set_bot_commands(app):
         BotCommand("logtrade", "Log a trade result (e.g. /logtrade WIN 500)"),
         BotCommand("history", "View your last 10 trades"),
         BotCommand("resetfirm", "Reset your challenge tracker"),
+        BotCommand("watch", "Set your scanner watchlist (e.g. /watch ES NQ XAUUSD)"),
+        BotCommand("scan", "Trigger an instant manual scan of your watchlist"),
         BotCommand("cancel", "Cancel current operation"),
     ]
     await app.bot.set_my_commands(commands)
@@ -432,6 +435,8 @@ async def start_bot():
     app.add_handler(CommandHandler("logtrade", cmd_logtrade))
     app.add_handler(CommandHandler("history", cmd_history))
     app.add_handler(CommandHandler("resetfirm", cmd_resetfirm))
+    app.add_handler(CommandHandler("watch", cmd_watch))
+    app.add_handler(CommandHandler("scan", cmd_scan))
     app.add_handler(CallbackQueryHandler(callback_reset, pattern="^reset_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("TNL Trader multi-user bot started")
