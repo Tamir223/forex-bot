@@ -441,6 +441,9 @@ async def start_bot():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("TNL Trader multi-user bot started")
     asyncio.create_task(process_signal_queue())
+    from scanner import start_scanner
+    from database import get_active_users
+    asyncio.create_task(start_scanner(app.bot, get_active_users))
     async with app:
         await app.start()
         await app.updater.start_polling()

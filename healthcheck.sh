@@ -156,3 +156,28 @@ echo "======================================"
 if [ $FAIL -gt 0 ]; then
   exit 1
 fi
+
+# 21. Scanner module loadable
+/home/ubuntu/apfee/venv/bin/python3 -c "
+import sys
+sys.path.insert(0, '/home/ubuntu/apfee')
+from scanner import get_candles_yfinance, detect_structure, detect_order_block, detect_fvg, score_setup
+candles = get_candles_yfinance('ES')
+assert candles and len(candles) > 10, 'ES candles failed'
+structure = detect_structure(candles)
+assert structure.get('trend') in ('bullish','bearish','ranging'), 'Structure detection failed'
+print('Scanner OK')
+" 2>/dev/null
+check $? "Phase 3 scanner — yFinance ES data and structure detection"
+
+# 22. yFinance futures data
+/home/ubuntu/apfee/venv/bin/python3 -c "
+import sys
+sys.path.insert(0, '/home/ubuntu/apfee')
+from scanner import get_candles_yfinance
+for sym in ['NQ','ES','CL','GC']:
+    c = get_candles_yfinance(sym)
+    assert c and len(c) > 5, f'{sym} failed'
+print('All futures data OK')
+" 2>/dev/null
+check $? "Phase 3 yFinance — NQ ES CL GC data feeds working"
