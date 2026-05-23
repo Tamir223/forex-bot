@@ -223,10 +223,9 @@ def _build_message(account_state, market_ctx, signal_text):
     lines.append("\n=== LOT SIZE SUGGESTION ===")
     if market_ctx.get("lot_size_suggestion"):
         lines.append(
-            f"Recommended position size: {market_ctx['lot_size_suggestion']} "
-            "(calculated from account risk % and estimated stop loss distance). "
-            "Include as lot_size_suggestion in your JSON output."
-        )
+        f"Recommended position size: {market_ctx['lot_size_suggestion']} "
+        "(pre-calculated — do NOT recalculate, use this exact value as lot_size_suggestion in your JSON output)."
+    )
     else:
         lines.append(
             "Stop loss distance unavailable — lot size cannot be pre-calculated. "
@@ -327,7 +326,6 @@ def _compute_sl_pts(entry_str, sl_str, pair) -> float | None:
 def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
                         account_size: float = 10000.0, max_contracts: int = None) -> str | None:
     try:
-        logger.info(f"[lot debug] pair={pair} in FUTURES_SYMBOLS={pair.upper() in {'ES','MES','NQ','MNQ','CL','MCL','GC','MGC','RTY','YM','NG'}} sl_pts={sl_pts}")
         if sl_pts <= 0:
             return None
         risk_dollar = account_size * (risk_percent / 100)
