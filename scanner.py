@@ -282,6 +282,58 @@ def detect_fvg(candles: list) -> dict | None:
     return None
 
 
+
+def get_htf_bias(symbol: str) -> dict:
+    """Get Daily, 4H, and 1H trend bias for multi-timeframe confirmation."""
+    result = {"h1_trend": "unclear", "h4_trend": "unclear", "d1_trend": "unclear", "aligned": False, "bias": "unclear"}
+    try:
+        if symbol.upper() in YFINANCE_FUTURES_MAP:
+            ticker = YFINANCE_FUTURES_MAP[symbol.upper()]
+            h1 = yf.Ticker(ticker).history(period="5d", interval="1h")
+            h4 = yf.Ticker(ticker).history(period="20d", interval="4h")
+            d1 = yf.Ticker(ticker).history(period="60d", interval="1d")
+            if h1.empty or h4.empty or d1.empty:
+                return result
+            h1_trend = "bullish" if h1["Close"].iloc[-1] > h1["Close"].iloc[0] else "bearish"
+            h4_trend = "bullish" if h4["Close"].iloc[-1] > h4["Close"].iloc[0] else "bearish"
+            d1_trend = "bullish" if d1["Close"].iloc[-1] > d1["Close"].iloc[0] else "bearish"
+        else:
+            if not TWELVE_DATA_API_KEY:
+                return result
+            td_symbol = normalize_symbol(symbol)
+            if not td_symbol:
+                return result
+            def fetch_td(interval, outputsize=30):
+                try:
+                    resp = requests.get(f"{BASE_URL}/time_series",
+                        params={"symbol": td_symbol, "interval": interval,
+                                "outputsize": outputsize, "apikey": TWELVE_DATA_API_KEY}, timeout=8)
+                    data = resp.json()
+                    if "values" not in data:
+                        return []
+                    return [{"close": float(c["close"])} for c in data["values"]]
+                except Exception:
+                    return []
+            h1_raw = fetch_td("1h")
+            h4_raw = fetch_td("4h")
+            d1_raw = fetch_td("1day", 60)
+            if not h1_raw or not h4_raw or not d1_raw:
+                return result
+            h1_trend = "bullish" if h1_raw[0]["close"] > h1_raw[-1]["close"] else "bearish"
+            h4_trend = "bullish" if h4_raw[0]["close"] > h4_raw[-1]["close"] else "bearish"
+            d1_trend = "bullish" if d1_raw[0]["close"] > d1_raw[-1]["close"] else "bearish"
+
+        result["h1_trend"] = h1_trend
+        result["h4_trend"] = h4_trend
+        result["d1_trend"] = d1_trend
+        all_aligned = h1_trend == h4_trend == d1_trend
+        result["aligned"] = all_aligned
+        result["bias"] = h1_trend if all_aligned else ("mixed" if h1_trend != h4_trend else h4_trend)
+    except Exception as e:
+        logger.warning(f"HTF bias error for {symbol}: {e}")
+    return result
+
+
 def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None) -> dict:
     """
     Score the overall setup quality. Returns score 0-10 and recommendation.
@@ -303,12 +355,6 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         score += 1
         factors.append("Change of character detected")
 
-    if score_data.get("htf_bias"):
-        htf = score_data["htf_bias"]
-        bias_emoji = "📈" if htf.get("bias") == "bullish" else "📉" if htf.get("bias") == "bearish" else "↔️"
-        lines.append(f"")
-        lines.append(f"{bias_emoji} *HTF Bias:* 1H={htf.get("h1_trend","?")} | 4H={htf.get("h4_trend","?")}")
-
     if ob:
         score += 2
         ob_type = "Bullish" if ob["type"] == "bullish_ob" else "Bearish"
@@ -327,20 +373,30 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
     if htf_bias:
         h1 = htf_bias.get("h1_trend", "unclear")
         h4 = htf_bias.get("h4_trend", "unclear")
+        d1 = htf_bias.get("d1_trend", "unclear")
         bias = htf_bias.get("bias", "unclear")
         aligned = htf_bias.get("aligned", False)
-        if aligned and bias == trend:
+        if aligned and bias == trend and d1 == trend:
+            score += 4
+            factors.append(f"STRONG HTF alignment — Daily, 4H, 1H all {bias}")
+        elif aligned and bias == trend:
             score += 3
             factors.append(f"HTF aligned — 1H and 4H both {bias}")
+        elif d1 == trend and h4 == trend:
+            score += 3
+            factors.append(f"Daily and 4H both {trend}")
         elif h4 == trend:
             score += 2
             factors.append(f"4H bias {h4} aligns with setup")
+        elif d1 == trend:
+            score += 2
+            factors.append(f"Daily bias {d1} aligns with setup")
         elif h1 == trend:
             score += 1
             factors.append(f"1H bias {h1} aligns with setup")
         elif bias == "mixed":
             score -= 1
-            factors.append("HTF mixed — 1H and 4H disagreeing")
+            factors.append("HTF mixed — timeframes disagreeing")
 
     # Direction alignment
     ob_aligned = ob and (
@@ -418,8 +474,23 @@ async def scan_symbol(symbol: str) -> dict | None:
         if not candles or len(candles) < 10:
             return None
 
-        price_data = get_live_price(symbol)
-        atr_data = get_atr(symbol)
+        # Use yFinance for futures price/ATR, Twelve Data for forex
+        if symbol.upper() in YFINANCE_FUTURES_MAP:
+            candles_1h = get_candles_yfinance(symbol, outputsize=20)
+            if candles_1h and len(candles_1h) >= 5:
+                closes = [c["close"] for c in candles_1h[:14]]
+                avg_close = sum(closes) / len(closes)
+                price_data = {"price": candles_1h[0]["close"]}
+                # Simple ATR estimate from recent candles
+                ranges = [c["high"] - c["low"] for c in candles_1h[:14]]
+                atr_val = sum(ranges) / len(ranges)
+                atr_data = {"atr": atr_val, "is_low_volatility": atr_val < 1.0}
+            else:
+                price_data = None
+                atr_data = None
+        else:
+            price_data = get_live_price(symbol)
+            atr_data = get_atr(symbol)
 
         if atr_data and atr_data.get("is_low_volatility"):
             logger.info(f"[scanner] {symbol} low volatility — skipping")
