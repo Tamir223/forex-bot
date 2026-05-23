@@ -36,6 +36,7 @@ class User:
     stripe_customer_id: Optional[str] = None
     stripe_subscription_id: Optional[str] = None
     firm_code: str = "ftmo"
+    watchlist: str = "XAUUSD,EURUSD,GBPUSD,NQ,ES"
 
 
 @dataclass
