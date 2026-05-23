@@ -83,7 +83,6 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         account_size = float(account_state.get("account_size", 10000))
         from futures_instruments import is_futures
         max_contracts = account_state.get("max_contracts") if is_futures(pair or "") else None
-        logger.info(f"[lot trace] pair={pair} sl_pts={sl_pts} risk_pct={risk_pct}")
         market_ctx["lot_size_suggestion"] = (
             _calculate_lot_size(float(risk_pct), sl_pts, pair, account_size, max_contracts)
             if risk_pct and sl_pts else None
