@@ -83,6 +83,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         account_size = float(account_state.get("account_size", 10000))
         from futures_instruments import is_futures
         max_contracts = account_state.get("max_contracts") if is_futures(pair or "") else None
+        logger.info(f"[lot trace] pair={pair} sl_pts={sl_pts} risk_pct={risk_pct}")
         market_ctx["lot_size_suggestion"] = (
             _calculate_lot_size(float(risk_pct), sl_pts, pair, account_size, max_contracts)
             if risk_pct and sl_pts else None
@@ -125,7 +126,14 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         result.setdefault("invalidation_level", None)
         result.setdefault("is_futures", market_ctx.get("is_futures", False))
         # Always override Claude's lot size with our own calculation — Claude gets it wrong for futures/forex
-        result["lot_size_suggestion"] = market_ctx.get("lot_size_suggestion")
+        # Recalculate lot size using Claude's stop_loss if quick parse missed it
+        if not market_ctx.get('lot_size_suggestion') and result.get('stop_loss') and result.get('entry_zone'):
+            sl_pts_final = _compute_sl_pts(str(result['entry_zone']), str(result['stop_loss']), pair)
+            risk_pct2 = account_state.get('risk_percent') or 1.0
+            account_size2 = float(account_state.get('account_size', 10000))
+            max_contracts2 = account_state.get('max_contracts')
+            market_ctx['lot_size_suggestion'] = _calculate_lot_size(float(risk_pct2), sl_pts_final, pair, account_size2, max_contracts2) if sl_pts_final else None
+        result['lot_size_suggestion'] = market_ctx.get('lot_size_suggestion')
         if "win_rate_context" not in result:
             if market_ctx.get("hist_win_rate") is not None:
                 result["win_rate_context"] = (
@@ -362,8 +370,9 @@ def _quick_parse(signal_text: str) -> dict:
     ]
 
     # Detect symbol
+    import re
     for symbol in FUTURES_PRIORITY:
-        if symbol in text_upper:
+        if re.search(r"\b" + symbol + r"\b", text_upper):
             result["pair"] = symbol
             result["is_futures"] = True
             break
