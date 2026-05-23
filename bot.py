@@ -295,6 +295,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if trade_id:
                 from database import update_trade_result
                 update_trade_result(trade_id, "WIN")
+            # Auto-update challenge tracker
+            from database import load_challenge_state, save_challenge_state
+            from prop_firm_profiles import get_profile as gp
+            from drawdown_tracker import state_from_json, state_to_json, record_trade
+            _state_json = load_challenge_state(user.id)
+            if _state_json:
+                _state = state_from_json(_state_json)
+                _profile = gp(_state.firm_code)
+                pnl_est = analysis.get("risk_percent", 0.35) / 100 * (_profile.account_size if _profile else 10000) * 2
+                _state, _warns = record_trade(_state, _profile, pnl_est)
+                save_challenge_state(user.id, _state.firm_code, state_to_json(_state))
+                if _warns:
+                    for w in _warns:
+                        await send(context, chat_id, w)
             await send(context, chat_id, trade_logged_win())
         elif reply == "LOSS":
             log_trade_loss(user.id, risk)
@@ -302,7 +316,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if trade_id:
                 from database import update_trade_result
                 update_trade_result(trade_id, "LOSS")
+            # Auto-update challenge tracker
+            from database import load_challenge_state, save_challenge_state
+            from prop_firm_profiles import get_profile as gp
+            from drawdown_tracker import state_from_json, state_to_json, record_trade
+            _state_json = load_challenge_state(user.id)
+            if _state_json:
+                _state = state_from_json(_state_json)
+                _profile = gp(_state.firm_code)
+                pnl_est = -(analysis.get("risk_percent", 0.35) / 100 * (_profile.account_size if _profile else 10000))
+                _state, _warns = record_trade(_state, _profile, pnl_est)
+                save_challenge_state(user.id, _state.firm_code, state_to_json(_state))
+                if _warns:
+                    for w in _warns:
+                        await send(context, chat_id, w)
             await send(context, chat_id, trade_logged_loss())
+        elif reply == "BREAKEVEN":
+            if trade_id:
+                from database import update_trade_result
+                update_trade_result(trade_id, "BREAKEVEN")
+            await send(context, chat_id, "➖ Breakeven logged.")
         return
     if not is_signal_message(text):
         return

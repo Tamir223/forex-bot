@@ -41,9 +41,39 @@ SCANNER_END_HOUR = 21    # 9 PM UTC = NY close
 def is_scan_window() -> bool:
     hour = datetime.now(timezone.utc).hour
     day = datetime.now(timezone.utc).weekday()
-    if day >= 5:  # Saturday/Sunday
+    if day >= 5:
         return False
     return SCANNER_START_HOUR <= hour <= SCANNER_END_HOUR
+
+
+def get_session_interval() -> int:
+    """
+    Return scan interval in seconds based on current session.
+    London open (7-10 UTC) and NY open (13-16 UTC) = every 5 min.
+    All other hours = every 15 min.
+    """
+    hour = datetime.now(timezone.utc).hour
+    london_open = 7 <= hour <= 10
+    ny_open = 13 <= hour <= 16
+    if london_open or ny_open:
+        return 300   # 5 minutes
+    return 900       # 15 minutes
+
+
+def get_current_session() -> str:
+    """Return the name of the current trading session."""
+    hour = datetime.now(timezone.utc).hour
+    if 7 <= hour <= 10:
+        return "London Open"
+    elif 10 <= hour <= 12:
+        return "London"
+    elif 13 <= hour <= 16:
+        return "NY Open"
+    elif 16 <= hour <= 21:
+        return "NY"
+    elif 0 <= hour <= 3:
+        return "Asian"
+    return "Off-Session"
 
 
 def get_candles_yfinance(symbol: str, outputsize: int = 50) -> list | None:
@@ -252,7 +282,7 @@ def detect_fvg(candles: list) -> dict | None:
     return None
 
 
-def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict) -> dict:
+def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None) -> dict:
     """
     Score the overall setup quality. Returns score 0-10 and recommendation.
     """
@@ -273,6 +303,12 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict) -> dict:
         score += 1
         factors.append("Change of character detected")
 
+    if score_data.get("htf_bias"):
+        htf = score_data["htf_bias"]
+        bias_emoji = "📈" if htf.get("bias") == "bullish" else "📉" if htf.get("bias") == "bearish" else "↔️"
+        lines.append(f"")
+        lines.append(f"{bias_emoji} *HTF Bias:* 1H={htf.get("h1_trend","?")} | 4H={htf.get("h4_trend","?")}")
+
     if ob:
         score += 2
         ob_type = "Bullish" if ob["type"] == "bullish_ob" else "Bearish"
@@ -286,6 +322,25 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict) -> dict:
     if atr_data and not atr_data.get("is_low_volatility"):
         score += 1
         factors.append("Healthy volatility")
+
+    # HTF confluence — biggest edge multiplier
+    if htf_bias:
+        h1 = htf_bias.get("h1_trend", "unclear")
+        h4 = htf_bias.get("h4_trend", "unclear")
+        bias = htf_bias.get("bias", "unclear")
+        aligned = htf_bias.get("aligned", False)
+        if aligned and bias == trend:
+            score += 3
+            factors.append(f"HTF aligned — 1H and 4H both {bias}")
+        elif h4 == trend:
+            score += 2
+            factors.append(f"4H bias {h4} aligns with setup")
+        elif h1 == trend:
+            score += 1
+            factors.append(f"1H bias {h1} aligns with setup")
+        elif bias == "mixed":
+            score -= 1
+            factors.append("HTF mixed — 1H and 4H disagreeing")
 
     # Direction alignment
     ob_aligned = ob and (
@@ -311,7 +366,7 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict) -> dict:
     }
 
 
-def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_data: dict, price_data: dict) -> str:
+def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_data: dict, price_data: dict, htf_bias: dict = None) -> str:
     """Format a scan alert for Telegram."""
     trend = structure.get("trend", "unclear")
     direction = score_data.get("direction", "")
@@ -347,7 +402,7 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
 
     lines += [
         "",
-        f"⏱ Scanned: {datetime.now(timezone.utc).strftime('%H:%M UTC')}",
+        f"⏱ Scanned: {datetime.now(timezone.utc).strftime('%H:%M UTC')} — {get_current_session()} Session",
         f"📡 Send this signal to the bot to get a full grade and execute report.",
     ]
 
@@ -379,14 +434,15 @@ async def scan_symbol(symbol: str) -> dict | None:
         ob = detect_order_block(candles, trend)
         fvg = detect_fvg(candles)
 
-        score_data = score_setup(structure, ob, fvg, atr_data)
+        htf_bias = get_htf_bias(symbol)
+        score_data = score_setup(structure, ob, fvg, atr_data, htf_bias)
 
         # Only alert on moderate or strong setups
         if score_data["score"] < 5:
             logger.info(f"[scanner] {symbol} score {score_data['score']}/10 — below threshold")
             return None
 
-        alert_text = format_scan_alert(symbol, structure, ob, fvg, score_data, price_data)
+        alert_text = format_scan_alert(symbol, structure, ob, fvg, score_data, price_data, htf_bias)
 
         return {
             "symbol": symbol,
@@ -448,7 +504,8 @@ async def start_scanner(bot, get_active_users_fn):
     logger.info("[scanner] Scanner started")
     while True:
         try:
-            await asyncio.sleep(SCAN_INTERVAL)
+            interval = get_session_interval()
+            await asyncio.sleep(interval)
 
             if not is_scan_window():
                 continue
