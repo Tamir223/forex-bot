@@ -365,11 +365,12 @@ async def scan_symbol(symbol: str) -> dict | None:
         return None
 
 
-async def run_scan(watchlist: list, bot, user_chat_ids: list):
+async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = False):
     """
     Scan all symbols in watchlist and send alerts to users.
+    force=True bypasses the scan window check (for manual /scan command).
     """
-    if not is_scan_window():
+    if not force and not is_scan_window():
         logger.info("[scanner] Outside scan window — skipping")
         return
 

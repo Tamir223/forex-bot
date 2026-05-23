@@ -200,4 +200,4 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     watchlist_str = get_user_watchlist(user.id)
     watchlist = [s.strip() for s in watchlist_str.split(",")] if watchlist_str else DEFAULT_WATCHLIST
     bot = context.bot
-    await run_scan(watchlist, bot, [str(update.effective_user.id)])
+    await run_scan(watchlist, bot, [str(update.effective_user.id)], force=True)
