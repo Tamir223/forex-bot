@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.twelvedata.com"
 
 # Default watchlist — users can customize with /watch command
-DEFAULT_WATCHLIST = ["XAUUSD", "EURUSD", "GBPUSD", "NQ", "ES"]
+DEFAULT_WATCHLIST = ["XAUUSD", "EURUSD", "NQ"]  # Free tier: max 3 symbols
 
 # Scan interval in seconds
 SCAN_INTERVAL = 900  # 15 minutes
@@ -392,8 +392,8 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                     except Exception as e:
                         logger.error(f"[scanner] Failed to send alert to {chat_id}: {e}")
 
-            # Rate limit — Twelve Data free tier: 8 req/min
-            await asyncio.sleep(8)
+            # Rate limit — Twelve Data free tier: 8 req/min, 3 calls per symbol
+            await asyncio.sleep(20)
 
         except Exception as e:
             logger.error(f"[scanner] Symbol scan failed for {symbol}: {e}")
