@@ -521,6 +521,15 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     factor_str = "; ".join(factors[:3]) if factors else "confluence confirmed"
     trend_dir = "Bullish" if direction == "BUY" else "Bearish"
 
+    # Round prices cleanly
+    def rp(v):
+        return round(float(v), 2) if spec else round(float(v), 5)
+    entry = rp(entry)
+    sl = rp(sl)
+    tp1 = rp(tp1)
+    tp2 = rp(tp2)
+    tp3 = rp(tp3)
+
     signal = (
         f"{symbol} {direction} SIGNAL\n"
         f"Provider: TNL Scanner\n"

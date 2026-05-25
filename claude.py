@@ -402,7 +402,7 @@ def _quick_parse(signal_text: str) -> dict:
     for kw, name in [
         ("DON PIPS", "DON PIPS VIP"), ("ICT", "ICT"),
         ("FTMO", "FTMO Signals"), ("GOLD SCALPERS", "Gold Scalpers"),
-        ("APEX", "Apex Signals"), ("TOPSTEP", "Topstep Signals"),
+        ("APEX", "Apex Signals"), ("TOPSTEP", "Topstep Signals"), ("TNL", "TNL Scanner"),
     ]:
         if kw in text_upper:
             result["provider"] = name
