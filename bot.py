@@ -452,6 +452,174 @@ async def set_bot_commands(app):
     await app.bot.set_my_commands(commands)
 
 
+async def callback_trade_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle YES/NO inline buttons on grade reports."""
+    query = update.callback_query
+    await query.answer()
+    chat_id = str(query.from_user.id)
+    user = get_user_by_chat_id(chat_id)
+    if not user:
+        return
+
+    action = query.data  # trade_yes or trade_no
+    analysis = last_analysis.get(chat_id, {})
+    risk = analysis.get("risk_percent", 0.35)
+    provider = analysis.get("signal_source", "TNL Scanner")
+    trade_id = last_trade_id.get(chat_id)
+
+    await query.edit_message_reply_markup(reply_markup=None)
+
+    if action == "trade_yes":
+        if trade_id:
+            from database import update_trade_result
+            update_trade_result(trade_id, "PENDING")
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=trade_executed() + "\n\nReply *WIN* or *LOSS* when you close the trade.",
+            parse_mode="Markdown"
+        )
+        if is_friday_close_warning():
+            firm_code = get_user_firm(user.id)
+            profile = get_profile(firm_code) if firm_code else None
+            if profile and not profile.allow_weekend:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⚠️ FRIDAY WARNING: {profile.name} does not allow weekend holding. Close before market close tonight."
+                )
+    else:
+        if trade_id:
+            from database import update_trade_result
+            update_trade_result(trade_id, "SKIPPED")
+        await context.bot.send_message(chat_id=chat_id, text=trade_skipped())
+
+
+async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle one-tap signal grading from scanner alerts."""
+    query = update.callback_query
+    chat_id = str(query.from_user.id)
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
+    user = get_user_by_chat_id(chat_id)
+    if not user or not user.is_active:
+        await context.bot.send_message(chat_id=chat_id, text="❌ No active subscription.")
+        return
+
+    # Get signal key from callback data
+    signal_key = query.data.replace("autograde_", "")
+    from scanner import get_cached_signal
+    signal_text = get_cached_signal(signal_key)
+
+    if not signal_text:
+        await query.edit_message_reply_markup(reply_markup=None)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚠️ Signal expired. Send /scan for fresh setups."
+        )
+        return
+
+    # Remove the Grade button so it can only be tapped once
+    await query.edit_message_reply_markup(reply_markup=None)
+
+    # Show grading message
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="🔍 Grading signal..."
+    )
+
+    # Run through full analysis pipeline
+    try:
+        from prop_firm_profiles import get_profile
+        firm_code = get_user_firm(user.id)
+        profile = get_profile(firm_code)
+        state = get_state(user.id)
+
+        state_dict = {
+            "trades_today": state.trades_today,
+            "open_trades": state.open_trades,
+            "live_exposure": state.live_exposure,
+            "session_losses": state.session_losses,
+            "weekly_losses": state.weekly_losses,
+            "daily_pnl": state.daily_pnl,
+            "account_size": profile.account_size if profile else 10000.0,
+            "risk_percent": 1.0,
+            "max_contracts": profile.max_contracts if profile else None,
+        }
+
+        analysis = analyze_signal(signal_text, state_dict)
+
+        if not analysis:
+            await context.bot.send_message(chat_id=chat_id, text="❌ Could not grade signal. Try again.")
+            return
+
+        # Apply firm-aware risk cap
+        if profile:
+            max_daily_pct = profile.max_daily_loss_pct * 100
+            signal_risk = analysis.get("risk_percent", 0) or 0
+            if max_daily_pct > 0 and signal_risk > (max_daily_pct / 5):
+                analysis["risk_percent"] = round(max_daily_pct / 5, 2)
+            priority_header = f"⚡ ELITE PRIORITY ANALYSIS\n🏆 {profile.name} MODE ACTIVE — Risk capped at {analysis.get('risk_percent', 1.0)}%\n"
+        else:
+            priority_header = "⚡ ELITE PRIORITY ANALYSIS\n"
+
+        # Check fast gates
+        passed, gate_reason = run_fast_gates(state.__dict__ if hasattr(state, "__dict__") else state)
+        if not passed:
+            await context.bot.send_message(chat_id=chat_id, text=fast_gate_blocked(gate_reason))
+            return
+
+        # Build and send report
+        from report import execute_report, blocked_report
+        decision = analysis.get("decision", "").upper()
+
+        if decision == "BLOCK" or analysis.get("grade", "") in ["C", "D", "F"]:
+            report_text = priority_header + blocked_report(analysis, "Signal blocked")
+            await context.bot.send_message(chat_id=chat_id, text=report_text, parse_mode="Markdown")
+        else:
+            report_text = priority_header + execute_report(analysis)
+            # Store analysis for WIN/LOSS tracking
+            last_analysis[chat_id] = analysis
+
+            # Log trade to DB
+            from database import Trade
+            trade_id = log_trade(Trade(
+                user_id=user.id,
+                pair=analysis.get("pair", ""),
+                direction=analysis.get("direction", ""),
+                grade=analysis.get("grade", ""),
+                confidence=analysis.get("confidence_score", 0),
+                signal_source=analysis.get("signal_source", "TNL Scanner"),
+                risk_percent=analysis.get("risk_percent", 0),
+                entry_zone=str(analysis.get("entry_zone", "")),
+                stop_loss=str(analysis.get("stop_loss", "")),
+            ))
+            if trade_id:
+                last_trade_id[chat_id] = trade_id
+
+            # Add YES/NO buttons
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            execute_keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ YES — Execute", callback_data="trade_yes"),
+                InlineKeyboardButton("❌ NO — Skip", callback_data="trade_no"),
+            ]])
+
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=report_text,
+                parse_mode="Markdown",
+                reply_markup=execute_keyboard
+            )
+
+            # Update trade state
+            log_trade_opened(user.id, analysis.get("risk_percent", 0))
+
+    except Exception as e:
+        logger.error(f"callback_autograde error: {e}")
+        await context.bot.send_message(chat_id=chat_id, text="❌ Error grading signal. Try again.")
+
+
 async def start_bot():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.post_init = set_bot_commands
@@ -471,6 +639,8 @@ async def start_bot():
     app.add_handler(CommandHandler("watch", cmd_watch))
     app.add_handler(CommandHandler("scan", cmd_scan))
     app.add_handler(CallbackQueryHandler(callback_reset, pattern="^reset_"))
+    app.add_handler(CallbackQueryHandler(callback_autograde, pattern="^autograde_"))
+    app.add_handler(CallbackQueryHandler(callback_trade_button, pattern="^trade_(yes|no)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("TNL Trader multi-user bot started")
     asyncio.create_task(process_signal_queue())

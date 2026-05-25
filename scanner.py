@@ -25,6 +25,28 @@ YFINANCE_FUTURES_MAP = {
 
 logger = logging.getLogger(__name__)
 
+# Cache for auto-built signals — keyed by short ID
+# Allows one-tap grading without user typing anything
+import uuid as _uuid
+AUTO_SIGNAL_CACHE = {}
+MAX_CACHE_SIZE = 200
+
+
+def _cache_signal(signal_text: str) -> str:
+    """Store a signal and return its short cache key."""
+    key = _uuid.uuid4().hex[:12]
+    AUTO_SIGNAL_CACHE[key] = signal_text
+    # Keep cache bounded
+    if len(AUTO_SIGNAL_CACHE) > MAX_CACHE_SIZE:
+        oldest = next(iter(AUTO_SIGNAL_CACHE))
+        del AUTO_SIGNAL_CACHE[oldest]
+    return key
+
+
+def get_cached_signal(key: str) -> str | None:
+    """Retrieve a cached signal by key."""
+    return AUTO_SIGNAL_CACHE.get(key)
+
 BASE_URL = "https://api.twelvedata.com"
 
 # Default watchlist — users can customize with /watch command
@@ -422,6 +444,99 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
     }
 
 
+def build_auto_signal(symbol: str, direction: str, price: float,
+                      ob: dict, fvg: dict, structure: dict,
+                      score_data: dict, htf_bias: dict) -> str:
+    """
+    Auto-build a complete formatted signal from scanner data.
+    This is what gets sent to the grader when user taps Grade button.
+    """
+    trend = structure.get("trend", "bullish")
+    score = score_data.get("score", 0)
+    factors = score_data.get("factors", [])
+
+    # Calculate entry, stop loss, and targets
+    from futures_instruments import is_futures, get_spec
+    spec = get_spec(symbol) if is_futures(symbol) else None
+
+    if direction == "BUY":
+        # Entry: OB mid if available, else FVG top, else current price
+        if ob and ob["type"] == "bullish_ob":
+            entry = ob["mid"]
+            sl = round(ob["low"] - (ob["high"] - ob["low"]) * 0.1, 5)
+        elif fvg and fvg["type"] == "bullish_fvg":
+            entry = fvg["top"]
+            sl = round(fvg["bottom"] - (fvg["top"] - fvg["bottom"]) * 0.5, 5)
+        else:
+            entry = price
+            sl = round(price * 0.998, 5) if not spec else round(price - spec["typical_sl_pts"], 2)
+
+        sl_dist = abs(entry - sl)
+        if not spec:
+            sl_dist = max(sl_dist, 0.0015)  # min 15 pips for forex
+            sl = round(entry - sl_dist, 5)
+        tp1 = round(entry + sl_dist * 1.5, 5)
+        tp2 = round(entry + sl_dist * 2.5, 5)
+        tp3 = round(entry + sl_dist * 4.0, 5)
+
+    else:  # SELL
+        if ob and ob["type"] == "bearish_ob":
+            entry = ob["mid"]
+            sl = round(ob["high"] + (ob["high"] - ob["low"]) * 0.1, 5)
+        elif fvg and fvg["type"] == "bearish_fvg":
+            entry = fvg["bottom"]
+            sl = round(fvg["top"] + (fvg["top"] - fvg["bottom"]) * 0.5, 5)
+        else:
+            entry = price
+            sl = round(price * 1.002, 5) if not spec else round(price + spec["typical_sl_pts"], 2)
+
+        sl_dist = abs(sl - entry)
+        if not spec:
+            sl_dist = max(sl_dist, 0.0015)  # min 15 pips for forex
+            sl = round(entry + sl_dist, 5)
+        tp1 = round(entry - sl_dist * 1.5, 5)
+        tp2 = round(entry - sl_dist * 2.5, 5)
+        tp3 = round(entry - sl_dist * 4.0, 5)
+
+    # Build setup description
+    setup_parts = []
+    if ob:
+        setup_parts.append("Order Block Retest")
+    if fvg:
+        setup_parts.append("Fair Value Gap")
+    if structure.get("bos"):
+        setup_parts.append("Break of Structure")
+    setup = " + ".join(setup_parts) if setup_parts else "Structure Setup"
+
+    # HTF confirmation text
+    htf_parts = []
+    if htf_bias:
+        d1 = htf_bias.get("d1_trend", "")
+        h4 = htf_bias.get("h4_trend", "")
+        h1 = htf_bias.get("h1_trend", "")
+        if d1 and h4 and h1:
+            htf_parts.append(f"Daily {d1}, 4H {h4}, 1H {h1}")
+    htf_str = ", ".join(htf_parts) if htf_parts else "HTF aligned"
+
+    factor_str = "; ".join(factors[:3]) if factors else "confluence confirmed"
+    trend_dir = "Bullish" if direction == "BUY" else "Bearish"
+
+    signal = (
+        f"{symbol} {direction} SIGNAL\n"
+        f"Provider: TNL Scanner\n"
+        f"Timeframe: 15M\n"
+        f"Setup: {setup}\n"
+        f"Entry Zone: {entry}\n"
+        f"Stop Loss: {sl}\n"
+        f"TP1: {tp1}\n"
+        f"TP2: {tp2}\n"
+        f"TP3: {tp3}\n"
+        f"Trend: {trend_dir}\n"
+        f"Confirmation: Yes — {score}/10 score, {htf_str}, {factor_str}"
+    )
+    return signal
+
+
 def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_data: dict, price_data: dict, htf_bias: dict = None) -> str:
     """Format a scan alert for Telegram."""
     trend = structure.get("trend", "unclear")
@@ -515,12 +630,23 @@ async def scan_symbol(symbol: str) -> dict | None:
 
         alert_text = format_scan_alert(symbol, structure, ob, fvg, score_data, price_data, htf_bias)
 
+        # Auto-build and cache the formatted signal for one-tap grading
+        current_price = price_data.get("price", 0) if price_data else 0
+        direction = score_data.get("direction", "BUY")
+        auto_signal = build_auto_signal(
+            symbol, direction, float(current_price),
+            ob, fvg, structure, score_data, htf_bias or {}
+        )
+        signal_key = _cache_signal(auto_signal)
+
         return {
             "symbol": symbol,
             "score": score_data["score"],
             "recommendation": score_data["recommendation"],
             "direction": score_data["direction"],
             "alert_text": alert_text,
+            "signal_key": signal_key,
+            "auto_signal": auto_signal,
         }
 
     except Exception as e:
@@ -544,12 +670,22 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
         try:
             result = await scan_symbol(symbol)
             if result:
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                signal_key = result.get("signal_key", "")
+                score = result.get("score", 0)
+                direction = result.get("direction", "")
+                symbol = result.get("symbol", "")
+                grade_label = f"⚡ Grade This Signal ({symbol} {direction})"
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton(grade_label, callback_data=f"autograde_{signal_key}")
+                ]])
                 for chat_id in user_chat_ids:
                     try:
                         await bot.send_message(
                             chat_id=chat_id,
                             text=result["alert_text"],
-                            parse_mode="Markdown"
+                            parse_mode="Markdown",
+                            reply_markup=keyboard
                         )
                         alerts_sent += 1
                     except Exception as e:
