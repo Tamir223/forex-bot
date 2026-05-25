@@ -473,8 +473,11 @@ def build_auto_signal(symbol: str, direction: str, price: float,
 
         sl_dist = abs(entry - sl)
         if not spec:
-            sl_dist = max(sl_dist, 0.0015)  # min 15 pips for forex
-            sl = round(entry - sl_dist, 5)
+            if symbol.upper() in ("XAUUSD", "US30", "NAS100"):
+                sl_dist = max(sl_dist, 8.0)  # min 8 points for gold
+            else:
+                sl_dist = max(sl_dist, 0.0015)  # min 15 pips for forex
+            sl = round(entry - sl_dist, 2) if symbol.upper() in ("XAUUSD",) else round(entry - sl_dist, 5)
         tp1 = round(entry + sl_dist * 1.5, 5)
         tp2 = round(entry + sl_dist * 2.5, 5)
         tp3 = round(entry + sl_dist * 4.0, 5)
@@ -492,8 +495,11 @@ def build_auto_signal(symbol: str, direction: str, price: float,
 
         sl_dist = abs(sl - entry)
         if not spec:
-            sl_dist = max(sl_dist, 0.0015)  # min 15 pips for forex
-            sl = round(entry + sl_dist, 5)
+            if symbol.upper() in ("XAUUSD", "US30", "NAS100"):
+                sl_dist = max(sl_dist, 8.0)  # min 8 points for gold
+            else:
+                sl_dist = max(sl_dist, 0.0015)  # min 15 pips for forex
+            sl = round(entry + sl_dist, 2) if symbol.upper() in ("XAUUSD",) else round(entry + sl_dist, 5)
         tp1 = round(entry - sl_dist * 1.5, 5)
         tp2 = round(entry - sl_dist * 2.5, 5)
         tp3 = round(entry - sl_dist * 4.0, 5)
@@ -523,7 +529,12 @@ def build_auto_signal(symbol: str, direction: str, price: float,
 
     # Round prices cleanly
     def rp(v):
-        return round(float(v), 2) if spec else round(float(v), 5)
+        if spec:
+            return round(float(v), 2)  # futures
+        elif symbol.upper() in ("XAUUSD", "US30", "NAS100"):
+            return round(float(v), 2)  # gold and indices use 2dp
+        else:
+            return round(float(v), 5)  # forex pairs use 5dp
     entry = rp(entry)
     sl = rp(sl)
     tp1 = rp(tp1)

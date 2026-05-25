@@ -124,6 +124,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         result.setdefault("correlation_warning", market_ctx.get("correlation_warning", False))
         result.setdefault("invalidation_level", None)
         result.setdefault("is_futures", market_ctx.get("is_futures", False))
+        result["signal_source"] = provider or result.get("signal_source") or "UNKNOWN"
         # Always override Claude's lot size with our own calculation — Claude gets it wrong for futures/forex
         # Recalculate lot size using Claude's stop_loss if quick parse missed it
         if not market_ctx.get('lot_size_suggestion') and result.get('stop_loss') and result.get('entry_zone'):
