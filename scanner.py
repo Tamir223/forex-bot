@@ -666,7 +666,10 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
     logger.info(f"[scanner] Starting scan of {len(watchlist)} symbols")
     alerts_sent = 0
 
-    for symbol in watchlist:
+    # Scan futures first (no rate limit), then forex
+    from futures_instruments import is_futures
+    sorted_watchlist = sorted(watchlist, key=lambda s: 0 if is_futures(s) else 1)
+    for symbol in sorted_watchlist:
         try:
             result = await scan_symbol(symbol)
             if result:
