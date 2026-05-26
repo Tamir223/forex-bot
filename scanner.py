@@ -674,6 +674,107 @@ async def scan_symbol(symbol: str) -> dict | None:
         return None
 
 
+async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
+    """
+    Automatically grade a high-score signal and send full report.
+    Called when scanner score is 9 or 10 — no user tap needed.
+    """
+    try:
+        signal_text = result.get("auto_signal", "")
+        if not signal_text:
+            return False
+
+        from claude import analyze_signal
+        from report import execute_report, blocked_report
+        from database import get_user_firm, load_challenge_state
+        from prop_firm_profiles import get_profile
+        from drawdown_tracker import state_from_json, check_signal_allowed
+        from database import get_state, log_trade_opened, log_trade
+        from database import Trade
+
+        firm_code = get_user_firm(user.id)
+        profile = get_profile(firm_code)
+        state = get_state(user.id)
+
+        state_dict = {
+            "trades_today": state.trades_today,
+            "open_trades": state.open_trades,
+            "live_exposure": state.live_exposure,
+            "session_losses": state.session_losses,
+            "weekly_losses": state.weekly_losses,
+            "daily_pnl": state.daily_pnl,
+            "account_size": profile.account_size if profile else 10000.0,
+            "risk_percent": 1.0,
+            "max_contracts": profile.max_contracts if profile else None,
+        }
+
+        analysis = analyze_signal(signal_text, state_dict)
+        if not analysis:
+            return False
+
+        # Apply firm risk cap
+        if profile:
+            max_daily_pct = profile.max_daily_loss_pct * 100
+            signal_risk = analysis.get("risk_percent", 0) or 0
+            if max_daily_pct > 0 and signal_risk > (max_daily_pct / 5):
+                analysis["risk_percent"] = round(max_daily_pct / 5, 2)
+            priority_header = f"⚡ AUTO-GRADED — {profile.name}\n🏆 Score {result['score']}/10 — {result['recommendation']}\n"
+        else:
+            priority_header = f"⚡ AUTO-GRADED — Score {result['score']}/10\n"
+
+        decision = analysis.get("decision", "").upper()
+        grade = analysis.get("grade", "")
+
+        if decision == "BLOCK" or grade in ["C", "D", "F"]:
+            # Send block message silently — no need to alert for blocked auto-grades
+            logger.info(f"[auto-grade] {result['symbol']} blocked — {grade}")
+            return False
+
+        report_text = priority_header + execute_report(analysis)
+
+        # Store for WIN/LOSS tracking
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        execute_keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ YES — Execute", callback_data="trade_yes"),
+            InlineKeyboardButton("❌ NO — Skip", callback_data="trade_no"),
+        ]])
+
+        await bot.send_message(
+            chat_id=chat_id,
+            text=report_text,
+            parse_mode="Markdown",
+            reply_markup=execute_keyboard
+        )
+
+        # Log the trade
+        trade_id = log_trade(Trade(
+            user_id=user.id,
+            pair=analysis.get("pair", ""),
+            direction=analysis.get("direction", ""),
+            grade=analysis.get("grade", ""),
+            confidence=analysis.get("confidence_score", 0),
+            signal_source="TNL Scanner (Auto)",
+            risk_percent=analysis.get("risk_percent", 0),
+            entry_zone=str(analysis.get("entry_zone", "")),
+            stop_loss=str(analysis.get("stop_loss", "")),
+        ))
+
+        # Store analysis for WIN/LOSS reply
+        # Use a simple module-level dict accessible from bot.py
+        from bot import last_analysis, last_trade_id
+        last_analysis[chat_id] = analysis
+        if trade_id:
+            last_trade_id[chat_id] = trade_id
+
+        log_trade_opened(user.id, analysis.get("risk_percent", 0))
+        logger.info(f"[auto-grade] {result['symbol']} {result['direction']} — {grade} {analysis.get('confidence_score')}/10 — sent to {chat_id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"[auto-grade] Error: {e}")
+        return False
+
+
 async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = False):
     """
     Scan all symbols in watchlist and send alerts to users.
@@ -698,18 +799,36 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                 score = result.get("score", 0)
                 direction = result.get("direction", "")
                 symbol = result.get("symbol", "")
-                grade_label = f"⚡ Grade This Signal ({symbol} {direction})"
-                keyboard = InlineKeyboardMarkup([[
-                    InlineKeyboardButton(grade_label, callback_data=f"autograde_{signal_key}")
-                ]])
+
                 for chat_id in user_chat_ids:
                     try:
-                        await bot.send_message(
-                            chat_id=chat_id,
-                            text=result["alert_text"],
-                            parse_mode="Markdown",
-                            reply_markup=keyboard
-                        )
+                        # Auto-grade scores 9-10 — no tap needed
+                        if score >= 9:
+                            from database import get_user_by_chat_id
+                            user = get_user_by_chat_id(chat_id)
+                            if user and user.is_active:
+                                # Send alert first so they see what was found
+                                await bot.send_message(
+                                    chat_id=chat_id,
+                                    text=result["alert_text"] + "\n\n⚡ *Score 9+/10 — Auto-grading now...*",
+                                    parse_mode="Markdown"
+                                )
+                                # Then immediately grade and send report
+                                graded = await auto_grade_and_send(result, bot, chat_id, user)
+                                if not graded:
+                                    # If auto-grade failed send manual button as fallback
+                                    grade_label = f"⚡ Grade This Signal ({symbol} {direction})"
+                                    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(grade_label, callback_data=f"autograde_{signal_key}")]])
+                                    await bot.send_message(chat_id=chat_id, text="Tap to grade manually:", reply_markup=keyboard)
+                            else:
+                                grade_label = f"⚡ Grade This Signal ({symbol} {direction})"
+                                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(grade_label, callback_data=f"autograde_{signal_key}")]])
+                                await bot.send_message(chat_id=chat_id, text=result["alert_text"], parse_mode="Markdown", reply_markup=keyboard)
+                        else:
+                            # Score 4-8 — show manual grade button
+                            grade_label = f"⚡ Grade This Signal ({symbol} {direction})"
+                            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(grade_label, callback_data=f"autograde_{signal_key}")]])
+                            await bot.send_message(chat_id=chat_id, text=result["alert_text"], parse_mode="Markdown", reply_markup=keyboard)
                         alerts_sent += 1
                     except Exception as e:
                         logger.error(f"[scanner] Failed to send alert to {chat_id}: {e}")
