@@ -609,21 +609,22 @@ async def scan_symbol(symbol: str) -> dict | None:
         if not candles or len(candles) < 10:
             return None
 
-        # Use yFinance for futures price/ATR, Twelve Data for forex
+        # Use yFinance for futures price/ATR — completely free, no rate limit
         if symbol.upper() in YFINANCE_FUTURES_MAP:
             candles_1h = get_candles_yfinance(symbol, outputsize=20)
             if candles_1h and len(candles_1h) >= 5:
-                closes = [c["close"] for c in candles_1h[:14]]
-                avg_close = sum(closes) / len(closes)
                 price_data = {"price": candles_1h[0]["close"]}
-                # Simple ATR estimate from recent candles
                 ranges = [c["high"] - c["low"] for c in candles_1h[:14]]
                 atr_val = sum(ranges) / len(ranges)
-                atr_data = {"atr": atr_val, "is_low_volatility": atr_val < 1.0}
+                # Futures ATR low volatility threshold varies by instrument
+                thresholds = {"ES": 5.0, "NQ": 20.0, "CL": 0.3, "GC": 5.0, "RTY": 3.0, "YM": 50.0}
+                threshold = thresholds.get(symbol.upper(), 1.0)
+                atr_data = {"atr": atr_val, "is_low_volatility": atr_val < threshold}
             else:
                 price_data = None
                 atr_data = None
         else:
+            # Forex — use Twelve Data (has rate limits)
             price_data = get_live_price(symbol)
             atr_data = get_atr(symbol)
 
@@ -805,7 +806,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         # Auto-grade scores 9-10 — no tap needed
                         if score >= 9:
                             from database import get_user_by_chat_id
-                            user = get_user_by_chat_id(chat_id)
+                            user = get_user_by_chat_id(str(chat_id))
                             if user and user.is_active:
                                 # Send alert first so they see what was found
                                 await bot.send_message(
