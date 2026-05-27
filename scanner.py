@@ -50,7 +50,7 @@ def get_cached_signal(key: str) -> str | None:
 BASE_URL = "https://api.twelvedata.com"
 
 # Default watchlist — users can customize with /watch command
-DEFAULT_WATCHLIST = ["XAUUSD", "EURUSD", "NQ"]  # Free tier: max 3 symbols
+DEFAULT_WATCHLIST = ["XAUUSD", "EURUSD", "GBPUSD"]  # Forex default
 
 # Scan interval in seconds
 SCAN_INTERVAL = 900  # 15 minutes
@@ -806,6 +806,16 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
 
                 for chat_id in user_chat_ids:
                     try:
+                        # Filter alerts per user watchlist
+                        from database import get_user_by_chat_id, get_user_watchlist
+                        _chat_user = get_user_by_chat_id(str(chat_id))
+                        if _chat_user:
+                            _user_wl = get_user_watchlist(_chat_user.id)
+                            if _user_wl:
+                                _user_symbols = [s.strip().upper() for s in _user_wl.split(",")]
+                                if symbol.upper() not in _user_symbols:
+                                    logger.info(f"[scanner] Skipping {symbol} for {chat_id} — not in watchlist")
+                                    continue
                         # Auto-grade scores 9-10 — no tap needed
                         if score >= 9:
                             from database import get_user_by_chat_id
