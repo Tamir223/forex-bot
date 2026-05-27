@@ -767,12 +767,15 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         if trade_id:
             last_trade_id[chat_id] = trade_id
 
-        log_trade_opened(user.id, analysis.get("risk_percent", 0))
+        # Don't count trade until user taps YES
+        # log_trade_opened called in callback_trade_button instead
         logger.info(f"[auto-grade] {result['symbol']} {result['direction']} — {grade} {analysis.get('confidence_score')}/10 — sent to {chat_id}")
         return True
 
     except Exception as e:
+        import traceback
         logger.error(f"[auto-grade] Error: {e}")
+        logger.error(f"[auto-grade] Traceback: {traceback.format_exc()}")
         return False
 
 
