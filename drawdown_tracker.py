@@ -175,7 +175,8 @@ def get_status_report(state: DrawdownState, profile: PropFirmProfile) -> str:
         drawdown_used = state.starting_balance - state.current_balance
         drawdown_label = "Static" if profile.drawdown_type == DrawdownType.STATIC else "Balance-based"
     drawdown_remaining = profile.max_total_loss - drawdown_used
-    daily_remaining = profile.max_daily_loss + state.today_pnl if profile.max_daily_loss > 0 else None
+    daily_loss_today = min(state.today_pnl, 0)
+    daily_remaining = profile.max_daily_loss + daily_loss_today if profile.max_daily_loss > 0 else None
     status_icon = "🚨" if state.is_breached else ("🎉" if state.profit_hit else "🟢")
     lines = [
         f"{status_icon} *{profile.name} — Challenge Status*",
