@@ -211,12 +211,72 @@ def get_profile_summary(profile: PropFirmProfile) -> str:
         f"📏 Consistency: {consistency}\n"
         f"🌐 {profile.website}"
     )
+_register(PropFirmProfile(
+    name="FundedNext Futures $50k", short_code="fundednext50",
+    account_size=50000, profit_target=3000, profit_target_pct=0.06,
+    max_total_loss=2500, max_total_loss_pct=0.05,
+    max_daily_loss=1250, max_daily_loss_pct=0.025,
+    drawdown_type=DrawdownType.EOD, min_trading_days=1,
+    max_lot_size=None, max_contracts=5,
+    instruments=[InstrumentType.FUTURES],
+    allow_overnight=True, allow_weekend=False, news_trading_allowed=True,
+    consistency_rule=False, consistency_pct=0.0, two_percent_rule=False,
+    trail_from_high_watermark=False,
+    website="fundednext.com", phase_name="FundedNext Evaluation",
+    notes="Guaranteed 24hr payout or $1000 compensation. EOD drawdown. News trading allowed."
+))
+
+_register(PropFirmProfile(
+    name="FundedNext Futures $150k", short_code="fundednext150",
+    account_size=150000, profit_target=9000, profit_target_pct=0.06,
+    max_total_loss=7500, max_total_loss_pct=0.05,
+    max_daily_loss=3750, max_daily_loss_pct=0.025,
+    drawdown_type=DrawdownType.EOD, min_trading_days=1,
+    max_lot_size=None, max_contracts=15,
+    instruments=[InstrumentType.FUTURES],
+    allow_overnight=True, allow_weekend=False, news_trading_allowed=True,
+    consistency_rule=False, consistency_pct=0.0, two_percent_rule=False,
+    trail_from_high_watermark=False,
+    website="fundednext.com", phase_name="FundedNext Evaluation",
+    notes="Guaranteed 24hr payout or $1000 compensation. EOD drawdown. 15 contracts max."
+))
+
+_register(PropFirmProfile(
+    name="Tradeify Select $50k", short_code="tradeify50",
+    account_size=50000, profit_target=2500, profit_target_pct=0.05,
+    max_total_loss=2500, max_total_loss_pct=0.05,
+    max_daily_loss=1250, max_daily_loss_pct=0.025,
+    drawdown_type=DrawdownType.EOD, min_trading_days=1,
+    max_lot_size=None, max_contracts=5,
+    instruments=[InstrumentType.FUTURES],
+    allow_overnight=True, allow_weekend=False, news_trading_allowed=True,
+    consistency_rule=False, consistency_pct=0.0, two_percent_rule=False,
+    trail_from_high_watermark=False,
+    website="tradeify.co", phase_name="Tradeify Select Evaluation",
+    notes="Daily payouts after buffer met. No daily loss limit on Select. Path to Tradeify Elite live account after 5 payouts."
+))
+
+_register(PropFirmProfile(
+    name="Tradeify Select $150k", short_code="tradeify150",
+    account_size=150000, profit_target=7500, profit_target_pct=0.05,
+    max_total_loss=7500, max_total_loss_pct=0.05,
+    max_daily_loss=0, max_daily_loss_pct=0.0,
+    drawdown_type=DrawdownType.EOD, min_trading_days=1,
+    max_lot_size=None, max_contracts=15,
+    instruments=[InstrumentType.FUTURES],
+    allow_overnight=True, allow_weekend=False, news_trading_allowed=True,
+    consistency_rule=False, consistency_pct=0.0, two_percent_rule=False,
+    trail_from_high_watermark=False,
+    website="tradeify.co", phase_name="Tradeify Select Evaluation",
+    notes="Daily payouts. No daily loss limit. EOD trailing drawdown. Path to live CME capital."
+))
+
 
 def get_profile_menu() -> str:
     lines = ["🏢 *Select Your Prop Firm*\n", "Reply with the code for your firm:\n"]
     firms_grouped = {
         "Forex": ["ftmo", "ftmo25", "5ers10", "5ers100"],
-        "Futures": ["apex50", "apex150", "topstep50", "topstep150"],
+        "Futures": ["apex50", "apex150", "topstep50", "topstep150", "fundednext50", "fundednext150", "tradeify50", "tradeify150"],
     }
     for category, codes in firms_grouped.items():
         lines.append(f"\n*{category}:*")
