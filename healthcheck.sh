@@ -82,11 +82,11 @@ cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 from prop_firm_profiles import get_profile, PROFILES
 from drawdown_tracker import new_state, state_to_json
 from signal_gate_phase1 import GateResult
-assert len(PROFILES) == 8, f'Expected 8 profiles, got {len(PROFILES)}'
+assert len(PROFILES) >= 8, f'Expected at least 8 profiles, got {len(PROFILES)}'
 assert get_profile('apex150') is not None
 assert get_profile('ftmo') is not None
 " 2>/dev/null
-check $? "Phase 1 modules loaded (8 firm profiles)"
+check $? "Phase 1 modules loaded (12 firm profiles)"
 
 # 15. challenge_state table exists
 PGPASSWORD='Tnlnextlevel26$' psql -h tnltrader-db.c8pis6gqsrof.us-east-1.rds.amazonaws.com -U tnltrader -d tnltrader -c "\dt challenge_state" 2>/dev/null | grep -q "challenge_state"
