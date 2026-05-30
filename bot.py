@@ -28,6 +28,10 @@ from report import (
 )
 from trading_calendar import is_friday_close_warning
 import os
+from bot_commands_phase4 import (
+    cmd_accounts, cmd_insights, cmd_best_hours,
+    cmd_addaccount, cmd_performance
+)
 from bot_commands_phase1 import (
     cmd_firmlist, cmd_setfirm, cmd_firm,
     cmd_challenge, cmd_status, cmd_logtrade,
@@ -290,6 +294,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 update_trade_result(trade_id, "SKIPPED")
             await send(context, chat_id, trade_skipped())
         elif reply == "WIN":
+            # Phase 4 self-learning
+            try:
+                from phase4_learning import log_trade_insight, get_session
+                import datetime
+                analysis = last_analysis.get(chat_id, {})
+                if analysis:
+                    log_trade_insight(user.id, {
+                        'pair': analysis.get('pair', ''),
+                        'direction': analysis.get('direction', ''),
+                        'setup_type': analysis.get('setup_type', ''),
+                        'session': get_session(datetime.datetime.utcnow().hour),
+                        'score': analysis.get('confidence_score', 0),
+                        'grade': analysis.get('grade', ''),
+                        'result': 'WIN',
+                        'pnl': risk * 100,
+                        'firm_code': get_user_firm(user.id) or 'ftmo',
+                    })
+            except Exception as e:
+                logger.error(f"Phase4 WIN log error: {e}")
             log_trade_win(user.id, risk)
             update_provider_result(user.id, provider, won=True)
             if trade_id:
@@ -311,6 +334,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await send(context, chat_id, w)
             await send(context, chat_id, trade_logged_win())
         elif reply == "LOSS":
+            # Phase 4 self-learning
+            try:
+                from phase4_learning import log_trade_insight, get_session
+                import datetime
+                analysis = last_analysis.get(chat_id, {})
+                if analysis:
+                    log_trade_insight(user.id, {
+                        'pair': analysis.get('pair', ''),
+                        'direction': analysis.get('direction', ''),
+                        'setup_type': analysis.get('setup_type', ''),
+                        'session': get_session(datetime.datetime.utcnow().hour),
+                        'score': analysis.get('confidence_score', 0),
+                        'grade': analysis.get('grade', ''),
+                        'result': 'LOSS',
+                        'pnl': -(risk * 100),
+                        'firm_code': get_user_firm(user.id) or 'ftmo',
+                    })
+            except Exception as e:
+                logger.error(f"Phase4 LOSS log error: {e}")
             log_trade_loss(user.id, risk)
             update_provider_result(user.id, provider, won=False)
             if trade_id:
@@ -640,6 +682,11 @@ async def start_bot():
     app.add_handler(CommandHandler("scan", cmd_scan))
     app.add_handler(CallbackQueryHandler(callback_reset, pattern="^reset_"))
     app.add_handler(CallbackQueryHandler(callback_autograde, pattern="^autograde_"))
+    app.add_handler(CommandHandler("accounts", cmd_accounts))
+    app.add_handler(CommandHandler("insights", cmd_insights))
+    app.add_handler(CommandHandler("besthours", cmd_best_hours))
+    app.add_handler(CommandHandler("addaccount", cmd_addaccount))
+    app.add_handler(CommandHandler("performance", cmd_performance))
     app.add_handler(CallbackQueryHandler(callback_trade_button, pattern="^trade_(yes|no)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("TNL Trader multi-user bot started")
