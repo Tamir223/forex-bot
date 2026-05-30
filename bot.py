@@ -113,17 +113,33 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "TNL Trader Commands\n\n"
-        "/status — account state and limits\n"
-        "/stats — recent trades and performance\n"
-        "/upgrade — upgrade your plan\n"
-        "/cancel — manage or cancel your subscription\n"
-        "/help — this menu\n\n"
-        "Replies after a report:\n"
+        "🤖 *TNL Trader Commands*\n\n"
+        "📊 *Challenge:*\n"
+        "/status — challenge P&L and drawdown\n"
+        "/challenge — start a new challenge\n"
+        "/setfirm — set your prop firm\n"
+        "/firmlist — all supported firms\n"
+        "/firm — your current firm rules\n"
+        "/logtrade — log a trade manually\n"
+        "/history — last 10 trades\n"
+        "/resetfirm — reset challenge tracker\n\n"
+        "📈 *Phase 4 — Insights:*\n"
+        "/accounts — all active challenges\n"
+        "/insights — performance analysis\n"
+        "/performance — pair and session stats\n"
+        "/besthours — your best trading hours\n"
+        "/addaccount — add a new firm\n\n"
+        "📡 *Scanner:*\n"
+        "/scan — instant market scan\n"
+        "/watch — set your watchlist\n\n"
+        "💬 *After a report:*\n"
         "YES — execute the trade\n"
         "NO — skip the trade\n"
-        "WIN — mark last trade as win\n"
-        "LOSS — mark last trade as loss"
+        "WIN — quick win log (estimated P&L)\n"
+        "LOSS — quick loss log (estimated P&L)\n"
+        "/logtrade WIN 146.20 — exact dollar amount\n"
+        "/logtrade LOSS 12.07 — exact dollar amount",
+        parse_mode="Markdown"
     )
 
 
