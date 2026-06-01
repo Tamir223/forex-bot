@@ -6,7 +6,7 @@ import os
 import logging
 import stripe
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
 from database import (
     get_user_by_email, get_user_by_stripe_customer,
     create_user, set_user_active
@@ -188,6 +188,10 @@ async def success():
     </html>
     """)
 
+
+@app.api_route("/ping", methods=["GET", "HEAD"])
+async def ping():
+    return PlainTextResponse("OK", status_code=200)
 
 @app.get("/health")
 async def health():
