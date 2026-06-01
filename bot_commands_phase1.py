@@ -134,6 +134,13 @@ async def cmd_logtrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
             })
         except Exception as e:
             pass
+    # Stop trade monitoring when WIN or LOSS is logged via /logtrade
+    if result in ("WIN", "LOSS"):
+        try:
+            from trade_monitor import trade_monitor
+            trade_monitor.remove_trade(user.id)
+        except Exception:
+            pass
     pair_str = f" | Pair: {pair}" if pair else ""
     emoji = "✅" if result == "WIN" else ("❌" if result == "LOSS" else "➖")
     msg = f"{emoji} *Trade Logged*\nResult: {result}{pair_str} | P&L: ${pnl:+,.2f}\nChallenge P&L: ${state.total_pnl:+,.2f}\nToday: ${state.today_pnl:+,.2f}"

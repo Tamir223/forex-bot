@@ -1043,6 +1043,13 @@ async def start_scanner(bot, get_active_users_fn):
 
             await run_scan(list(all_symbols), bot, user_chat_ids)
 
+            # Check active monitored trades after each scan cycle
+            try:
+                from trade_monitor import trade_monitor
+                await trade_monitor.check_all_trades(bot)
+            except Exception as _tm_err:
+                logger.error(f"[scanner] trade_monitor check error: {_tm_err}")
+
         except Exception as e:
             logger.error(f"[scanner] Loop error: {e}")
             await asyncio.sleep(60)

@@ -27,6 +27,7 @@ from report import (
     trade_logged_loss, not_subscribed_message, status_report
 )
 from trading_calendar import is_friday_close_warning
+from trade_monitor import trade_monitor
 import os
 from bot_commands_phase4 import (
     cmd_accounts, cmd_insights, cmd_best_hours,
@@ -331,6 +332,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.error(f"Phase4 WIN log error: {e}")
             log_trade_win(user.id, risk)
             update_provider_result(user.id, provider, won=True)
+            trade_monitor.remove_trade(user.id)
             if trade_id:
                 from database import update_trade_result
                 update_trade_result(trade_id, "WIN")
@@ -381,6 +383,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.error(f"Consecutive loss check error: {e}")
             update_provider_result(user.id, provider, won=False)
+            trade_monitor.remove_trade(user.id)
             if trade_id:
                 from database import update_trade_result
                 update_trade_result(trade_id, "LOSS")
@@ -551,6 +554,22 @@ async def callback_trade_button(update: Update, context: ContextTypes.DEFAULT_TY
             text=trade_executed() + "\n\nReply *WIN* or *LOSS* when you close the trade.",
             parse_mode="Markdown"
         )
+        # Start trade monitoring
+        try:
+            firm_code = get_user_firm(user.id)
+            trade_monitor.add_trade(
+                user_id=user.id,
+                chat_id=chat_id,
+                symbol=analysis.get("pair", ""),
+                direction=analysis.get("direction", ""),
+                entry=analysis.get("entry_zone"),
+                sl=analysis.get("stop_loss"),
+                tp1=analysis.get("tp1"),
+                tp2=analysis.get("tp2"),
+                firm_code=firm_code,
+            )
+        except Exception as _e:
+            logger.error(f"[monitor] add_trade error: {_e}")
         if is_friday_close_warning():
             firm_code = get_user_firm(user.id)
             profile = get_profile(firm_code) if firm_code else None
