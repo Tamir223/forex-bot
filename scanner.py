@@ -798,7 +798,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         # Correlation filter — skip if correlated pair already signaled this scan
         if active_signals:
-            corr_ok, corr_reason = check_pair_correlation(symbol, active_signals)
+            corr_ok, corr_reason = check_pair_correlation(symbol, score_data.get("direction", ""), active_signals)
             if not corr_ok:
                 logger.info(f"[scanner] {symbol} correlation skip — {corr_reason}")
                 return None

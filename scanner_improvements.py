@@ -554,33 +554,69 @@ def validate_risk_reward(entry: float, sl: float, tp1: float, min_rr: float = 1.
 
 # ─── 13. CORRELATION FILTER ───────────────────────────────────────────────────
 
-CORRELATED_PAIRS = {
-    "EURUSD": ["GBPUSD"],
-    "GBPUSD": ["EURUSD"],
-    "XAUUSD": ["US30"],
-    "US30":   ["XAUUSD"],
-    "ES":     ["NQ"],
-    "NQ":     ["ES"],
-    "MES":    ["MNQ"],
-    "MNQ":    ["MES"],
+CORRELATED_SAME_DIRECTION = {
+    "EURUSD": ["GBPUSD", "AUDUSD", "NZDUSD"],
+    "GBPUSD": ["EURUSD", "AUDUSD", "NZDUSD"],
+    "AUDUSD": ["EURUSD", "GBPUSD", "NZDUSD"],
+    "NZDUSD": ["EURUSD", "GBPUSD", "AUDUSD"],
+    "USDJPY": ["USDCAD", "USDCHF"],
+    "USDCAD": ["USDJPY", "USDCHF"],
+    "USDCHF": ["USDJPY", "USDCAD"],
+    "ES": ["NQ", "YM"],
+    "NQ": ["ES", "YM"],
+    "YM": ["ES", "NQ"],
+    "XAUUSD": ["GC", "MGC"],
+    "GC": ["XAUUSD"],
 }
 
-def check_pair_correlation(symbol: str, active_signals: list) -> tuple[bool, str]:
+INVERSE_CORRELATED = {
+    "EURUSD": ["USDJPY", "USDCAD", "USDCHF"],
+    "GBPUSD": ["USDJPY", "USDCAD", "USDCHF"],
+    "AUDUSD": ["USDJPY", "USDCAD", "USDCHF"],
+    "NZDUSD": ["USDJPY", "USDCAD", "USDCHF"],
+    "USDJPY": ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"],
+    "USDCAD": ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"],
+    "USDCHF": ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"],
+}
+
+def check_pair_correlation(symbol: str, direction: str, active_signals: list) -> tuple[bool, str]:
     """
-    Check if a correlated pair already appears in active_signals.
-    active_signals: list of dicts with 'symbol' key.
+    Block signals that double USD exposure via same-direction or inverse correlation.
+
+    Same-direction: e.g. EURUSD SELL + GBPUSD SELL — both express EUR/GBP weakness vs USD.
+    Inverse: e.g. EURUSD SELL active, USDJPY BUY fires — both express USD strength; block the duplicate.
+
+    active_signals: list of dicts with 'symbol' and 'direction' keys.
     Returns (is_ok_to_trade, reason).
     """
     if not active_signals:
         return True, ""
 
     sym = symbol.upper()
-    correlated = CORRELATED_PAIRS.get(sym, [])
-    active_syms = [s.get("symbol", "").upper() for s in active_signals]
+    new_dir = direction.upper()
 
-    for corr_sym in correlated:
-        if corr_sym in active_syms:
-            return False, "Correlated pair already signaled — skip to avoid doubling USD exposure"
+    active_map = {
+        s.get("symbol", "").upper(): s.get("direction", "").upper()
+        for s in active_signals
+    }
+
+    # Same-direction block
+    for corr_sym in CORRELATED_SAME_DIRECTION.get(sym, []):
+        if corr_sym in active_map and active_map[corr_sym] == new_dir:
+            return False, f"Correlated pair {corr_sym} already has a {new_dir} signal — skip to avoid doubling exposure"
+
+    # Inverse-correlation block: new signal expresses the same underlying USD move
+    # as an existing inverse-correlated signal in the opposite direction.
+    # EURUSD SELL (USD strong) == USDJPY BUY (USD strong) → block the second one.
+    for inv_sym in INVERSE_CORRELATED.get(sym, []):
+        if inv_sym in active_map:
+            active_dir = active_map[inv_sym]
+            # Opposite directions on inverse-correlated pairs = same USD theme
+            if active_dir != new_dir:
+                return False, (
+                    f"Inverse-correlated pair {inv_sym} already has a {active_dir} signal "
+                    f"expressing the same USD move — skip {sym} {new_dir} to avoid doubling exposure"
+                )
 
     return True, ""
 
