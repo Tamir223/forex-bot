@@ -43,7 +43,7 @@ MAX_CACHE_SIZE = 200
 def _cache_signal(signal_text: str) -> str:
     """Store a signal and return its short cache key."""
     key = _uuid.uuid4().hex[:12]
-    AUTO_SIGNAL_CACHE[key] = signal_text
+    AUTO_SIGNAL_CACHE[key] = {"signal": signal_text, "timestamp": datetime.now(timezone.utc)}
     # Keep cache bounded
     if len(AUTO_SIGNAL_CACHE) > MAX_CACHE_SIZE:
         oldest = next(iter(AUTO_SIGNAL_CACHE))
@@ -52,8 +52,15 @@ def _cache_signal(signal_text: str) -> str:
 
 
 def get_cached_signal(key: str) -> str | None:
-    """Retrieve a cached signal by key."""
-    return AUTO_SIGNAL_CACHE.get(key)
+    """Retrieve a cached signal by key. Returns None if missing or older than 10 minutes."""
+    entry = AUTO_SIGNAL_CACHE.get(key)
+    if entry is None:
+        return None
+    age = datetime.now(timezone.utc) - entry["timestamp"]
+    if age.total_seconds() > 600:
+        del AUTO_SIGNAL_CACHE[key]
+        return None
+    return entry["signal"]
 
 BASE_URL = "https://api.twelvedata.com"
 
@@ -829,6 +836,27 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         signal_text = result.get("auto_signal", "")
         if not signal_text:
             return False
+
+        # Entry validation — reject if price has moved outside tolerance since signal fired
+        import re as _re
+        _entry_match = _re.search(r"Entry Zone:\s*([\d.]+)", signal_text)
+        if _entry_match:
+            _entry_price = float(_entry_match.group(1))
+            _symbol = result.get("symbol", "")
+            if _symbol.upper() in YFINANCE_FUTURES_MAP:
+                _candles = get_candles_yfinance(_symbol, outputsize=5)
+                _live_price = float(_candles[0]["close"]) if _candles else None
+                _tolerance = 12.0
+            else:
+                _price_data = get_live_price(_symbol)
+                _live_price = float(_price_data["price"]) if _price_data else None
+                _tolerance = 12.0 if _symbol.upper() == "XAUUSD" else 0.0012
+            if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⏰ Signal expired — {_symbol} entry at {_entry_price} but price is now at {_live_price}. Entry zone missed."
+                )
+                return False
 
         from claude import analyze_signal
         from report import execute_report, blocked_report

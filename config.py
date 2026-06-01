@@ -63,4 +63,6 @@ CONFIDENCE: 10 full known source. 7-9 minor gaps. 4-6 partial. 1-3 vague. Minus 
 
 ACCOUNT RULES: trades_today 2 or more means BLOCK daily limit. session_losses 2 or more means BLOCK session limit. daily_pnl negative 2 or worse means BLOCK drawdown. weekly_losses 4 or more means BLOCK weekly limit.
 
+If the scanner alert includes 'Outside optimal session' in the confluence factors, reduce confidence by 1 and note the session warning in the grade report.
+
 Only return the raw JSON. Nothing else."""
