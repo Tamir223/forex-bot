@@ -15,7 +15,10 @@ from config import TWELVE_DATA_API_KEY
 from scanner_improvements import (
     is_news_window, get_session_score_bonus, validate_entry,
     check_1h_candle_confirmation, check_consecutive_losses,
-    get_loss_warning_message, run_pre_scan_checks
+    get_loss_warning_message, run_pre_scan_checks,
+    detect_liquidity_sweep, detect_rejection_candle, is_ranging_market,
+    get_previous_day_levels, is_optimal_time_for_pair, validate_risk_reward,
+    check_pair_correlation
 )
 import requests
 import yfinance as yf
@@ -361,7 +364,7 @@ def get_htf_bias(symbol: str) -> dict:
     return result
 
 
-def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None) -> dict:
+def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None, candles: list = None) -> dict:
     """
     Score the overall setup quality. Returns score 0-10 and recommendation.
     """
@@ -456,6 +459,33 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         score += get_session_score_bonus(_session)
     except Exception:
         pass
+    # Candle-based confluence — liquidity sweep, rejection, previous day levels
+    if candles is not None:
+        direction_str = "BUY" if trend == "bullish" else "SELL"
+        ob_mid = ob["mid"] if ob else (candles[0]["close"] if candles else 0.0)
+
+        sweep_ok, swept_level = detect_liquidity_sweep(candles, direction_str)
+        if sweep_ok:
+            score += 2
+            factors.append(f"Liquidity sweep confirmed at {swept_level} — institutional entry signal")
+
+        rej_ok, candle_type = detect_rejection_candle(candles, direction_str, ob_mid)
+        if rej_ok:
+            score += 2
+            factors.append(f"Rejection candle at OB zone: {candle_type}")
+
+        pd_levels = get_previous_day_levels(candles)
+        pdh = pd_levels.get("pdh")
+        pdl = pd_levels.get("pdl")
+        current_p = pd_levels.get("current_price")
+        if pdh and pdl and current_p:
+            if direction_str == "BUY" and current_p > pdh:
+                score += 1
+                factors.append("Breaking previous day high — strong breakout confirmation")
+            elif direction_str == "SELL" and current_p < pdl:
+                score += 1
+                factors.append("Breaking previous day low — strong breakout confirmation")
+
     recommendation = "STRONG" if score >= 8 else "MODERATE" if score >= 5 else "WEAK"
 
     return {
@@ -622,13 +652,18 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
     return "\n".join(lines)
 
 
-async def scan_symbol(symbol: str) -> dict | None:
+async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
     """
     Run full scan on one symbol. Returns alert dict if setup found, None otherwise.
     """
     try:
         candles = get_candles(symbol, interval="15min", outputsize=50)
         if not candles or len(candles) < 10:
+            return None
+
+        # Ranging market filter — skip tight-range choppy conditions
+        if is_ranging_market(candles):
+            logger.info(f"[scanner] {symbol} ranging market — skipping")
             return None
 
         # Use yFinance for futures price/ATR — completely free, no rate limit
@@ -670,7 +705,14 @@ async def scan_symbol(symbol: str) -> dict | None:
         fvg = detect_fvg(candles)
 
         htf_bias = get_htf_bias(symbol)
-        score_data = score_setup(structure, ob, fvg, atr_data, htf_bias)
+        score_data = score_setup(structure, ob, fvg, atr_data, htf_bias, candles=candles)
+
+        # Time of day filter — apply -1 score penalty outside optimal hours
+        is_optimal, optimal_reason = is_optimal_time_for_pair(symbol)
+        if not is_optimal:
+            logger.info(f"[scanner] {symbol} outside optimal hours — applying -1 score penalty")
+            score_data["score"] = max(0, score_data["score"] - 1)
+            score_data["factors"] = score_data.get("factors", []) + [f"Outside optimal session — {optimal_reason}"]
 
         # Only alert on moderate or strong setups
         if score_data["score"] < 5:
@@ -701,6 +743,32 @@ async def scan_symbol(symbol: str) -> dict | None:
         if not entry_valid:
             logger.info(f"[scanner] {symbol} entry missed by {deviation} — skipping auto-grade")
 
+        # Risk-reward validation — block if RR below 1.5
+        _dir_rr = score_data.get("direction", "BUY")
+        if _dir_rr == "BUY":
+            if ob and ob.get("type") == "bullish_ob":
+                _sl_rr = round(ob["low"] - (ob["high"] - ob["low"]) * 0.1, 5)
+            elif fvg:
+                _sl_rr = round(fvg["bottom"] - (fvg["top"] - fvg["bottom"]) * 0.5, 5)
+            else:
+                _sl_rr = round(float(current_price) * 0.998, 5)
+            _sl_dist_rr = max(abs(float(entry_check) - _sl_rr), 0.0015)
+            _tp1_rr = round(float(entry_check) + _sl_dist_rr * 1.5, 5)
+        else:
+            if ob and ob.get("type") == "bearish_ob":
+                _sl_rr = round(ob["high"] + (ob["high"] - ob["low"]) * 0.1, 5)
+            elif fvg:
+                _sl_rr = round(fvg["top"] + (fvg["top"] - fvg["bottom"]) * 0.5, 5)
+            else:
+                _sl_rr = round(float(current_price) * 1.002, 5)
+            _sl_dist_rr = max(abs(_sl_rr - float(entry_check)), 0.0015)
+            _tp1_rr = round(float(entry_check) - _sl_dist_rr * 1.5, 5)
+
+        _rr_valid, _actual_rr = validate_risk_reward(float(entry_check), _sl_rr, _tp1_rr)
+        if not _rr_valid:
+            logger.info(f"[scanner] {symbol} RR {_actual_rr:.1f} below minimum 1.5 — skipping")
+            return None
+
         # 1H candle confirmation
         candles_1h = None
         try:
@@ -714,6 +782,13 @@ async def scan_symbol(symbol: str) -> dict | None:
                                   for _, r in h1.iloc[::-1].iterrows()][:5]
         except Exception:
             pass
+
+        # Correlation filter — skip if correlated pair already signaled this scan
+        if active_signals:
+            corr_ok, corr_reason = check_pair_correlation(symbol, active_signals)
+            if not corr_ok:
+                logger.info(f"[scanner] {symbol} correlation skip — {corr_reason}")
+                return None
 
         return {
             "symbol": symbol,
@@ -851,10 +926,15 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
     # Scan futures first (no rate limit), then forex
     from futures_instruments import is_futures
     sorted_watchlist = sorted(watchlist, key=lambda s: 0 if is_futures(s) else 1)
+    active_signals_this_scan = []
     for symbol in sorted_watchlist:
         try:
-            result = await scan_symbol(symbol)
+            result = await scan_symbol(symbol, active_signals=active_signals_this_scan)
             if result:
+                active_signals_this_scan.append({
+                    "symbol": result.get("symbol", symbol),
+                    "direction": result.get("direction", ""),
+                })
                 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                 signal_key = result.get("signal_key", "")
                 score = result.get("score", 0)

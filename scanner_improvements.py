@@ -346,3 +346,240 @@ def run_pre_scan_checks(symbol: str, entry_price: float,
             results["warnings"].append(f"⚠️ {reason}")
 
     return results
+
+
+# ─── 7. LIQUIDITY SWEEP DETECTION ────────────────────────────────────────────
+
+def detect_liquidity_sweep(candles: list, direction: str) -> tuple[bool, float]:
+    """
+    Check last 5 candles for a liquidity sweep.
+    BUY: candle low pierced below previous 3-candle low but closed back above it.
+    SELL: candle high pierced above previous 3-candle high but closed back below it.
+    Returns (sweep_detected, swept_level).
+    """
+    if not candles or len(candles) < 6:
+        return False, 0.0
+
+    recent = candles[:5]
+
+    if direction == "BUY":
+        for i, c in enumerate(recent):
+            if i + 3 >= len(candles):
+                break
+            prev_low = min(candles[i+1]["low"], candles[i+2]["low"], candles[i+3]["low"])
+            if c["low"] < prev_low and c["close"] > prev_low:
+                return True, round(prev_low, 5)
+    else:  # SELL
+        for i, c in enumerate(recent):
+            if i + 3 >= len(candles):
+                break
+            prev_high = max(candles[i+1]["high"], candles[i+2]["high"], candles[i+3]["high"])
+            if c["high"] > prev_high and c["close"] < prev_high:
+                return True, round(prev_high, 5)
+
+    return False, 0.0
+
+
+# ─── 8. REJECTION CANDLE DETECTION ───────────────────────────────────────────
+
+def detect_rejection_candle(candles: list, direction: str, ob_zone_mid: float) -> tuple[bool, str]:
+    """
+    Check most recent 3 candles for rejection patterns near an OB zone.
+    BUY: hammer, bullish engulfing, pin bar (lower wick >60% of range).
+    SELL: shooting star, bearish engulfing, pin bar (upper wick >60% of range).
+    Must be within 15 points/pips of ob_zone_mid.
+    Returns (found, candle_type).
+    """
+    if not candles or len(candles) < 2:
+        return False, ""
+
+    # Proximity threshold — 15 pips for forex, 15 points for gold/futures
+    threshold = 0.0015 if ob_zone_mid < 100 else 15.0
+
+    for i in range(min(3, len(candles))):
+        c = candles[i]
+        candle_mid = (c["high"] + c["low"]) / 2
+        if abs(candle_mid - ob_zone_mid) > threshold:
+            continue
+
+        body = abs(c["close"] - c["open"])
+        total_range = c["high"] - c["low"]
+        if total_range == 0:
+            continue
+
+        upper_wick = c["high"] - max(c["close"], c["open"])
+        lower_wick = min(c["close"], c["open"]) - c["low"]
+
+        if direction == "BUY":
+            if body > 0 and lower_wick >= 2 * body:
+                return True, "hammer"
+            if lower_wick / total_range > 0.6:
+                return True, "pin bar"
+            if i + 1 < len(candles):
+                prev = candles[i + 1]
+                if (c["close"] > c["open"] and prev["close"] < prev["open"] and
+                        c["close"] >= prev["open"] and c["open"] <= prev["close"]):
+                    return True, "bullish engulfing"
+        else:  # SELL
+            if body > 0 and upper_wick >= 2 * body:
+                return True, "shooting star"
+            if upper_wick / total_range > 0.6:
+                return True, "pin bar"
+            if i + 1 < len(candles):
+                prev = candles[i + 1]
+                if (c["close"] < c["open"] and prev["close"] > prev["open"] and
+                        c["close"] <= prev["low"] and c["open"] >= prev["high"]):
+                    return True, "bearish engulfing"
+
+    return False, ""
+
+
+# ─── 9. RANGE FILTER ──────────────────────────────────────────────────────────
+
+def is_ranging_market(candles: list) -> bool:
+    """
+    Returns True if total price movement across last 4 candles < 0.3% of price.
+    """
+    if not candles or len(candles) < 4:
+        return False
+
+    recent = candles[:4]
+    max_high = max(c["high"] for c in recent)
+    min_low = min(c["low"] for c in recent)
+    current_price = candles[0]["close"]
+
+    if current_price == 0:
+        return False
+
+    return (max_high - min_low) / current_price < 0.003
+
+
+# ─── 10. PREVIOUS DAY HIGH/LOW ────────────────────────────────────────────────
+
+def get_previous_day_levels(candles: list) -> dict:
+    """
+    Find previous day high and low from candles list (newest first).
+    Returns dict with pdh, pdl, current_price.
+    """
+    if not candles:
+        return {"pdh": None, "pdl": None, "current_price": None}
+
+    current_price = candles[0]["close"]
+    current_day = datetime.now(timezone.utc).date()
+    prev_day_candles = []
+    prev_day_date = None
+
+    for c in candles:
+        dt_str = c.get("datetime", "")
+        if not dt_str:
+            continue
+        try:
+            if "T" in str(dt_str):
+                c_dt = datetime.fromisoformat(str(dt_str).replace("Z", "+00:00"))
+            else:
+                c_dt = datetime.strptime(str(dt_str)[:16], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+            c_day = c_dt.date()
+            if c_day < current_day:
+                if prev_day_date is None:
+                    prev_day_date = c_day
+                if c_day == prev_day_date:
+                    prev_day_candles.append(c)
+        except Exception:
+            continue
+
+    if prev_day_candles:
+        pdh = max(c["high"] for c in prev_day_candles)
+        pdl = min(c["low"] for c in prev_day_candles)
+        return {"pdh": round(pdh, 5), "pdl": round(pdl, 5), "current_price": round(current_price, 5)}
+
+    # Fallback: older half of available candles
+    mid = max(len(candles) // 2, 2)
+    older = candles[mid:]
+    if not older:
+        return {"pdh": None, "pdl": None, "current_price": round(current_price, 5)}
+
+    pdh = max(c["high"] for c in older)
+    pdl = min(c["low"] for c in older)
+    return {"pdh": round(pdh, 5), "pdl": round(pdl, 5), "current_price": round(current_price, 5)}
+
+
+# ─── 11. TIME OF DAY FILTER PER PAIR ─────────────────────────────────────────
+
+PAIR_OPTIMAL_HOURS = {
+    "GBPUSD": [(6, 9)],
+    "EURUSD": [(7, 11)],
+    "XAUUSD": [(6, 10), (13, 15)],
+    "ES":     [(13, 16)],
+    "MES":    [(13, 16)],
+    "NQ":     [(13, 16)],
+    "MNQ":    [(13, 16)],
+    "CL":     [(13, 16)],
+    "MCL":    [(13, 16)],
+}
+
+def is_optimal_time_for_pair(symbol: str) -> tuple[bool, str]:
+    """
+    Check if current UTC hour is within optimal trading window for the pair.
+    Returns (is_optimal, reason_string).
+    """
+    hour = datetime.now(timezone.utc).hour
+    sym = symbol.upper()
+    windows = PAIR_OPTIMAL_HOURS.get(sym)
+
+    if not windows:
+        return True, ""
+
+    for start, end in windows:
+        if start <= hour < end:
+            return True, f"{sym} in optimal window {start:02d}:00–{end:02d}:00 UTC"
+
+    window_strs = [f"{s:02d}:00–{e:02d}:00" for s, e in windows]
+    return False, f"{sym} outside optimal hours — optimal: {', '.join(window_strs)} UTC"
+
+
+# ─── 12. RISK REWARD MINIMUM FILTER ──────────────────────────────────────────
+
+def validate_risk_reward(entry: float, sl: float, tp1: float, min_rr: float = 1.5) -> tuple[bool, float]:
+    """
+    Validate actual risk/reward ratio meets minimum threshold.
+    Returns (is_valid, actual_rr).
+    """
+    sl_dist = abs(entry - sl)
+    if sl_dist == 0:
+        return False, 0.0
+
+    actual_rr = abs(tp1 - entry) / sl_dist
+    return actual_rr >= min_rr, round(actual_rr, 2)
+
+
+# ─── 13. CORRELATION FILTER ───────────────────────────────────────────────────
+
+CORRELATED_PAIRS = {
+    "EURUSD": ["GBPUSD"],
+    "GBPUSD": ["EURUSD"],
+    "XAUUSD": ["US30"],
+    "US30":   ["XAUUSD"],
+    "ES":     ["NQ"],
+    "NQ":     ["ES"],
+    "MES":    ["MNQ"],
+    "MNQ":    ["MES"],
+}
+
+def check_pair_correlation(symbol: str, active_signals: list) -> tuple[bool, str]:
+    """
+    Check if a correlated pair already appears in active_signals.
+    active_signals: list of dicts with 'symbol' key.
+    Returns (is_ok_to_trade, reason).
+    """
+    if not active_signals:
+        return True, ""
+
+    sym = symbol.upper()
+    correlated = CORRELATED_PAIRS.get(sym, [])
+    active_syms = [s.get("symbol", "").upper() for s in active_signals]
+
+    for corr_sym in correlated:
+        if corr_sym in active_syms:
+            return False, "Correlated pair already signaled — skip to avoid doubling USD exposure"
+
+    return True, ""
