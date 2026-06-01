@@ -18,7 +18,7 @@ from scanner_improvements import (
     get_loss_warning_message, run_pre_scan_checks,
     detect_liquidity_sweep, detect_rejection_candle, is_ranging_market,
     get_previous_day_levels, is_optimal_time_for_pair, validate_risk_reward,
-    check_pair_correlation
+    check_pair_correlation, detect_mtf_ob_confluence
 )
 import requests
 import yfinance as yf
@@ -364,7 +364,7 @@ def get_htf_bias(symbol: str) -> dict:
     return result
 
 
-def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None, candles: list = None) -> dict:
+def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None, candles: list = None, symbol: str = None) -> dict:
     """
     Score the overall setup quality. Returns score 0-10 and recommendation.
     """
@@ -389,6 +389,19 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         score += 2
         ob_type = "Bullish" if ob["type"] == "bullish_ob" else "Bearish"
         factors.append(f"{ob_type} order block at {ob['mid']}")
+
+        # MTF OB confluence — check 1H and 4H alignment with the 15M OB
+        if symbol is not None:
+            _direction_str = "BUY" if trend == "bullish" else "SELL"
+            _mtf_found, _mtf_desc = detect_mtf_ob_confluence(symbol, ob, _direction_str)
+            if _mtf_found:
+                if "Triple" in _mtf_desc:
+                    score += 3
+                elif "4H" in _mtf_desc:
+                    score += 2
+                else:
+                    score += 1
+                factors.append(_mtf_desc)
 
     if fvg:
         score += 2
@@ -705,7 +718,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         fvg = detect_fvg(candles)
 
         htf_bias = get_htf_bias(symbol)
-        score_data = score_setup(structure, ob, fvg, atr_data, htf_bias, candles=candles)
+        score_data = score_setup(structure, ob, fvg, atr_data, htf_bias, candles=candles, symbol=symbol)
 
         # Time of day filter — apply -1 score penalty outside optimal hours
         is_optimal, optimal_reason = is_optimal_time_for_pair(symbol)

@@ -583,3 +583,127 @@ def check_pair_correlation(symbol: str, active_signals: list) -> tuple[bool, str
             return False, "Correlated pair already signaled — skip to avoid doubling USD exposure"
 
     return True, ""
+
+
+# ─── 14. MULTI-TIMEFRAME OB CONFLUENCE ───────────────────────────────────────
+
+# Mirrors YFINANCE_FUTURES_MAP from scanner.py — kept in sync manually
+_MTF_FUTURES_MAP = {
+    'ES': 'ES=F', 'MES': 'MES=F', 'NQ': 'NQ=F', 'MNQ': 'MNQ=F',
+    'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
+    'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F',
+}
+
+
+def _fetch_htf_candles(symbol: str, interval_yf: str, period_yf: str,
+                       interval_td: str, outputsize: int) -> list | None:
+    """Fetch candles for MTF analysis — yFinance for futures, Twelve Data for forex."""
+    sym = symbol.upper()
+    ticker = _MTF_FUTURES_MAP.get(sym)
+    if ticker:
+        try:
+            import yfinance as yf
+            hist = yf.Ticker(ticker).history(period=period_yf, interval=interval_yf)
+            if hist.empty:
+                return None
+            result = []
+            for _, row in hist.iloc[::-1].iterrows():
+                result.append({
+                    "open": float(row["Open"]), "high": float(row["High"]),
+                    "low": float(row["Low"]), "close": float(row["Close"]),
+                })
+            return result[:outputsize]
+        except Exception as e:
+            logger.debug(f"MTF yFinance fetch error {symbol} {interval_yf}: {e}")
+            return None
+    else:
+        try:
+            from config import TWELVE_DATA_API_KEY
+            from market import normalize_symbol
+            td_symbol = normalize_symbol(symbol)
+            if not td_symbol or not TWELVE_DATA_API_KEY:
+                return None
+            resp = requests.get(
+                "https://api.twelvedata.com/time_series",
+                params={"symbol": td_symbol, "interval": interval_td,
+                        "outputsize": outputsize, "apikey": TWELVE_DATA_API_KEY},
+                timeout=8,
+            )
+            data = resp.json()
+            if "values" not in data:
+                return None
+            return [
+                {"open": float(c["open"]), "high": float(c["high"]),
+                 "low": float(c["low"]), "close": float(c["close"])}
+                for c in data["values"]
+            ]
+        except Exception as e:
+            logger.debug(f"MTF Twelve Data fetch error {symbol} {interval_td}: {e}")
+            return None
+
+
+def _detect_ob_htf(candles: list, trend: str) -> dict | None:
+    """Minimal OB detection for MTF confluence — same logic as detect_order_block in scanner.py."""
+    if not candles or len(candles) < 5:
+        return None
+    if trend == "bullish":
+        for i in range(1, min(15, len(candles))):
+            c = candles[i]
+            if c["close"] < c["open"] and candles[i - 1]["close"] > c["high"]:
+                return {"high": c["high"], "low": c["low"],
+                        "mid": round((c["high"] + c["low"]) / 2, 5)}
+    elif trend == "bearish":
+        for i in range(1, min(15, len(candles))):
+            c = candles[i]
+            if c["close"] > c["open"] and candles[i - 1]["close"] < c["low"]:
+                return {"high": c["high"], "low": c["low"],
+                        "mid": round((c["high"] + c["low"]) / 2, 5)}
+    return None
+
+
+def detect_mtf_ob_confluence(symbol: str, current_ob: dict, direction: str) -> tuple[bool, str]:
+    """
+    Check if the 15M order block also aligns with a 1H or 4H order block at the same level.
+    Triple timeframe OB confluence is the highest probability SMC setup.
+    Returns (confluence_found, description).
+    Scoring applied by caller: triple→+3, 4H only→+2, 1H only→+1.
+    """
+    if not current_ob:
+        return False, ""
+
+    ob_low = current_ob["low"]
+    ob_high = current_ob["high"]
+    trend = "bullish" if direction == "BUY" else "bearish"
+    mid_price = current_ob.get("mid", ob_high)
+
+    # Tolerance: 10 pips for forex, 10 points for gold/futures
+    tol_1h = 0.001 if mid_price < 100 else 10.0
+    # Tolerance: 20 pips for forex, 20 points for gold/futures
+    tol_4h = 0.002 if mid_price < 100 else 20.0
+
+    def _overlaps(low_a, high_a, low_b, high_b, tol):
+        return low_a <= high_b + tol and low_b <= high_a + tol
+
+    try:
+        # 1H: 5-day history at 1h interval, 50 candles
+        candles_1h = _fetch_htf_candles(symbol, "1h", "5d", "1h", 50)
+        ob_1h = _detect_ob_htf(candles_1h, trend) if candles_1h else None
+
+        # 4H: 20-day history at 4h interval, 30 candles
+        candles_4h = _fetch_htf_candles(symbol, "4h", "20d", "4h", 30)
+        ob_4h = _detect_ob_htf(candles_4h, trend) if candles_4h else None
+
+        h1_conf = bool(ob_1h and _overlaps(ob_low, ob_high, ob_1h["low"], ob_1h["high"], tol_1h))
+        h4_conf = bool(ob_4h and _overlaps(ob_low, ob_high, ob_4h["low"], ob_4h["high"], tol_4h))
+
+        if h1_conf and h4_conf:
+            return True, "Triple timeframe OB confluence (15M+1H+4H) — highest probability setup"
+        elif h4_conf:
+            return True, "4H OB confluence confirmed — strong institutional level"
+        elif h1_conf:
+            return True, "1H OB confluence confirmed — solid structural level"
+
+    except Exception as e:
+        logger.debug(f"MTF OB confluence error for {symbol}: {e}")
+
+    return False, ""
