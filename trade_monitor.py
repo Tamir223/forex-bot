@@ -35,6 +35,10 @@ class TradeMonitor:
         # Keyed by user_id (int or str)
         self._trades: dict = {}
 
+    @property
+    def trades(self) -> dict:
+        return self._trades
+
     def add_trade(self, user_id, chat_id, symbol, direction, entry, sl, tp1, tp2, firm_code=None):
         """Add a trade to active monitoring."""
         entry_f = _parse_float(entry)
