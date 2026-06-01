@@ -101,19 +101,42 @@ async def cmd_logtrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Result must be WIN, LOSS, or BREAKEVEN.")
         return
     pnl = 0.0
+    pair = None
+    # Parse amount and optional pair: /logtrade WIN 37.98 XAUUSD
     if len(context.args) >= 2:
         try:
             amount = float(context.args[1])
             pnl = amount if result == "WIN" else (-amount if result == "LOSS" else 0.0)
         except ValueError:
-            await update.message.reply_text("❌ Invalid amount. Example: `/logtrade WIN 250`", parse_mode="Markdown")
+            await update.message.reply_text("❌ Invalid amount. Example: `/logtrade WIN 250 XAUUSD`", parse_mode="Markdown")
             return
+    if len(context.args) >= 3:
+        pair = context.args[2].upper()
     state = state_from_json(state_json)
     profile = get_profile(state.firm_code)
     state, warnings = record_trade(state, profile, pnl)
     save_challenge_state(user.id, state.firm_code, state_to_json(state))
+    # Phase 4 — log with pair if provided
+    if pair and result in ("WIN", "LOSS"):
+        try:
+            from phase4_learning import log_trade_insight, get_session
+            import datetime
+            log_trade_insight(user.id, {
+                'pair': pair,
+                'direction': '',
+                'setup_type': 'OB FVG',
+                'session': get_session(datetime.datetime.utcnow().hour),
+                'score': 9,
+                'grade': 'A+',
+                'result': result,
+                'pnl': pnl,
+                'firm_code': state.firm_code or 'ftmo',
+            })
+        except Exception as e:
+            pass
+    pair_str = f" | Pair: {pair}" if pair else ""
     emoji = "✅" if result == "WIN" else ("❌" if result == "LOSS" else "➖")
-    msg = f"{emoji} *Trade Logged*\nResult: {result} | P&L: ${pnl:+,.2f}\nChallenge P&L: ${state.total_pnl:+,.2f}\nToday: ${state.today_pnl:+,.2f}"
+    msg = f"{emoji} *Trade Logged*\nResult: {result}{pair_str} | P&L: ${pnl:+,.2f}\nChallenge P&L: ${state.total_pnl:+,.2f}\nToday: ${state.today_pnl:+,.2f}"
     if warnings:
         msg += "\n\n" + "\n\n".join(warnings)
     await update.message.reply_text(msg, parse_mode="Markdown")

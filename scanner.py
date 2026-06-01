@@ -12,6 +12,11 @@ import asyncio
 from datetime import datetime, timezone
 from market import get_live_price, get_atr, normalize_symbol
 from config import TWELVE_DATA_API_KEY
+from scanner_improvements import (
+    is_news_window, get_session_score_bonus, validate_entry,
+    check_1h_candle_confirmation, check_consecutive_losses,
+    get_loss_warning_message, run_pre_scan_checks
+)
 import requests
 import yfinance as yf
 import pandas as pd
@@ -434,6 +439,23 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         score += 1
         factors.append("OB and FVG both aligned with trend")
 
+    # Session quality bonus
+    try:
+        from scanner_improvements import get_session_score_bonus
+        hour = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).hour
+        if 7 <= hour <= 10:
+            _session = "London Open"
+        elif 13 <= hour <= 16:
+            _session = "NY Open"
+        elif 10 <= hour <= 12:
+            _session = "London"
+        elif 16 <= hour <= 21:
+            _session = "NY"
+        else:
+            _session = "Asian"
+        score += get_session_score_bonus(_session)
+    except Exception:
+        pass
     recommendation = "STRONG" if score >= 8 else "MODERATE" if score >= 5 else "WEAK"
 
     return {
@@ -628,6 +650,12 @@ async def scan_symbol(symbol: str) -> dict | None:
             price_data = get_live_price(symbol)
             atr_data = get_atr(symbol)
 
+        # News filter check
+        news_blocked, news_reason = is_news_window()
+        if news_blocked:
+            logger.info(f"[scanner] {symbol} blocked — {news_reason}")
+            return None
+
         if atr_data and atr_data.get("is_low_volatility"):
             logger.info(f"[scanner] {symbol} low volatility — skipping")
             return None
@@ -660,6 +688,33 @@ async def scan_symbol(symbol: str) -> dict | None:
         )
         signal_key = _cache_signal(auto_signal)
 
+        # Entry validation — skip auto-grade if entry already missed
+        current_price = price_data.get("price", 0) if price_data else 0
+        direction_check = score_data.get("direction", "BUY")
+        if ob:
+            entry_check = ob["mid"]
+        elif fvg:
+            entry_check = fvg.get("mid", current_price)
+        else:
+            entry_check = current_price
+        entry_valid, deviation = validate_entry(symbol, entry_check, float(current_price))
+        if not entry_valid:
+            logger.info(f"[scanner] {symbol} entry missed by {deviation} — skipping auto-grade")
+
+        # 1H candle confirmation
+        candles_1h = None
+        try:
+            if symbol.upper() in YFINANCE_FUTURES_MAP:
+                import yfinance as yf
+                ticker = YFINANCE_FUTURES_MAP[symbol.upper()]
+                h1 = yf.Ticker(ticker).history(period="2d", interval="1h")
+                if not h1.empty:
+                    candles_1h = [{"open": float(r["Open"]), "close": float(r["Close"]),
+                                   "high": float(r["High"]), "low": float(r["Low"])}
+                                  for _, r in h1.iloc[::-1].iterrows()][:5]
+        except Exception:
+            pass
+
         return {
             "symbol": symbol,
             "score": score_data["score"],
@@ -668,6 +723,8 @@ async def scan_symbol(symbol: str) -> dict | None:
             "alert_text": alert_text,
             "signal_key": signal_key,
             "auto_signal": auto_signal,
+            "entry_valid": entry_valid,
+            "deviation": deviation,
         }
 
     except Exception as e:

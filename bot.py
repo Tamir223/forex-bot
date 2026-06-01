@@ -370,6 +370,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.error(f"Phase4 LOSS log error: {e}")
             log_trade_loss(user.id, risk)
+            # Consecutive loss protection
+            try:
+                from scanner_improvements import check_consecutive_losses, get_loss_warning_message
+                should_warn, consecutive = check_consecutive_losses(user.id)
+                if should_warn:
+                    warning_msg = get_loss_warning_message(consecutive)
+                    if warning_msg:
+                        await update.message.reply_text(warning_msg, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Consecutive loss check error: {e}")
             update_provider_result(user.id, provider, won=False)
             if trade_id:
                 from database import update_trade_result
