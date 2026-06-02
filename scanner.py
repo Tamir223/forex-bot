@@ -43,6 +43,9 @@ MAX_CACHE_SIZE = 200
 # Rotation index for spreading Twelve Data API calls across scan cycles
 _scan_rotation_index = 0
 
+# Tracks last known bias per symbol for shift detection
+_last_bias: dict = {}
+
 
 def _cache_signal(signal_text: str) -> str:
     """Store a signal and return its short cache key."""
@@ -1170,6 +1173,47 @@ def build_bias_report(symbols: list) -> str:
     return "\n".join(lines)
 
 
+async def check_bias_shifts(symbols: list, bot, user_chat_ids: list):
+    """
+    Check each symbol for a daily bias shift since the last scan cycle.
+    Fires a Telegram alert only when the bias direction has changed AND
+    intraday_override is True (strong intraday candle confirms the shift).
+    """
+    global _last_bias
+    from scanner_improvements import get_daily_bias
+
+    for symbol in symbols:
+        try:
+            b = get_daily_bias(symbol)
+            new_bias = b.get("bias", "neutral")
+            intraday_override = b.get("intraday_override", False)
+            intraday_move_pct = b.get("intraday_move_pct", 0.0)
+
+            old_bias = _last_bias.get(symbol)
+
+            if (old_bias is not None
+                    and old_bias != new_bias
+                    and new_bias != "neutral"
+                    and intraday_override):
+                msg = (
+                    f"🔄 BIAS SHIFT — {symbol}\n"
+                    f"{old_bias.upper()} → {new_bias.upper()}\n"
+                    f"Intraday move: {intraday_move_pct:.2f}%\n"
+                    f"Update your trading direction accordingly."
+                )
+                for chat_id in user_chat_ids:
+                    try:
+                        await bot.send_message(chat_id=chat_id, text=msg)
+                    except Exception as _se:
+                        logger.error(f"[bias_shift] Send error to {chat_id}: {_se}")
+                logger.info(f"[bias_shift] {symbol}: {old_bias} → {new_bias} (intraday {intraday_move_pct:.2f}%)")
+
+            _last_bias[symbol] = new_bias
+
+        except Exception as e:
+            logger.error(f"[bias_shift] Error checking {symbol}: {e}")
+
+
 async def start_scanner(bot, get_active_users_fn):
     """
     Main scanner loop. Runs every SCAN_INTERVAL seconds.
@@ -1223,6 +1267,12 @@ async def start_scanner(bot, get_active_users_fn):
                     logger.error(f"[scanner] bias report build error: {_bre}")
 
             await run_scan(list(all_symbols), bot, user_chat_ids)
+
+            # Bias shift monitor — runs every cycle alongside regular scanning
+            try:
+                await check_bias_shifts(list(all_symbols), bot, user_chat_ids)
+            except Exception as _bs_err:
+                logger.error(f"[scanner] bias shift check error: {_bs_err}")
 
             # Check active monitored trades after each scan cycle
             try:

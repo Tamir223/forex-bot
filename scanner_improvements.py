@@ -916,7 +916,8 @@ def get_daily_bias(symbol: str) -> dict:
     Returns dict with bias, strength, confirmed flag, and reason.
     """
     _default = {"bias": "neutral", "strength": "weak", "today_candle": "neutral",
-                "confirmed": False, "reason": "Insufficient data"}
+                "confirmed": False, "reason": "Insufficient data",
+                "intraday_override": False, "intraday_move_pct": 0.0}
     sym = symbol.upper()
     try:
         candles = []
@@ -976,6 +977,9 @@ def get_daily_bias(symbol: str) -> dict:
         today_dir   = _candle_dir(today)
         today_ratio = _body_ratio(today)
 
+        intraday_move_pct = ((today["close"] - today["open"]) / today["open"] * 100) if today["open"] else 0.0
+        intraday_override = today_ratio > 0.6
+
         # Strong today candle overrides everything
         if today_ratio > 0.7:
             bias      = today_dir
@@ -985,6 +989,7 @@ def get_daily_bias(symbol: str) -> dict:
             return {
                 "bias": bias, "strength": strength,
                 "today_candle": today_dir, "confirmed": confirmed, "reason": reason,
+                "intraday_override": True, "intraday_move_pct": round(intraday_move_pct, 2),
             }
 
         # Weighted score: today×3, yesterday×2, two_days_ago×1
@@ -1023,6 +1028,8 @@ def get_daily_bias(symbol: str) -> dict:
             "today_candle": today_dir,
             "confirmed": confirmed,
             "reason": reason,
+            "intraday_override": intraday_override,
+            "intraday_move_pct": round(intraday_move_pct, 2),
         }
 
     except Exception as e:
