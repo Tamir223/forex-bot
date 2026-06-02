@@ -970,10 +970,23 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
         logger.info("[scanner] Outside scan window — skipping")
         return
 
+    # Rebuild the symbol set from each user's actual DB watchlist so only symbols
+    # explicitly added by these users drive the scan (same DB fetch as per-alert filtering)
+    from database import get_user_by_chat_id, get_user_watchlist as _get_user_wl
+    _user_symbol_union: set = set()
+    for _cid in user_chat_ids:
+        _u = get_user_by_chat_id(str(_cid))
+        if _u:
+            _wl_str = _get_user_wl(_u.id)
+            if _wl_str:
+                _user_symbol_union.update(s.strip().upper() for s in _wl_str.split(","))
+    if not _user_symbol_union:
+        _user_symbol_union = {s.upper() for s in watchlist}
+
     # yFinance pairs have no rate limit — always scan every cycle
-    yfinance_pairs = [s for s in watchlist if s.upper() in YFINANCE_FUTURES_MAP or s.upper() == "XAUUSD"]
+    yfinance_pairs = [s for s in _user_symbol_union if s in YFINANCE_FUTURES_MAP or s == "XAUUSD"]
     # Twelve Data pairs rotate through in groups of 2
-    td_pairs = [s for s in watchlist if s.upper() not in YFINANCE_FUTURES_MAP and s.upper() != "XAUUSD"]
+    td_pairs = [s for s in _user_symbol_union if s not in YFINANCE_FUTURES_MAP and s != "XAUUSD"]
 
     group_size = 2
     if len(td_pairs) <= group_size:
