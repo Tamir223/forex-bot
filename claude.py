@@ -29,12 +29,19 @@ _PIP_SIZE = {
 }
 _DEFAULT_PIP_SIZE = 0.0001
 
-_PIP_VALUE = {
-    "XAUUSD": 100.0,
-    "US30": 1.0,
+PIP_VALUES = {
+    "EURUSD": 10.0,
+    "GBPUSD": 10.0,
+    "USDJPY": 9.30,
+    "AUDUSD": 10.0,
+    "USDCAD": 7.50,
+    "NZDUSD": 10.0,
+    "USDCHF": 10.50,
+    "XAUUSD": 10.0,  # 100oz contract, $10/pt per lot
+    "US30":   1.0,
     "NAS100": 1.0,
+    "default": 10.0,
 }
-_DEFAULT_PIP_VALUE = 10.0
 
 
 def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -> dict | None:
@@ -377,7 +384,7 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
             return format_sizing(sizing, account_size)
 
         # Forex lot calculation
-        pip_val = _PIP_VALUE.get(pair, _DEFAULT_PIP_VALUE)
+        pip_val = PIP_VALUES.get(pair, PIP_VALUES["default"])
         lot = round(risk_dollar / (sl_pts * pip_val), 2)
         acct_k = int(account_size / 1000)
         return f"{lot} lots on ${acct_k}k account"
