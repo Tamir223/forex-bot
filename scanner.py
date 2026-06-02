@@ -679,7 +679,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     return signal
 
 
-def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_data: dict, price_data: dict, htf_bias: dict = None) -> str:
+def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_data: dict, price_data: dict, htf_bias: dict = None, candles: list = None) -> str:
     """Format a scan alert for Telegram."""
     trend = structure.get("trend", "unclear")
     direction = score_data.get("direction", "")
@@ -687,6 +687,8 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
     rec = score_data.get("recommendation", "WEAK")
     factors = score_data.get("factors", [])
     current_price = price_data.get("price", "--") if price_data else "--"
+    if current_price == "--" and candles:
+        current_price = candles[0]["close"]
 
     rec_emoji = "🔥" if rec == "STRONG" else "⚡" if rec == "MODERATE" else "👀"
     dir_emoji = "📈" if direction == "BUY" else "📉" if direction == "SELL" else "↔️"
@@ -804,7 +806,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(f"[scanner] {symbol} score {score_data['score']}/10 — below threshold")
             return None
 
-        alert_text = format_scan_alert(symbol, structure, ob, fvg, score_data, price_data, htf_bias)
+        alert_text = format_scan_alert(symbol, structure, ob, fvg, score_data, price_data, htf_bias, candles=candles)
 
         # Auto-build and cache the formatted signal for one-tap grading
         current_price = price_data.get("price", 0) if price_data else 0
