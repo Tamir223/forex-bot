@@ -730,18 +730,23 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
 async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
     """
     Run full scan on one symbol. Returns alert dict if setup found, None otherwise.
+
+    Tiered validation:
+      TIER 1 — Hard blocks (news, low volatility, market closed)
+      TIER 2 — Score penalties (ranging, off-session, bias conflict)
+      TIER 3 — Score bonuses (applied inside score_setup)
+      TIER 4 — Post-score blocks (score < 7, RR, entry missed, correlation)
+      Guarantee: score >= 9 always sends regardless of range/session flags
     """
     try:
         candles = get_candles(symbol, interval="15min", outputsize=50)
         if not candles or len(candles) < 10:
             return None
 
-        # Ranging market filter — skip tight-range choppy conditions
-        if is_ranging_market(candles):
-            logger.info(f"[scanner] {symbol} ranging market — skipping")
-            return None
+        # Flag ranging candles early — penalty applied after scoring, not a hard block
+        is_ranging_candles = is_ranging_market(candles)
 
-        # Use yFinance for futures and XAUUSD price/ATR — completely free, no rate limit
+        # Fetch price and ATR data
         if symbol.upper() in YFINANCE_FUTURES_MAP or symbol.upper() == "XAUUSD":
             yf_ticker = YFINANCE_FUTURES_MAP.get(symbol.upper(), "GC=F")
             try:
@@ -755,7 +760,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     price_data = {"price": candles_1h[0]["close"]}
                     ranges = [c["high"] - c["low"] for c in candles_1h[:14]]
                     atr_val = sum(ranges) / len(ranges)
-                    # ATR low volatility threshold varies by instrument
                     thresholds = {
                         "ES": 5.0, "MES": 5.0, "NQ": 20.0, "MNQ": 20.0,
                         "CL": 0.3, "MCL": 0.3, "GC": 5.0, "MGC": 5.0,
@@ -771,58 +775,87 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 price_data = None
                 atr_data = None
         else:
-            # Forex — use Twelve Data (has rate limits)
             price_data = get_live_price(symbol)
             atr_data = get_atr(symbol)
 
-        # News filter check
+        # ── TIER 1: HARD BLOCKS ──────────────────────────────────────────────
         news_blocked, news_reason = is_news_window()
         if news_blocked:
-            logger.info(f"[scanner] {symbol} blocked — {news_reason}")
+            logger.info(f"[scanner] {symbol} BLOCKED — {news_reason}")
             return None
 
         if atr_data and atr_data.get("is_low_volatility"):
-            logger.info(f"[scanner] {symbol} low volatility — skipping")
+            logger.info(f"[scanner] {symbol} BLOCKED — low volatility")
             return None
 
+        # Structure and setup detection
         structure = detect_structure(candles)
         trend = structure.get("trend", "unclear")
+        is_ranging_structure = (trend == "ranging")
 
-        if trend == "ranging":
-            return None  # No clear setup in ranging market
+        # Completely unclear: no data to score at all
+        if trend == "unclear":
+            return None
 
         ob = detect_order_block(candles, trend)
         fvg = detect_fvg(candles)
-
         htf_bias = get_htf_bias(symbol)
         score_data = score_setup(structure, ob, fvg, atr_data, htf_bias, candles=candles, symbol=symbol)
 
-        # Time of day filter — apply -1 score penalty outside optimal hours
+        # ── TIER 2: SCORE PENALTIES ──────────────────────────────────────────
+        if is_ranging_candles:
+            logger.info(f"[scanner] {symbol} ranging candles — applying -1 penalty")
+            score_data["score"] = max(0, score_data["score"] - 1)
+            score_data["factors"] = score_data.get("factors", []) + ["Ranging candle pattern — reduced confidence"]
+
+        if is_ranging_structure:
+            logger.info(f"[scanner] {symbol} ranging structure — applying -1 penalty")
+            score_data["score"] = max(0, score_data["score"] - 1)
+            score_data["factors"] = score_data.get("factors", []) + ["Ranging price structure — no clear 15M trend"]
+
         is_optimal, optimal_reason = is_optimal_time_for_pair(symbol)
         if not is_optimal:
-            logger.info(f"[scanner] {symbol} outside optimal hours — applying -1 score penalty")
+            logger.info(f"[scanner] {symbol} outside optimal hours — applying -1 penalty")
             score_data["score"] = max(0, score_data["score"] - 1)
             score_data["factors"] = score_data.get("factors", []) + [f"Outside optimal session — {optimal_reason}"]
 
-        # Only alert on moderate or strong setups
-        if score_data["score"] < 5:
-            logger.info(f"[scanner] {symbol} score {score_data['score']}/10 — below threshold")
+        # Recalculate recommendation after all penalties
+        final_score = score_data["score"]
+        score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
+
+        # Resolve trade direction — for ranging structure fall back to HTF bias
+        direction = score_data.get("direction")
+        if direction is None and htf_bias:
+            htf_dir = htf_bias.get("bias", "unclear")
+            if htf_dir == "bullish":
+                direction = "BUY"
+                score_data["direction"] = "BUY"
+                score_data["factors"] = score_data.get("factors", []) + ["Direction from HTF bias (15M structure ranging)"]
+            elif htf_dir == "bearish":
+                direction = "SELL"
+                score_data["direction"] = "SELL"
+                score_data["factors"] = score_data.get("factors", []) + ["Direction from HTF bias (15M structure ranging)"]
+
+        if not direction:
+            logger.info(f"[scanner] {symbol} no actionable direction — skipping")
+            return None
+
+        # ── TIER 4: POST-SCORE BLOCKS ─────────────────────────────────────────
+        # Score threshold — 9+ guarantee overrides range/session penalties
+        if final_score < 7:
+            logger.info(f"[scanner] {symbol} score {final_score}/10 — below threshold")
             return None
 
         alert_text = format_scan_alert(symbol, structure, ob, fvg, score_data, price_data, htf_bias, candles=candles)
 
-        # Auto-build and cache the formatted signal for one-tap grading
         current_price = price_data.get("price", 0) if price_data else 0
-        direction = score_data.get("direction", "BUY")
         auto_signal = build_auto_signal(
             symbol, direction, float(current_price),
             ob, fvg, structure, score_data, htf_bias or {}
         )
         signal_key = _cache_signal(auto_signal)
 
-        # Entry validation — skip auto-grade if entry already missed
-        current_price = price_data.get("price", 0) if price_data else 0
-        direction_check = score_data.get("direction", "BUY")
+        # Entry zone
         if ob:
             entry_check = ob["mid"]
         elif fvg:
@@ -830,12 +863,16 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         else:
             entry_check = current_price
         entry_valid, deviation = validate_entry(symbol, entry_check, float(current_price))
-        if not entry_valid:
-            logger.info(f"[scanner] {symbol} entry missed by {deviation} — skipping auto-grade")
 
-        # Risk-reward validation — block if RR below 1.5
-        _dir_rr = score_data.get("direction", "BUY")
-        if _dir_rr == "BUY":
+        # TIER 4: Entry missed — block unless score >= 9
+        if not entry_valid:
+            if final_score < 9:
+                logger.info(f"[scanner] {symbol} entry missed by {deviation} — blocking (score {final_score})")
+                return None
+            logger.info(f"[scanner] {symbol} entry missed by {deviation} — score {final_score}/10 overrides entry check")
+
+        # TIER 4: RR check — hard block regardless of score
+        if direction == "BUY":
             if ob and ob.get("type") == "bullish_ob":
                 _sl_rr = round(ob["low"] - (ob["high"] - ob["low"]) * 0.1, 5)
             elif fvg:
@@ -859,11 +896,10 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(f"[scanner] {symbol} RR {_actual_rr:.1f} below minimum 1.5 — skipping")
             return None
 
-        # 1H candle confirmation
+        # 1H candle confirmation (informational)
         candles_1h = None
         try:
             if symbol.upper() in YFINANCE_FUTURES_MAP:
-                import yfinance as yf
                 ticker = YFINANCE_FUTURES_MAP[symbol.upper()]
                 h1 = yf.Ticker(ticker).history(period="2d", interval="1h")
                 if not h1.empty:
@@ -873,10 +909,10 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         except Exception:
             pass
 
-        # Correlation filter — block same-direction duplicates; warn on inverse correlation
+        # TIER 4: Correlation duplicate hard block
         corr_warning = ""
         if active_signals:
-            corr_ok, corr_reason, corr_warning = check_pair_correlation(symbol, score_data.get("direction", ""), active_signals)
+            corr_ok, corr_reason, corr_warning = check_pair_correlation(symbol, direction, active_signals)
             if not corr_ok:
                 logger.info(f"[scanner] {symbol} correlation skip — {corr_reason}")
                 return None
@@ -885,9 +921,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         return {
             "symbol": symbol,
-            "score": score_data["score"],
+            "score": final_score,
             "recommendation": score_data["recommendation"],
-            "direction": score_data["direction"],
+            "direction": direction,
             "alert_text": alert_text,
             "signal_key": signal_key,
             "auto_signal": auto_signal,

@@ -667,8 +667,8 @@ def validate_risk_reward(entry: float, sl: float, tp1: float, min_rr: float = 1.
     if sl_dist == 0:
         return False, 0.0
 
-    actual_rr = abs(tp1 - entry) / sl_dist
-    return actual_rr >= min_rr, round(actual_rr, 2)
+    actual_rr = round(abs(tp1 - entry) / sl_dist, 2)
+    return actual_rr >= min_rr, actual_rr
 
 
 # ─── 13. CORRELATION FILTER ───────────────────────────────────────────────────
