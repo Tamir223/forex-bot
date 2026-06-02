@@ -106,6 +106,58 @@ def get_next_news_event() -> str:
     return "No more events today"
 
 
+def check_upcoming_news(lookahead_minutes: int = 45) -> tuple[bool, str, int]:
+    """
+    Check if high-impact news is within lookahead_minutes in the future.
+    Returns (news_approaching, reason, minutes_until).
+    Only looks at future events — does not fire for events already passed.
+    """
+    now = datetime.now(timezone.utc)
+    current_minutes = now.hour * 60 + now.minute
+
+    # Try ForexFactory RSS feed first
+    try:
+        resp = requests.get(
+            "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+            timeout=5
+        )
+        if resp.status_code == 200:
+            events = resp.json()
+            today = now.strftime("%Y-%m-%d")
+            for event in events:
+                if event.get("impact") != "High":
+                    continue
+                event_date = event.get("date", "")
+                if today not in event_date:
+                    continue
+                event_time = event.get("time", "")
+                if not event_time or event_time == "Tentative":
+                    continue
+                try:
+                    from datetime import datetime as dt
+                    t = dt.strptime(event_time.upper(), "%I:%M%p")
+                    event_minutes = t.hour * 60 + t.minute
+                    event_minutes_utc = event_minutes + 4 * 60
+                    if event_minutes_utc > 24 * 60:
+                        event_minutes_utc -= 24 * 60
+                    minutes_until = event_minutes_utc - current_minutes
+                    if 0 < minutes_until <= lookahead_minutes:
+                        return True, f"High impact news: {event.get('title', 'USD event')}", minutes_until
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    # Fall back to hardcoded news times
+    for hour, minute, desc in HIGH_IMPACT_NEWS:
+        event_minutes = hour * 60 + minute
+        minutes_until = event_minutes - current_minutes
+        if 0 < minutes_until <= lookahead_minutes:
+            return True, f"News window: {desc} at {hour:02d}:{minute:02d} UTC", minutes_until
+
+    return False, "", 0
+
+
 # ─── 2. SESSION QUALITY SCORE ─────────────────────────────────────────────────
 
 SESSION_MULTIPLIERS = {
@@ -614,18 +666,19 @@ INVERSE_CORRELATED = {
     "USDCHF": ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"],
 }
 
-def check_pair_correlation(symbol: str, direction: str, active_signals: list) -> tuple[bool, str]:
+def check_pair_correlation(symbol: str, direction: str, active_signals: list) -> tuple[bool, str, str]:
     """
-    Block signals that double USD exposure via same-direction or inverse correlation.
+    Block signals that double USD exposure via same-direction correlation.
+    Warn (but allow) on inverse correlation — USD theme conflict.
 
-    Same-direction: e.g. EURUSD SELL + GBPUSD SELL — both express EUR/GBP weakness vs USD.
-    Inverse: e.g. EURUSD SELL active, USDJPY BUY fires — both express USD strength; block the duplicate.
+    Same-direction: e.g. EURUSD SELL + GBPUSD SELL — both express EUR/GBP weakness vs USD. Hard block.
+    Inverse: e.g. EURUSD BUY active, USDJPY BUY fires — conflicting USD themes. Warn, don't block.
 
     active_signals: list of dicts with 'symbol' and 'direction' keys.
-    Returns (is_ok_to_trade, reason).
+    Returns (is_ok_to_trade, block_reason, correlation_warning).
     """
     if not active_signals:
-        return True, ""
+        return True, "", ""
 
     sym = symbol.upper()
     new_dir = direction.upper()
@@ -635,25 +688,24 @@ def check_pair_correlation(symbol: str, direction: str, active_signals: list) ->
         for s in active_signals
     }
 
-    # Same-direction block
+    # Same-direction block — hard stop, doubling exposure
     for corr_sym in CORRELATED_SAME_DIRECTION.get(sym, []):
         if corr_sym in active_map and active_map[corr_sym] == new_dir:
-            return False, f"Correlated pair {corr_sym} already has a {new_dir} signal — skip to avoid doubling exposure"
+            return False, f"Correlated pair {corr_sym} already has a {new_dir} signal — skip to avoid doubling exposure", ""
 
-    # Inverse-correlation block: new signal expresses the same underlying USD move
-    # as an existing inverse-correlated signal in the opposite direction.
-    # EURUSD SELL (USD strong) == USDJPY BUY (USD strong) → block the second one.
+    # Inverse-correlation: same USD theme via opposite pair directions — warn but allow
     for inv_sym in INVERSE_CORRELATED.get(sym, []):
         if inv_sym in active_map:
             active_dir = active_map[inv_sym]
-            # Opposite directions on inverse-correlated pairs = same USD theme
             if active_dir != new_dir:
-                return False, (
-                    f"Inverse-correlated pair {inv_sym} already has a {active_dir} signal "
-                    f"expressing the same USD move — skip {sym} {new_dir} to avoid doubling exposure"
+                usd_theme = "USD strengthening" if new_dir == "BUY" and "JPY" in sym else "USD conflict"
+                warning = (
+                    f"⚠️ {usd_theme} — {sym} {new_dir} signal while {inv_sym} {active_dir} active. "
+                    f"USD theme conflict detected."
                 )
+                return True, "", warning
 
-    return True, ""
+    return True, "", ""
 
 
 # ─── 14. MULTI-TIMEFRAME OB CONFLUENCE ───────────────────────────────────────
@@ -776,5 +828,42 @@ def detect_mtf_ob_confluence(symbol: str, current_ob: dict, direction: str) -> t
 
     except Exception as e:
         logger.debug(f"MTF OB confluence error for {symbol}: {e}")
+
+    return False, ""
+
+
+# ─── 15. MOMENTUM DETECTION ──────────────────────────────────────────────────
+
+def detect_momentum(candles: list, direction: str) -> tuple[bool, str]:
+    """
+    Detect if price is moving with strong momentum in signal direction.
+    Strong momentum = 3+ consecutive candles closing in same direction
+    with increasing body sizes.
+    Returns (momentum_detected, description).
+    """
+    if not candles or len(candles) < 3:
+        return False, ""
+
+    expected_bullish = direction.upper() == "BUY"
+    consecutive = 0
+    prev_body = None
+    bodies_increasing = True
+
+    for c in candles[:5]:
+        is_bullish = c["close"] > c["open"]
+        if is_bullish == expected_bullish:
+            body = abs(c["close"] - c["open"])
+            if prev_body is not None and body <= prev_body:
+                bodies_increasing = False
+            prev_body = body
+            consecutive += 1
+        else:
+            break
+
+    if consecutive >= 3:
+        dir_label = "bullish" if expected_bullish else "bearish"
+        if bodies_increasing:
+            return True, f"Strong momentum — 3 consecutive {dir_label} candles with increasing volume"
+        return True, f"Momentum confirmed — consecutive {dir_label} candles"
 
     return False, ""

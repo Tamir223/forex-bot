@@ -7,6 +7,7 @@ Sends smart alerts while the trade is running: TP1 approach, SL warning,
 breakeven suggestion, momentum shift, and news warnings.
 """
 
+import collections
 import logging
 from datetime import datetime, timezone
 
@@ -67,7 +68,9 @@ class TradeMonitor:
             "tp1_alerted": False,
             "sl_alerted": False,
             "news_alerted": False,
-            # Store recent close prices for momentum check
+            "momentum_alerted": False,
+            "price_history": collections.deque(maxlen=3),
+            # Store recent close prices for momentum shift check
             "_recent_closes": [],
         }
         logger.info(f"[monitor] Monitoring {symbol} {direction} for user {user_id} — entry={entry_f} SL={sl_f} TP1={tp1_f}")
@@ -155,9 +158,10 @@ class TradeMonitor:
         if current is None:
             return []
 
-        # Update stored recent closes
+        # Update stored recent closes and price history
         if recent_closes:
             trade["_recent_closes"] = list(recent_closes)
+        trade["price_history"].append(current)
 
         pip_mult, dist_unit, tp1_thresh, sl_thresh = self._pip_info(symbol)
         # Fall back to sl_dist-based thresholds for non-forex (XAUUSD, futures)
@@ -225,17 +229,37 @@ class TradeMonitor:
                         f"against your {direction}. Still above SL — hold but watch closely."
                     )
 
+        # --- Rapid momentum alert (price moving strongly in trade direction) ---
+        price_history = trade["price_history"]
+        if len(price_history) >= 3 and not trade["momentum_alerted"]:
+            is_gold_or_futures = "XAU" in symbol or symbol in YFINANCE_FUTURES_MAP
+            threshold = 8.0 if is_gold_or_futures else 0.0008
+            oldest = price_history[0]
+            if direction == "BUY":
+                move = current - oldest
+            else:
+                move = oldest - current
+            if move >= threshold:
+                pips_display = move * pip_mult
+                alerts.append(
+                    f"🚀 *MOMENTUM ALERT* — {symbol} moving strongly in your favor\n"
+                    f"Price: {current} (+{pips_display:.1f} pips in 30 min)\n"
+                    f"Entry: {entry} | TP1: {tp1}\n"
+                    f"Consider moving SL to breakeven if not already done"
+                )
+                trade["momentum_alerted"] = True
+
         # --- News warning ---
         if not trade["news_alerted"]:
             elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
-            if elapsed > 300:  # trade open more than 5 minutes
+            if elapsed >= 120:  # trade open 2+ minutes
                 try:
-                    from scanner_improvements import is_news_window
-                    news_blocked, news_reason = is_news_window()
-                    if news_blocked and news_reason:
+                    from scanner_improvements import check_upcoming_news
+                    news_approaching, news_reason, minutes_until = check_upcoming_news(45)
+                    if news_approaching and news_reason:
                         alerts.append(
-                            f"⏰ *NEWS WARNING* — {symbol} open trade. {news_reason}. "
-                            f"Consider closing or moving SL to breakeven before news hits."
+                            f"⏰ *URGENT NEWS WARNING* — {symbol} open trade. {news_reason}. "
+                            f"Close or move SL to breakeven NOW — {minutes_until} minutes until high impact news."
                         )
                         trade["news_alerted"] = True
                 except Exception as e:

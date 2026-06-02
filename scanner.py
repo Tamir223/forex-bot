@@ -18,7 +18,7 @@ from scanner_improvements import (
     get_loss_warning_message, run_pre_scan_checks,
     detect_liquidity_sweep, detect_rejection_candle, is_ranging_market,
     get_previous_day_levels, is_optimal_time_for_pair, validate_risk_reward,
-    check_pair_correlation, detect_mtf_ob_confluence
+    check_pair_correlation, detect_mtf_ob_confluence, detect_momentum
 )
 import requests
 import yfinance as yf
@@ -509,6 +509,11 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
                 score += 1
                 factors.append("Breaking previous day low — strong breakout confirmation")
 
+        mom_ok, mom_desc = detect_momentum(candles, direction_str)
+        if mom_ok:
+            score += 2 if "Strong" in mom_desc else 1
+            factors.append(mom_desc)
+
     recommendation = "STRONG" if score >= 8 else "MODERATE" if score >= 5 else "WEAK"
 
     return {
@@ -806,12 +811,15 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         except Exception:
             pass
 
-        # Correlation filter — skip if correlated pair already signaled this scan
+        # Correlation filter — block same-direction duplicates; warn on inverse correlation
+        corr_warning = ""
         if active_signals:
-            corr_ok, corr_reason = check_pair_correlation(symbol, score_data.get("direction", ""), active_signals)
+            corr_ok, corr_reason, corr_warning = check_pair_correlation(symbol, score_data.get("direction", ""), active_signals)
             if not corr_ok:
                 logger.info(f"[scanner] {symbol} correlation skip — {corr_reason}")
                 return None
+            if corr_warning:
+                logger.info(f"[scanner] {symbol} correlation warning — {corr_warning}")
 
         return {
             "symbol": symbol,
@@ -823,6 +831,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             "auto_signal": auto_signal,
             "entry_valid": entry_valid,
             "deviation": deviation,
+            "correlation_warning": corr_warning,
         }
 
     except Exception as e:
@@ -1032,8 +1041,10 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                                 if symbol.upper() not in _user_symbols:
                                     logger.info(f"[scanner] Skipping {symbol} for {chat_id} — not in watchlist")
                                     continue
-                        # Auto-grade scores 9-10 — no tap needed
-                        if score >= 9:
+                        # Auto-grade scores 9-10, but a 9/10 outside optimal session
+                        # requires manual confirmation — only 10/10 auto-grades outside session
+                        _outside_session = "Outside optimal session" in result.get("alert_text", "")
+                        if score >= 9 and not (_outside_session and score < 10):
                             from database import get_user_by_chat_id
                             user = get_user_by_chat_id(str(chat_id))
                             if user and user.is_active:
