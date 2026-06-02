@@ -153,9 +153,9 @@ def get_atr(pair: str, interval: str = "1h", period: int = 14) -> dict:
         "XAU/USD": 3.0,
         "GBP/USD": 0.0008,
         "EUR/USD": 0.0007,
-        "USD/JPY": 0.08,
-        "GBP/JPY": 0.12,
-        "EUR/JPY": 0.10,
+        "USD/JPY": 0.05,   # 5 pips in JPY terms — JPY pairs have 2dp not 4dp
+        "GBP/JPY": 0.05,
+        "EUR/JPY": 0.05,
         "USD/CAD": 0.0008,
         "AUD/USD": 0.0006,
         "DJI":     80.0,
@@ -181,7 +181,13 @@ def get_atr(pair: str, interval: str = "1h", period: int = 14) -> dict:
             return None
 
         atr_value = float(data["values"][0]["atr"])
-        minimum = ATR_MINIMUMS.get(symbol, 0)
+        # Prefer PIP_SPECS min_atr (keyed by bare symbol e.g. "EURUSD") over
+        # the slash-format ATR_MINIMUMS dict — covers JPY pairs correctly
+        try:
+            from scanner_improvements import PIP_SPECS as _PIP_SPECS
+            minimum = _PIP_SPECS.get(pair.upper(), {}).get("min_atr") or ATR_MINIMUMS.get(symbol, 0)
+        except Exception:
+            minimum = ATR_MINIMUMS.get(symbol, 0)
         is_low = atr_value < minimum
 
         return {

@@ -15,6 +15,32 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# ─── PIP SPECIFICATION SYSTEM ────────────────────────────────────────────────
+# Single source of truth for pip size, minimum SL distance, and ATR threshold.
+# All functions that need pair-specific tolerances should call get_pip_spec().
+
+PIP_SPECS = {
+    "EURUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0007},
+    "GBPUSD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.0008},
+    "AUDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0006},
+    "NZDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0006},
+    "USDCAD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.0007},
+    "USDCHF": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0007},
+    "USDJPY": {"pip": 0.01,   "min_sl": 0.10,   "min_atr": 0.05},
+    "EURJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.08},
+    "GBPJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.10},
+    "XAUUSD": {"pip": 0.01,   "min_sl": 5.0,    "min_atr": 3.0},
+    "XAGUSD": {"pip": 0.001,  "min_sl": 0.05,   "min_atr": 0.03},
+}
+
+_FOREX_PIP_SPEC_PAIRS = {k for k, v in PIP_SPECS.items() if v["pip"] <= 0.01 and k not in ("XAUUSD", "XAGUSD")}
+
+
+def get_pip_spec(symbol: str) -> dict:
+    """Return pip spec for symbol, defaulting to standard 4dp forex if unknown."""
+    return PIP_SPECS.get(symbol.upper(), {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0007})
+
+
 # ─── 1. NEWS FILTER ───────────────────────────────────────────────────────────
 
 # High impact news times UTC — updated weekly
@@ -207,21 +233,17 @@ def validate_entry(symbol: str, entry_price: float, current_price: float) -> tup
     Returns (is_valid, deviation).
     """
     deviation = abs(current_price - entry_price)
+    sym = symbol.upper()
 
-    symbol_upper = symbol.upper()
-
-    if symbol_upper in ("XAUUSD", "GC", "MGC"):
+    if sym in ("XAUUSD", "GC", "MGC", "XAGUSD"):
         max_dev = ENTRY_MAX_POINTS_GOLD
-        is_valid = deviation <= max_dev
-    elif symbol_upper in ("ES", "MES", "NQ", "MNQ", "RTY", "YM"):
+    elif sym in ("ES", "MES", "NQ", "MNQ", "RTY", "YM", "CL", "MCL", "NG"):
         max_dev = ENTRY_MAX_POINTS_FUTURES
-        is_valid = deviation <= max_dev
     else:
-        # Forex — convert to pips
-        max_dev = ENTRY_MAX_PIPS_FOREX * 0.0001
-        is_valid = deviation <= max_dev
+        # Forex (standard and JPY) — use pip spec so JPY pairs get correct scaling
+        max_dev = get_pip_spec(sym)["pip"] * ENTRY_MAX_PIPS_FOREX
 
-    return is_valid, round(deviation, 5)
+    return deviation <= max_dev, round(deviation, 5)
 
 
 # ─── 4. 1H CANDLE CONFIRMATION ────────────────────────────────────────────────
@@ -271,7 +293,12 @@ def check_spread(symbol: str, bid: float, ask: float) -> tuple[bool, float]:
     Returns (is_acceptable, spread).
     """
     spread = abs(ask - bid)
-    max_spread = MAX_SPREADS.get(symbol.upper(), 0.001)
+    sym = symbol.upper()
+    # Pip-spec pairs: max spread = 2 pips in that pair's pip units
+    if sym in PIP_SPECS:
+        max_spread = PIP_SPECS[sym]["pip"] * 2
+    else:
+        max_spread = MAX_SPREADS.get(sym, 0.001)
     is_ok = spread <= max_spread
     return is_ok, round(spread, 5)
 
@@ -402,7 +429,7 @@ def run_pre_scan_checks(symbol: str, entry_price: float,
 
 # ─── 7. LIQUIDITY SWEEP DETECTION ────────────────────────────────────────────
 
-def detect_liquidity_sweep(candles: list, direction: str) -> tuple[bool, float]:
+def detect_liquidity_sweep(candles: list, direction: str, symbol: str = "") -> tuple[bool, float]:
     """
     Check last 5 candles for a liquidity sweep.
     BUY: candle low pierced below previous 3-candle low but closed back above it.
@@ -412,6 +439,10 @@ def detect_liquidity_sweep(candles: list, direction: str) -> tuple[bool, float]:
     if not candles or len(candles) < 6:
         return False, 0.0
 
+    # Minimum pierce distance — 1 pip in the pair's units — filters wicks that barely graze the level
+    sym = symbol.upper() if symbol else ""
+    min_pierce = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+
     recent = candles[:5]
 
     if direction == "BUY":
@@ -419,14 +450,14 @@ def detect_liquidity_sweep(candles: list, direction: str) -> tuple[bool, float]:
             if i + 3 >= len(candles):
                 break
             prev_low = min(candles[i+1]["low"], candles[i+2]["low"], candles[i+3]["low"])
-            if c["low"] < prev_low and c["close"] > prev_low:
+            if c["low"] < prev_low - min_pierce and c["close"] > prev_low:
                 return True, round(prev_low, 5)
     else:  # SELL
         for i, c in enumerate(recent):
             if i + 3 >= len(candles):
                 break
             prev_high = max(candles[i+1]["high"], candles[i+2]["high"], candles[i+3]["high"])
-            if c["high"] > prev_high and c["close"] < prev_high:
+            if c["high"] > prev_high + min_pierce and c["close"] < prev_high:
                 return True, round(prev_high, 5)
 
     return False, 0.0
@@ -434,19 +465,23 @@ def detect_liquidity_sweep(candles: list, direction: str) -> tuple[bool, float]:
 
 # ─── 8. REJECTION CANDLE DETECTION ───────────────────────────────────────────
 
-def detect_rejection_candle(candles: list, direction: str, ob_zone_mid: float) -> tuple[bool, str]:
+def detect_rejection_candle(candles: list, direction: str, ob_zone_mid: float, symbol: str = "") -> tuple[bool, str]:
     """
     Check most recent 3 candles for rejection patterns near an OB zone.
     BUY: hammer, bullish engulfing, pin bar (lower wick >60% of range).
     SELL: shooting star, bearish engulfing, pin bar (upper wick >60% of range).
-    Must be within 15 points/pips of ob_zone_mid.
+    Must be within 15 pips of ob_zone_mid.
     Returns (found, candle_type).
     """
     if not candles or len(candles) < 2:
         return False, ""
 
-    # Proximity threshold — 15 pips for forex, 15 points for gold/futures
-    threshold = 0.0015 if ob_zone_mid < 100 else 15.0
+    # Proximity threshold: 15 pips via pip spec for forex pairs; price-level fallback for gold/futures
+    sym = symbol.upper() if symbol else ""
+    if sym in _FOREX_PIP_SPEC_PAIRS:
+        threshold = PIP_SPECS[sym]["pip"] * 15
+    else:
+        threshold = 0.0015 if ob_zone_mid < 100 else 15.0
 
     for i in range(min(3, len(candles))):
         c = candles[i]
@@ -595,6 +630,9 @@ def get_previous_day_levels(candles: list) -> dict:
 PAIR_OPTIMAL_HOURS = {
     "GBPUSD": [(6, 9)],
     "EURUSD": [(7, 11)],
+    "USDJPY": [(0, 3), (7, 12)],   # Asian session (JPY most active) + London/NY overlap
+    "EURJPY": [(0, 3), (7, 12)],
+    "GBPJPY": [(0, 3), (7, 12)],
     "XAUUSD": [(6, 10), (13, 15)],
     "ES":     [(13, 16)],
     "MES":    [(13, 16)],
