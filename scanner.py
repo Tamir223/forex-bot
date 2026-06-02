@@ -144,9 +144,29 @@ def get_candles_yfinance(symbol: str, outputsize: int = 50) -> list | None:
 
 
 def get_candles(symbol: str, interval: str = "15min", outputsize: int = 50) -> list | None:
-    """Fetch candles — uses yFinance for futures, Twelve Data for forex."""
+    """Fetch candles — uses yFinance for futures and XAUUSD, Twelve Data for forex."""
     if symbol.upper() in YFINANCE_FUTURES_MAP:
         return get_candles_yfinance(symbol, outputsize)
+    if symbol.upper() == "XAUUSD":
+        # Use yFinance GC=F for gold — free, no Twelve Data credits consumed
+        try:
+            hist = yf.Ticker("GC=F").history(period="2d", interval="15m")
+            if hist.empty:
+                return None
+            result = []
+            for ts, row in hist.iloc[::-1].iterrows():
+                result.append({
+                    "datetime": str(ts),
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": float(row["Close"]),
+                    "volume": float(row.get("Volume", 0)),
+                })
+            return result[:outputsize]
+        except Exception as e:
+            logger.error(f"yFinance candle error for XAUUSD: {e}")
+            return None
     if not TWELVE_DATA_API_KEY:
         return None
     td_symbol = normalize_symbol(symbol)
@@ -716,18 +736,33 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(f"[scanner] {symbol} ranging market — skipping")
             return None
 
-        # Use yFinance for futures price/ATR — completely free, no rate limit
-        if symbol.upper() in YFINANCE_FUTURES_MAP:
-            candles_1h = get_candles_yfinance(symbol, outputsize=20)
-            if candles_1h and len(candles_1h) >= 5:
-                price_data = {"price": candles_1h[0]["close"]}
-                ranges = [c["high"] - c["low"] for c in candles_1h[:14]]
-                atr_val = sum(ranges) / len(ranges)
-                # Futures ATR low volatility threshold varies by instrument
-                thresholds = {"ES": 5.0, "NQ": 20.0, "CL": 0.3, "GC": 5.0, "RTY": 3.0, "YM": 50.0}
-                threshold = thresholds.get(symbol.upper(), 1.0)
-                atr_data = {"atr": atr_val, "is_low_volatility": atr_val < threshold}
-            else:
+        # Use yFinance for futures and XAUUSD price/ATR — completely free, no rate limit
+        if symbol.upper() in YFINANCE_FUTURES_MAP or symbol.upper() == "XAUUSD":
+            yf_ticker = YFINANCE_FUTURES_MAP.get(symbol.upper(), "GC=F")
+            try:
+                _hist = yf.Ticker(yf_ticker).history(period="2d", interval="1h")
+                if not _hist.empty and len(_hist) >= 5:
+                    candles_1h = [
+                        {"high": float(r["High"]), "low": float(r["Low"]),
+                         "close": float(r["Close"])}
+                        for _, r in _hist.iloc[::-1].iterrows()
+                    ][:20]
+                    price_data = {"price": candles_1h[0]["close"]}
+                    ranges = [c["high"] - c["low"] for c in candles_1h[:14]]
+                    atr_val = sum(ranges) / len(ranges)
+                    # ATR low volatility threshold varies by instrument
+                    thresholds = {
+                        "ES": 5.0, "MES": 5.0, "NQ": 20.0, "MNQ": 20.0,
+                        "CL": 0.3, "MCL": 0.3, "GC": 5.0, "MGC": 5.0,
+                        "RTY": 3.0, "YM": 50.0, "XAUUSD": 3.0,
+                    }
+                    threshold = thresholds.get(symbol.upper(), 1.0)
+                    atr_data = {"atr": atr_val, "is_low_volatility": atr_val < threshold}
+                else:
+                    price_data = None
+                    atr_data = None
+            except Exception as _yfe:
+                logger.error(f"[scanner] yFinance price/ATR error for {symbol}: {_yfe}")
                 price_data = None
                 atr_data = None
         else:
@@ -881,10 +916,18 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 _candles = get_candles_yfinance(_symbol, outputsize=5)
                 _live_price = float(_candles[0]["close"]) if _candles else None
                 _tolerance = 12.0
+            elif _symbol.upper() == "XAUUSD":
+                # Use yFinance GC=F for live gold price — no Twelve Data credits
+                try:
+                    _gc_hist = yf.Ticker("GC=F").history(period="1d", interval="1m")
+                    _live_price = float(_gc_hist["Close"].iloc[-1]) if not _gc_hist.empty else None
+                except Exception:
+                    _live_price = None
+                _tolerance = 12.0
             else:
                 _price_data = get_live_price(_symbol)
                 _live_price = float(_price_data["price"]) if _price_data else None
-                _tolerance = 12.0 if _symbol.upper() == "XAUUSD" else 0.0012
+                _tolerance = 0.0012
             if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
                 await bot.send_message(
                     chat_id=chat_id,

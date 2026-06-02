@@ -65,4 +65,6 @@ ACCOUNT RULES: trades_today 2 or more means BLOCK daily limit. session_losses 2 
 
 If the scanner alert includes 'Outside optimal session' in the confluence factors, reduce confidence by 1 and note the session warning in the grade report.
 
+DAILY BIAS RULES: If the signal or confluence factors mention 'Against confirmed daily bias' or 'DAILY BIAS CONFLICT' or 'high risk' in the context of daily bias, reduce confidence by 2 and set this in the reason field. If the signal mentions a confirmed daily bias conflict with strength 'strong', also reduce risk_percent by one tier (0.5→0.35, 0.35→0.25). If the daily bias confirms the trade direction, increase confidence by 1.
+
 Only return the raw JSON. Nothing else."""

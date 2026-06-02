@@ -69,6 +69,7 @@ class TradeMonitor:
             "sl_alerted": False,
             "news_alerted": False,
             "momentum_alerted": False,
+            "momentum_shift_alerted": False,
             "price_history": collections.deque(maxlen=3),
             # Store recent close prices for momentum shift check
             "_recent_closes": [],
@@ -211,23 +212,26 @@ class TradeMonitor:
                 trade["breakeven_alerted"] = True
 
         # --- Momentum shift (3 consecutive candles against trade) ---
-        closes = trade.get("_recent_closes", [])
-        if len(closes) >= 3:
-            last3 = closes[-3:]
-            if direction == "BUY":
-                # 3 bearish candles = each close lower than the previous
-                if last3[0] > last3[1] > last3[2]:
-                    alerts.append(
-                        f"⚠️ *MOMENTUM SHIFT* — {symbol} showing 3 consecutive candles "
-                        f"against your {direction}. Still above SL — hold but watch closely."
-                    )
-            else:
-                # SELL: 3 bullish candles
-                if last3[0] < last3[1] < last3[2]:
-                    alerts.append(
-                        f"⚠️ *MOMENTUM SHIFT* — {symbol} showing 3 consecutive candles "
-                        f"against your {direction}. Still above SL — hold but watch closely."
-                    )
+        if not trade.get("momentum_shift_alerted"):
+            closes = trade.get("_recent_closes", [])
+            if len(closes) >= 3:
+                last3 = closes[-3:]
+                if direction == "BUY":
+                    # 3 bearish candles: oldest > middle > newest (closes falling)
+                    if last3[0] > last3[1] > last3[2]:
+                        alerts.append(
+                            f"⚠️ *MOMENTUM SHIFT* — {symbol} showing 3 consecutive candles "
+                            f"against your {direction}. Still above SL — hold but watch closely."
+                        )
+                        trade["momentum_shift_alerted"] = True
+                else:
+                    # SELL: 3 bullish candles: oldest < middle < newest (closes rising)
+                    if last3[0] < last3[1] < last3[2]:
+                        alerts.append(
+                            f"⚠️ *MOMENTUM SHIFT* — {symbol} showing 3 consecutive candles "
+                            f"against your {direction}. Still above SL — hold but watch closely."
+                        )
+                        trade["momentum_shift_alerted"] = True
 
         # --- Rapid momentum alert (price moving strongly in trade direction) ---
         price_history = trade["price_history"]
