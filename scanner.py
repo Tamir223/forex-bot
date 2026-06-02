@@ -51,11 +51,18 @@ _scan_rotation_index = 0
 
 
 MIN_SL_DISTANCE = {
-    "XAUUSD":        8.0,    # points
-    "US30":          8.0,
-    "NAS100":        8.0,
-    "default_forex": 0.0008, # 8 pips (4-decimal pairs)
-    "jpy_forex":     0.08,   # 8 pips (JPY 2-decimal pairs)
+    "XAUUSD":        12.0,   # gold needs more room
+    "US30":          25.0,
+    "NAS100":        20.0,
+    "GBPUSD":        0.0015, # 15 pips — most volatile forex
+    "EURUSD":        0.0012, # 12 pips
+    "USDJPY":        0.12,   # 12 pips JPY
+    "USDCAD":        0.0012, # 12 pips
+    "USDCHF":        0.0010, # 10 pips
+    "AUDUSD":        0.0010, # 10 pips
+    "NZDUSD":        0.0010, # 10 pips
+    "default_forex": 0.0010, # 10 pips default
+    "jpy_forex":     0.10,   # 10 pips JPY default
     "futures":       8.0,
 }
 
