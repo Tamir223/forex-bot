@@ -15,6 +15,22 @@ def confluence_bar(score):
     return f"{'█' * score}{'░' * (6 - score)} {score}/6"
 
 
+_RISK_TIER_LABELS = {
+    10: "Premium — full confluence",
+    9:  "Standard",
+    8:  "Conservative",
+}
+
+
+def _risk_line(analysis: dict) -> str:
+    conf = int(analysis.get('confidence') or 9)
+    label = _RISK_TIER_LABELS.get(conf, "")
+    raw = analysis.get('risk_percent')
+    pct = f"{float(raw):.2f}" if raw is not None else "--"
+    suffix = f" ({label})" if label else ""
+    return f"Risk %:       {pct}%{suffix}\n"
+
+
 def execute_report(analysis: dict) -> str:
     confluence = calculate_confluence(analysis)
     return (
@@ -46,7 +62,7 @@ def execute_report(analysis: dict) -> str:
         f"Confirmation: {fmt(analysis.get('confirmation'))}\n"
         f"Win Rate:     {fmt(analysis.get('win_rate_context'))}\n\n"
         f"💰 RISK\n"
-        f"Risk %:       {fmt(analysis.get('risk_percent'))}%\n"
+        + _risk_line(analysis)
         + (f"Contracts:    {fmt(analysis.get('lot_size_suggestion'))}\n"
            if analysis.get('is_futures') and analysis.get('pair', '') in ['ES','MES','NQ','MNQ','CL','MCL','GC','MGC','RTY','YM','NG']
            else

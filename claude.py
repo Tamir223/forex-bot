@@ -17,6 +17,12 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 CORRELATED_USD_LONGS = {"GBPUSD", "EURUSD", "AUDUSD", "NZDUSD"}
 
+RISK_TIERS = {
+    10: 0.0075,  # 10/10 — 0.75% — Premium full confluence
+    9:  0.0050,  # 9/10  — 0.50% — Standard strong setup
+    8:  0.0035,  # 8/10  — 0.35% — Conservative
+}
+
 _PIP_SIZE = {
     "USDJPY": 0.01, "EURJPY": 0.01, "GBPJPY": 0.01,
     "XAUUSD": 1.0, "US30": 1.0, "NAS100": 1.0,
@@ -144,6 +150,22 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
             max_contracts2 = account_state.get('max_contracts')
             market_ctx['lot_size_suggestion'] = _calculate_lot_size(float(risk_pct2), sl_pts_final, pair, account_size2, max_contracts2) if sl_pts_final else None
         result['lot_size_suggestion'] = market_ctx.get('lot_size_suggestion')
+
+        # Tiered risk sizing based on confidence score
+        confidence_score = int(result.get("confidence", 9))
+        risk_percent = RISK_TIERS.get(confidence_score, 0.0050) * 100  # Store as percentage (0.75)
+        result['risk_percent'] = round(risk_percent, 4)
+        # Always recalculate lot size with tiered risk
+        if result.get('stop_loss') and result.get('entry_zone'):
+            sl_pts_tiered = _compute_sl_pts(str(result['entry_zone']), str(result['stop_loss']), pair)
+            if sl_pts_tiered:
+                from futures_instruments import is_futures as _is_fut
+                max_c = account_state.get('max_contracts') if _is_fut(pair or "") else None
+                result['lot_size_suggestion'] = _calculate_lot_size(
+                    risk_percent, sl_pts_tiered, pair,
+                    float(account_state.get('account_size', 10000)), max_c
+                )
+
         if "win_rate_context" not in result:
             if market_ctx.get("hist_win_rate") is not None:
                 result["win_rate_context"] = (
