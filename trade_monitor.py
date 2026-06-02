@@ -107,6 +107,27 @@ class TradeMonitor:
                 logger.error(f"[monitor] Twelve Data price error for {symbol}: {e}")
                 return None, []
 
+    @staticmethod
+    def _pip_info(symbol: str):
+        """Return (pip_multiplier, dist_unit, tp1_threshold, sl_threshold) for a symbol.
+
+        Forex non-JPY : pip_mult=10000, thresholds in raw price (0.0003=3 pips, 0.0005=5 pips)
+        Forex JPY     : pip_mult=100,   thresholds scaled (0.03=3 pips, 0.05=5 pips)
+        XAUUSD/futures: pip_mult=1,     thresholds None (caller uses sl_dist fallback)
+        """
+        sym = symbol.upper()
+        forex_currencies = {"USD", "EUR", "GBP", "AUD", "NZD", "CAD", "CHF"}
+        is_xau_or_futures = "XAU" in sym or sym in {
+            "ES", "MES", "NQ", "MNQ", "RTY", "YM", "CL", "MCL", "GC", "MGC", "NG",
+        }
+        if not is_xau_or_futures:
+            is_forex = any(sym.startswith(c) or sym.endswith(c) for c in forex_currencies)
+            if is_forex:
+                if "JPY" in sym:
+                    return 100, "pips", 0.03, 0.05
+                return 10000, "pips", 0.0003, 0.0005
+        return 1, "pts", None, None
+
     def check_trade(self, user_id) -> list:
         """Check a monitored trade against current price. Returns list of alert strings."""
         uid = str(user_id)
@@ -138,15 +159,21 @@ class TradeMonitor:
         if recent_closes:
             trade["_recent_closes"] = list(recent_closes)
 
+        pip_mult, dist_unit, tp1_thresh, sl_thresh = self._pip_info(symbol)
+        # Fall back to sl_dist-based thresholds for non-forex (XAUUSD, futures)
+        if tp1_thresh is None:
+            tp1_thresh = max(sl_dist * 0.15, 3.0)
+            sl_thresh = max(sl_dist * 0.25, 5.0)
+
         alerts = []
-        threshold = max(sl_dist * 0.15, 3.0)  # 15% of SL dist, minimum 3 pts/pips
 
         # --- TP1 approaching ---
         if tp1 and not trade["tp1_alerted"]:
             dist_to_tp1 = abs(current - tp1)
-            if dist_to_tp1 <= threshold:
+            if dist_to_tp1 <= tp1_thresh:
+                display_dist = dist_to_tp1 * pip_mult
                 alerts.append(
-                    f"🎯 *TP1 APPROACHING* — {symbol} only {dist_to_tp1:.2f} away. "
+                    f"🎯 *TP1 APPROACHING* — {symbol} only {display_dist:.1f} {dist_unit} away. "
                     f"Consider partial close or let MT5 auto-close."
                 )
                 trade["tp1_alerted"] = True
@@ -154,11 +181,11 @@ class TradeMonitor:
         # --- SL warning ---
         if not trade["sl_alerted"]:
             dist_to_sl = abs(current - sl)
-            sl_warn_threshold = max(sl_dist * 0.25, 5.0)
-            if dist_to_sl <= sl_warn_threshold:
+            if dist_to_sl <= sl_thresh:
+                display_dist = dist_to_sl * pip_mult
                 alerts.append(
                     f"⚠️ *SL WARNING* — {symbol} price at {current:.5f}, "
-                    f"only {dist_to_sl:.2f} from stop loss at {sl:.5f}. "
+                    f"only {display_dist:.1f} {dist_unit} from stop loss at {sl:.5f}. "
                     f"Prepare to accept the loss."
                 )
                 trade["sl_alerted"] = True
@@ -169,10 +196,11 @@ class TradeMonitor:
                 profit = current - entry
             else:
                 profit = entry - current
-            breakeven_threshold = max(sl_dist * 0.5, 15.0)
+            breakeven_threshold = max(sl_dist * 0.5, 15.0 / pip_mult)
             if profit >= breakeven_threshold:
+                display_profit = profit * pip_mult
                 alerts.append(
-                    f"💡 *MOVE SL TO BREAKEVEN* — {symbol} is +{profit:.2f} in profit. "
+                    f"💡 *MOVE SL TO BREAKEVEN* — {symbol} is +{display_profit:.1f} {dist_unit} in profit. "
                     f"Move your SL to {entry:.5f} on MT5 now. "
                     f"This makes the trade free — zero risk."
                 )
