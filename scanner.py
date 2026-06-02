@@ -49,6 +49,28 @@ MAX_CACHE_SIZE = 200
 # Rotation index for spreading Twelve Data API calls across scan cycles
 _scan_rotation_index = 0
 
+
+MIN_SL_DISTANCE = {
+    "XAUUSD":        8.0,    # points
+    "US30":          8.0,
+    "NAS100":        8.0,
+    "default_forex": 0.0008, # 8 pips (4-decimal pairs)
+    "jpy_forex":     0.08,   # 8 pips (JPY 2-decimal pairs)
+    "futures":       8.0,
+}
+
+
+def _min_sl_dist(symbol: str) -> float:
+    """Return the minimum acceptable SL distance for a symbol (in price units)."""
+    sym = symbol.upper()
+    if sym in MIN_SL_DISTANCE:
+        return MIN_SL_DISTANCE[sym]
+    if sym in YFINANCE_FUTURES_MAP:
+        return MIN_SL_DISTANCE["futures"]
+    if "JPY" in sym:
+        return MIN_SL_DISTANCE["jpy_forex"]
+    return MIN_SL_DISTANCE["default_forex"]
+
 # Tracks last known bias per symbol for shift detection
 _last_bias: dict = {}
 
@@ -577,21 +599,22 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
             score += 2 if "Strong" in mom_desc else 1
             factors.append(mom_desc)
 
-    # Daily bias alignment check
+    # Daily bias alignment check — single get_daily_bias call, result shared for both
+    # alignment check and strength lookup, and to flag unknown bias to callers
+    _bias_unknown = False
     if symbol is not None and trend in ("bullish", "bearish"):
         try:
+            from scanner_improvements import get_daily_bias as _get_db
+            _db = _get_db(symbol)
+            _bias_unknown = (_db.get("bias") == "unknown")
             _trade_dir = "BUY" if trend == "bullish" else "SELL"
-            _bias_ok, _bias_msg = check_daily_bias_alignment(symbol, _trade_dir)
+            _bias_ok, _bias_msg = check_daily_bias_alignment(symbol, _trade_dir, _prefetched=_db)
             if not _bias_ok:
-                # Confirmed conflict — penalty depends on bias strength
-                from scanner_improvements import get_daily_bias as _get_db
-                _db = _get_db(symbol)
                 if _db.get("strength") == "strong":
                     score -= 2
-                    factors.append("⚠️ Against confirmed daily bias — high risk")
                 else:
                     score -= 1
-                    factors.append("⚠️ Daily bias conflict — proceed with caution")
+                factors.append(_bias_msg or "⚠️ Daily bias conflict — proceed with caution")
             elif _bias_msg:
                 score += 1
                 factors.append(_bias_msg)
@@ -605,6 +628,7 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         "recommendation": recommendation,
         "factors": factors,
         "direction": "BUY" if trend == "bullish" else "SELL" if trend == "bearish" else None,
+        "bias_unknown": _bias_unknown,
     }
 
 
@@ -637,10 +661,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
 
         sl_dist = abs(entry - sl)
         if not spec:
-            if symbol.upper() in ("XAUUSD", "US30", "NAS100"):
-                sl_dist = max(sl_dist, 8.0)  # min 8 points for gold
-            else:
-                sl_dist = max(sl_dist, 0.0015)  # min 15 pips for forex
+            sl_dist = max(sl_dist, _min_sl_dist(symbol))
             sl = round(entry - sl_dist, 2) if symbol.upper() in ("XAUUSD",) else round(entry - sl_dist, 5)
         tp1 = round(entry + sl_dist * 1.5, 5)
         tp2 = round(entry + sl_dist * 2.5, 5)
@@ -659,10 +680,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
 
         sl_dist = abs(sl - entry)
         if not spec:
-            if symbol.upper() in ("XAUUSD", "US30", "NAS100"):
-                sl_dist = max(sl_dist, 8.0)  # min 8 points for gold
-            else:
-                sl_dist = max(sl_dist, 0.0015)  # min 15 pips for forex
+            sl_dist = max(sl_dist, _min_sl_dist(symbol))
             sl = round(entry + sl_dist, 2) if symbol.upper() in ("XAUUSD",) else round(entry + sl_dist, 5)
         tp1 = round(entry - sl_dist * 1.5, 5)
         tp2 = round(entry - sl_dist * 2.5, 5)
@@ -931,6 +949,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(f"[scanner] {symbol} entry missed by {deviation} — score {final_score}/10 overrides entry check")
 
         # TIER 4: RR check — hard block regardless of score
+        _min_sl = _min_sl_dist(symbol)
         if direction == "BUY":
             if ob and ob.get("type") == "bullish_ob":
                 _sl_rr = round(ob["low"] - (ob["high"] - ob["low"]) * 0.1, 5)
@@ -938,7 +957,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 _sl_rr = round(fvg["bottom"] - (fvg["top"] - fvg["bottom"]) * 0.5, 5)
             else:
                 _sl_rr = round(float(current_price) * 0.998, 5)
-            _sl_dist_rr = max(abs(float(entry_check) - _sl_rr), 0.0015)
+            _sl_dist_rr = max(abs(float(entry_check) - _sl_rr), _min_sl)
+            _sl_rr = round(float(entry_check) - _sl_dist_rr, 5)
             _tp1_rr = round(float(entry_check) + _sl_dist_rr * 1.5, 5)
         else:
             if ob and ob.get("type") == "bearish_ob":
@@ -947,7 +967,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 _sl_rr = round(fvg["top"] + (fvg["top"] - fvg["bottom"]) * 0.5, 5)
             else:
                 _sl_rr = round(float(current_price) * 1.002, 5)
-            _sl_dist_rr = max(abs(_sl_rr - float(entry_check)), 0.0015)
+            _sl_dist_rr = max(abs(_sl_rr - float(entry_check)), _min_sl)
+            _sl_rr = round(float(entry_check) + _sl_dist_rr, 5)
             _tp1_rr = round(float(entry_check) - _sl_dist_rr * 1.5, 5)
 
         _rr_valid, _actual_rr = validate_risk_reward(float(entry_check), _sl_rr, _tp1_rr)
@@ -989,6 +1010,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             "entry_valid": entry_valid,
             "deviation": deviation,
             "correlation_warning": corr_warning,
+            "bias_unknown": score_data.get("bias_unknown", False),
         }
 
     except Exception as e:
@@ -1208,10 +1230,12 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                                 if symbol.upper() not in _user_symbols:
                                     logger.info(f"[scanner] Skipping {symbol} for {chat_id} — not in watchlist")
                                     continue
-                        # Auto-grade scores 9-10, but a 9/10 outside optimal session
-                        # requires manual confirmation — only 10/10 auto-grades outside session
+                        # Auto-grade scores 9-10.
+                        # Require 10/10 when outside optimal session OR bias data unavailable.
                         _outside_session = "Outside optimal session" in result.get("alert_text", "")
-                        if score >= 9 and not (_outside_session and score < 10):
+                        _bias_unknown = result.get("bias_unknown", False)
+                        _needs_10 = (_outside_session or _bias_unknown) and score < 10
+                        if score >= 9 and not _needs_10:
                             from database import get_user_by_chat_id
                             user = get_user_by_chat_id(str(chat_id))
                             if user and user.is_active:

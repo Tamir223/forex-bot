@@ -668,6 +668,11 @@ def validate_risk_reward(entry: float, sl: float, tp1: float, min_rr: float = 1.
         return False, 0.0
 
     actual_rr = round(abs(tp1 - entry) / sl_dist, 2)
+    if actual_rr < min_rr:
+        logger.warning(
+            f"[RR_check] FAILED — entry={entry} sl={sl} tp1={tp1} "
+            f"sl_dist={round(sl_dist, 5)} actual_rr={actual_rr} min={min_rr}"
+        )
     return actual_rr >= min_rr, actual_rr
 
 
@@ -915,7 +920,7 @@ def get_daily_bias(symbol: str) -> dict:
     Get the daily candle bias for a symbol.
     Returns dict with bias, strength, confirmed flag, and reason.
     """
-    _default = {"bias": "neutral", "strength": "weak", "today_candle": "neutral",
+    _default = {"bias": "unknown", "strength": "weak", "today_candle": "neutral",
                 "confirmed": False, "reason": "Insufficient data",
                 "intraday_override": False, "intraday_move_pct": 0.0}
     sym = symbol.upper()
@@ -1037,22 +1042,25 @@ def get_daily_bias(symbol: str) -> dict:
         return _default
 
 
-def check_daily_bias_alignment(symbol: str, direction: str) -> tuple[bool, str]:
+def check_daily_bias_alignment(symbol: str, direction: str, _prefetched: dict = None) -> tuple[bool, str]:
     """
     Check if trade direction aligns with the daily bias.
     Returns (aligned, message).
+    Pass _prefetched to reuse an already-fetched get_daily_bias() result.
     """
-    bias = get_daily_bias(symbol)
+    bias = _prefetched if _prefetched is not None else get_daily_bias(symbol)
     b = bias["bias"]
     confirmed = bias["confirmed"]
-    strength = bias["strength"]
+
+    if b == "unknown":
+        return False, "⚠️ No bias data available — proceed with extra caution"
 
     if direction.upper() == "BUY" and b == "bearish" and confirmed:
-        return False, f"⚠️ DAILY BIAS CONFLICT — Trading BUY against confirmed bearish daily bias. High risk."
+        return False, "⚠️ DAILY BIAS CONFLICT — Trading BUY against confirmed bearish daily bias. High risk."
     if direction.upper() == "SELL" and b == "bullish" and confirmed:
-        return False, f"⚠️ DAILY BIAS CONFLICT — Trading SELL against confirmed bullish daily bias. High risk."
+        return False, "⚠️ DAILY BIAS CONFLICT — Trading SELL against confirmed bullish daily bias. High risk."
 
-    if b != "neutral" and confirmed:
+    if b not in ("neutral", "unknown") and confirmed:
         return True, f"✅ Daily bias {b} confirms {direction.upper()} direction"
 
     return True, ""
