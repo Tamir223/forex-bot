@@ -39,6 +39,9 @@ import uuid as _uuid
 AUTO_SIGNAL_CACHE = {}
 MAX_CACHE_SIZE = 200
 
+# Rotation index for spreading Twelve Data API calls across scan cycles
+_scan_rotation_index = 0
+
 
 def _cache_signal(signal_text: str) -> str:
     """Store a signal and return its short cache key."""
@@ -954,21 +957,43 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
 
 async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = False):
     """
-    Scan all symbols in watchlist and send alerts to users.
+    Scan symbols in watchlist and send alerts to users.
     force=True bypasses the scan window check (for manual /scan command).
+
+    Rate limiting strategy: yFinance pairs (XAUUSD, futures) scan every cycle.
+    Twelve Data (forex) pairs rotate in groups of 2 across cycles — stays within
+    the 8 credits/minute free tier limit.
     """
+    global _scan_rotation_index
+
     if not force and not is_scan_window():
         logger.info("[scanner] Outside scan window — skipping")
         return
 
-    logger.info(f"[scanner] Starting scan of {len(watchlist)} symbols")
-    alerts_sent = 0
+    # yFinance pairs have no rate limit — always scan every cycle
+    yfinance_pairs = [s for s in watchlist if s.upper() in YFINANCE_FUTURES_MAP or s.upper() == "XAUUSD"]
+    # Twelve Data pairs rotate through in groups of 2
+    td_pairs = [s for s in watchlist if s.upper() not in YFINANCE_FUTURES_MAP and s.upper() != "XAUUSD"]
 
-    # Scan futures first (no rate limit), then forex
-    from futures_instruments import is_futures
-    sorted_watchlist = sorted(watchlist, key=lambda s: 0 if is_futures(s) else 1)
+    group_size = 2
+    if len(td_pairs) <= group_size:
+        td_group = td_pairs
+    else:
+        start = (_scan_rotation_index * group_size) % len(td_pairs)
+        td_group = [td_pairs[(start + j) % len(td_pairs)] for j in range(group_size)]
+
+    _scan_rotation_index += 1
+    pairs_this_cycle = yfinance_pairs + td_group
+
+    logger.info(
+        f"[scanner] Cycle {_scan_rotation_index} — scanning {len(pairs_this_cycle)} symbols "
+        f"(yFinance: {yfinance_pairs}, TD group: {td_group})"
+    )
+
+    alerts_sent = 0
     active_signals_this_scan = []
-    for symbol in sorted_watchlist:
+
+    for i, symbol in enumerate(pairs_this_cycle):
         try:
             result = await scan_symbol(symbol, active_signals=active_signals_this_scan)
             if result:
@@ -1025,10 +1050,9 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                     except Exception as e:
                         logger.error(f"[scanner] Failed to send alert to {chat_id}: {e}")
 
-            # Rate limit — only needed for Twelve Data (forex). yFinance futures have no limit.
-            from futures_instruments import is_futures
-            if not is_futures(symbol):
-                await asyncio.sleep(20)
+            # 2-second gap between each pair scan to avoid burst rate limiting
+            if i < len(pairs_this_cycle) - 1:
+                await asyncio.sleep(2)
 
         except Exception as e:
             logger.error(f"[scanner] Symbol scan failed for {symbol}: {e}")
