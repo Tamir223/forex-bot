@@ -15,7 +15,8 @@ from database import (
     get_user_by_chat_id, get_state, link_telegram,
     log_trade_opened, log_trade_win, log_trade_loss,
     get_provider_stats, update_provider_result,
-    log_trade, get_user_trades, Trade, get_user_firm
+    log_trade, get_user_trades, Trade, get_user_firm,
+    update_trade_result
 )
 from prop_firm_profiles import get_profile
 from notifications import send_subscription_confirmed
@@ -260,14 +261,12 @@ async def process_signal_queue():
 
             if analysis.get("decision") == "BLOCK":
                 await bot.send_message(chat_id=int(chat_id), text=blocked_report(analysis, "claude_block"))
-                from database import update_trade_result
                 if trade_id:
                     update_trade_result(trade_id, "BLOCKED")
             else:
                 passed, enforce_reason = run_enforcement_filter(analysis)
                 if not passed:
                     await bot.send_message(chat_id=int(chat_id), text=blocked_report(analysis, enforce_reason))
-                    from database import update_trade_result
                     if trade_id:
                         update_trade_result(trade_id, "BLOCKED")
                 else:
@@ -300,14 +299,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if reply == "YES":
             log_trade_opened(user.id, risk)
             if trade_id:
-                from database import update_trade_result
                 update_trade_result(trade_id, "PENDING")
             await send(context, chat_id, trade_executed())
             if is_friday_close_warning():
                 await send(context, chat_id, "⚠️ FRIDAY WARNING: FTMO does not allow holding positions over the weekend. Make sure to close this trade before market close at 21:00 UTC tonight.")
         elif reply == "NO":
             if trade_id:
-                from database import update_trade_result
                 update_trade_result(trade_id, "SKIPPED")
             await send(context, chat_id, trade_skipped())
         elif reply == "WIN":
@@ -322,7 +319,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         'direction': analysis.get('direction', ''),
                         'setup_type': analysis.get('setup_type', ''),
                         'session': get_session(datetime.datetime.utcnow().hour),
-                        'score': analysis.get('confidence_score', 0),
+                        'score': analysis.get('confidence', 0),
                         'grade': analysis.get('grade', ''),
                         'result': 'WIN',
                         'pnl': risk * 100,
@@ -334,7 +331,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update_provider_result(user.id, provider, won=True)
             trade_monitor.remove_trade(user.id)
             if trade_id:
-                from database import update_trade_result
                 update_trade_result(trade_id, "WIN")
             # Auto-update challenge tracker
             from database import load_challenge_state, save_challenge_state
@@ -363,7 +359,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         'direction': analysis.get('direction', ''),
                         'setup_type': analysis.get('setup_type', ''),
                         'session': get_session(datetime.datetime.utcnow().hour),
-                        'score': analysis.get('confidence_score', 0),
+                        'score': analysis.get('confidence', 0),
                         'grade': analysis.get('grade', ''),
                         'result': 'LOSS',
                         'pnl': -(risk * 100),
@@ -385,7 +381,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update_provider_result(user.id, provider, won=False)
             trade_monitor.remove_trade(user.id)
             if trade_id:
-                from database import update_trade_result
                 update_trade_result(trade_id, "LOSS")
             # Auto-update challenge tracker
             from database import load_challenge_state, save_challenge_state
@@ -404,7 +399,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send(context, chat_id, trade_logged_loss())
         elif reply == "BREAKEVEN":
             if trade_id:
-                from database import update_trade_result
                 update_trade_result(trade_id, "BREAKEVEN")
             await send(context, chat_id, "➖ Breakeven logged.")
         return
@@ -548,8 +542,8 @@ async def callback_trade_button(update: Update, context: ContextTypes.DEFAULT_TY
 
     if action == "trade_yes":
         if trade_id:
-            from database import update_trade_result
             update_trade_result(trade_id, "PENDING")
+        log_trade_opened(user.id, risk)
         await context.bot.send_message(
             chat_id=chat_id,
             text=trade_executed() + "\n\nReply *WIN* or *LOSS* when you close the trade.",
@@ -581,7 +575,6 @@ async def callback_trade_button(update: Update, context: ContextTypes.DEFAULT_TY
                 )
     else:
         if trade_id:
-            from database import update_trade_result
             update_trade_result(trade_id, "SKIPPED")
         await context.bot.send_message(chat_id=chat_id, text=trade_skipped())
 
@@ -705,9 +698,6 @@ async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 reply_markup=execute_keyboard
             )
 
-            # Update trade state
-            log_trade_opened(user.id, analysis.get("risk_percent", 0))
-
     except Exception as e:
         logger.error(f"callback_autograde error: {e}")
         await context.bot.send_message(chat_id=chat_id, text="❌ Error grading signal. Try again.")
@@ -744,8 +734,8 @@ async def start_bot():
     logger.info("TNL Trader multi-user bot started")
     asyncio.create_task(process_signal_queue())
     from scanner import start_scanner
-    from database import get_active_users
-    asyncio.create_task(start_scanner(app.bot, get_active_users))
+    from database import get_all_active_users
+    asyncio.create_task(start_scanner(app.bot, get_all_active_users))
     async with app:
         await app.start()
         await app.updater.start_polling()

@@ -133,7 +133,7 @@ async def cmd_logtrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'firm_code': state.firm_code or 'ftmo',
             })
         except Exception as e:
-            pass
+            logger.error(f"Phase4 log error in /logtrade: {e}")
     # Stop trade monitoring when WIN or LOSS is logged via /logtrade
     if result in ("WIN", "LOSS"):
         try:

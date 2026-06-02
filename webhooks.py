@@ -214,22 +214,6 @@ async def stats():
         return {"signals": 0, "traders": 0}
 
 
-@app.get("/api/stats")
-async def stats():
-    try:
-        from database import get_conn
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) as count FROM trades")
-                signals = cur.fetchone()["count"]
-                cur.execute("SELECT COUNT(*) as count FROM users WHERE is_active = TRUE")
-                traders = cur.fetchone()["count"]
-        return {"signals": signals, "traders": traders}
-    except Exception as e:
-        logger.error(f"Stats error: {e}")
-        return {"signals": 0, "traders": 0}
-
-
 @app.get("/privacy")
 async def privacy():
     from fastapi.responses import FileResponse

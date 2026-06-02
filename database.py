@@ -641,13 +641,3 @@ def get_user_watchlist(user_id: int) -> str:
         logger.error(f"get_user_watchlist error: {e}")
         return None
 
-def get_active_users() -> list:
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM users WHERE is_active = true")
-                rows = cur.fetchall()
-                return [User(**row) for row in rows]
-    except Exception as e:
-        logger.error(f"get_active_users error: {e}")
-        return []

@@ -376,7 +376,7 @@ def get_performance_insights(user_id: int) -> str:
 
         total = overall[0] if overall else 0
 
-        if total < 3:
+        if total < 5:
             return (
                 "📊 *Performance Insights*\n\n"
                 "Not enough data yet — need at least 5 completed trades.\n"

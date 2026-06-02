@@ -132,8 +132,8 @@ def get_session_interval() -> int:
     All other hours = every 15 min.
     """
     hour = datetime.now(timezone.utc).hour
-    london_open = 7 <= hour <= 10
-    ny_open = 13 <= hour <= 16
+    london_open = 7 <= hour < 10
+    ny_open = 13 <= hour < 16
     if london_open or ny_open:
         return 300   # 5 minutes
     return 900       # 15 minutes
@@ -142,15 +142,15 @@ def get_session_interval() -> int:
 def get_current_session() -> str:
     """Return the name of the current trading session."""
     hour = datetime.now(timezone.utc).hour
-    if 7 <= hour <= 10:
+    if 7 <= hour < 10:
         return "London Open"
-    elif 10 <= hour <= 12:
+    elif 10 <= hour < 13:
         return "London"
-    elif 13 <= hour <= 16:
+    elif 13 <= hour < 16:
         return "NY Open"
-    elif 16 <= hour <= 21:
+    elif 16 <= hour < 21:
         return "NY"
-    elif 0 <= hour <= 3:
+    elif 0 <= hour < 3:
         return "Asian"
     return "Off-Session"
 
@@ -983,19 +983,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(f"[scanner] {symbol} RR {_actual_rr:.1f} below minimum 1.5 — skipping")
             return None
 
-        # 1H candle confirmation (informational)
-        candles_1h = None
-        try:
-            if symbol.upper() in YFINANCE_FUTURES_MAP:
-                ticker = YFINANCE_FUTURES_MAP[symbol.upper()]
-                h1 = yf.Ticker(ticker).history(period="2d", interval="1h")
-                if not h1.empty:
-                    candles_1h = [{"open": float(r["Open"]), "close": float(r["Close"]),
-                                   "high": float(r["High"]), "low": float(r["Low"])}
-                                  for _, r in h1.iloc[::-1].iterrows()][:5]
-        except Exception:
-            pass
-
         # TIER 4: Correlation duplicate hard block
         corr_warning = ""
         if active_signals:
@@ -1134,7 +1121,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             pair=analysis.get("pair", ""),
             direction=analysis.get("direction", ""),
             grade=analysis.get("grade", ""),
-            confidence=analysis.get("confidence_score", 0),
+            confidence=analysis.get("confidence", 0),
             signal_source="TNL Scanner (Auto)",
             risk_percent=analysis.get("risk_percent", 0),
             entry_zone=str(analysis.get("entry_zone", "")),
@@ -1150,7 +1137,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
 
         # Don't count trade until user taps YES
         # log_trade_opened called in callback_trade_button instead
-        logger.info(f"[auto-grade] {result['symbol']} {result['direction']} — {grade} {analysis.get('confidence_score')}/10 — sent to {chat_id}")
+        logger.info(f"[auto-grade] {result['symbol']} {result['direction']} — {grade} {analysis.get('confidence')}/10 — sent to {chat_id}")
         return True
 
     except Exception as e:
