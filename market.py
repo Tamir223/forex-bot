@@ -6,7 +6,18 @@ Free tier: 800 requests/day, 8 requests/minute.
 
 import logging
 import requests
+import yfinance as yf
 from config import TWELVE_DATA_API_KEY
+
+# Mirrors scanner.YFINANCE_FUTURES_MAP — kept here to avoid a circular import
+# (scanner.py imports from market.py).  Keep in sync when the map changes.
+YFINANCE_FUTURES_MAP = {
+    'ES': 'ES=F', 'MES': 'MES=F', 'NQ': 'NQ=F', 'MNQ': 'MNQ=F',
+    'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
+    'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F',
+}
+# XAUUSD is handled via yFinance using the gold futures ticker
+_XAUUSD_YF_TICKER = "GC=F"
 
 logger = logging.getLogger(__name__)
 
@@ -84,13 +95,52 @@ def get_live_price(pair: str) -> dict:
         return None
 
 
+def _get_atr_yfinance(pair: str, yf_ticker: str, interval: str = "1h", period: int = 14) -> dict | None:
+    """Calculate ATR from yFinance candles as average of (high-low) over last `period` candles."""
+    ATR_MINIMUMS_YF = {
+        "GC=F": 3.0,   # XAUUSD / GC
+        "ES=F": 8.0, "MES=F": 8.0,
+        "NQ=F": 30.0, "MNQ=F": 30.0,
+        "CL=F": 0.4,
+    }
+    try:
+        # yfinance interval: "1h" is valid; fetch enough days for `period` hourly candles
+        hist = yf.Ticker(yf_ticker).history(period="5d", interval=interval)
+        if hist.empty or len(hist) < period:
+            logger.warning(f"yFinance ATR: insufficient data for {yf_ticker}")
+            return None
+        recent = hist.tail(period)
+        atr_value = float((recent["High"] - recent["Low"]).mean())
+        minimum = ATR_MINIMUMS_YF.get(yf_ticker, 0)
+        return {
+            "atr": atr_value,
+            "is_low_volatility": atr_value < minimum,
+            "minimum": minimum,
+            "symbol": pair,
+        }
+    except Exception as e:
+        logger.error(f"yFinance ATR error for {pair} ({yf_ticker}): {e}")
+        return None
+
+
 def get_atr(pair: str, interval: str = "1h", period: int = 14) -> dict:
     """
     Get Average True Range to measure session volatility.
     Returns: { atr, is_low_volatility } or None
     Low volatility = ATR below historical average for that pair
     """
-    if not TWELVE_DATA_API_KEY or not pair:
+    if not pair:
+        return None
+
+    upper = pair.upper()
+
+    # Use yFinance (free) for XAUUSD and all futures — no Twelve Data credits consumed
+    if upper == "XAUUSD":
+        return _get_atr_yfinance(pair, _XAUUSD_YF_TICKER, interval, period)
+    if upper in YFINANCE_FUTURES_MAP:
+        return _get_atr_yfinance(pair, YFINANCE_FUTURES_MAP[upper], interval, period)
+
+    if not TWELVE_DATA_API_KEY:
         return None
 
     symbol = normalize_symbol(pair)
