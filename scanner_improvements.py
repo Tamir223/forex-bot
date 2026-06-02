@@ -958,9 +958,6 @@ def get_daily_bias(symbol: str) -> dict:
         if len(candles) < 3:
             return _default
 
-        # Analyse last 3 daily candles (index -3, -2, -1 = oldest to newest)
-        last3 = candles[-3:]
-
         def _candle_dir(c):
             return "bullish" if c["close"] > c["open"] else "bearish"
 
@@ -968,39 +965,57 @@ def get_daily_bias(symbol: str) -> dict:
             rng = c["high"] - c["low"]
             return abs(c["close"] - c["open"]) / rng if rng else 0
 
-        today = last3[-1]
-        today_dir = _candle_dir(today)
-        today_strength = "strong" if _body_ratio(today) > 0.6 else "moderate"
+        def _score(c):
+            return 1 if c["close"] > c["open"] else -1
 
-        directions = [_candle_dir(c) for c in last3]
-        bullish_count = directions.count("bullish")
-        bearish_count = directions.count("bearish")
+        # candles are oldest→newest; last entry is today
+        today       = candles[-1]
+        yesterday   = candles[-2]
+        two_days    = candles[-3]
 
-        if bullish_count >= 2:
+        today_dir   = _candle_dir(today)
+        today_ratio = _body_ratio(today)
+
+        # Strong today candle overrides everything
+        if today_ratio > 0.7:
+            bias      = today_dir
+            strength  = "strong"
+            confirmed = True
+            reason    = f"Strong today candle ({today_dir}, body {today_ratio:.0%}) overrides history"
+            return {
+                "bias": bias, "strength": strength,
+                "today_candle": today_dir, "confirmed": confirmed, "reason": reason,
+            }
+
+        # Weighted score: today×3, yesterday×2, two_days_ago×1
+        weighted = _score(today) * 3 + _score(yesterday) * 2 + _score(two_days) * 1
+
+        if weighted >= 3:
             bias = "bullish"
-            confirmed = bullish_count >= 2
-        elif bearish_count >= 2:
+        elif weighted >= 1:
+            bias = "bullish"
+        elif weighted <= -3:
             bias = "bearish"
-            confirmed = bearish_count >= 2
+        elif weighted <= -1:
+            bias = "bearish"
         else:
             bias = "neutral"
-            confirmed = False
 
-        # Strength: strong if today's candle body > 60% AND confirmed
-        if confirmed and today_strength == "strong":
+        confirmed = abs(weighted) >= 2
+
+        # Strength
+        if today_ratio > 0.6 and _candle_dir(today) == bias:
             strength = "strong"
-        elif confirmed:
+        elif abs(weighted) >= 3:
             strength = "moderate"
         else:
             strength = "weak"
 
-        consecutive = sum(1 for d in reversed(directions) if d == today_dir)
-        if consecutive == 3:
-            reason = f"3 consecutive {today_dir} daily candles"
-        elif confirmed:
-            reason = f"2 of 3 daily candles {bias}"
-        else:
-            reason = f"Today {today_dir}, mixed recent"
+        reason = (
+            f"Weighted score {weighted:+d}/6 "
+            f"(today {_candle_dir(today)}, yday {_candle_dir(yesterday)}, "
+            f"2d {_candle_dir(two_days)})"
+        )
 
         return {
             "bias": bias,
