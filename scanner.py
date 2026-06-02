@@ -25,6 +25,12 @@ import requests
 import yfinance as yf
 import pandas as pd
 
+# GC=F and similar futures trade above spot — subtract to approximate MT5 spot price
+FUTURES_SPOT_OFFSET = {
+    "XAUUSD": -30,    # GC=F ~30 pts above XAUUSD spot
+    "XAGUSD": -0.30,  # SI=F above spot silver
+}
+
 # yFinance ticker map for futures
 YFINANCE_FUTURES_MAP = {
     'ES': 'ES=F', 'MES': 'MES=F', 'NQ': 'NQ=F', 'MNQ': 'MNQ=F',
@@ -652,14 +658,17 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     factor_str = "; ".join(factors[:3]) if factors else "confluence confirmed"
     trend_dir = "Bullish" if direction == "BUY" else "Bearish"
 
-    # Round prices cleanly
+    # Round prices cleanly and apply spot offset for instruments where yFinance
+    # returns futures prices that differ from MT5 spot price
+    _spot_offset = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
     def rp(v):
+        adjusted = float(v) + _spot_offset
         if spec:
-            return round(float(v), 2)  # futures
+            return round(adjusted, 2)  # futures
         elif symbol.upper() in ("XAUUSD", "US30", "NAS100"):
-            return round(float(v), 2)  # gold and indices use 2dp
+            return round(adjusted, 2)  # gold and indices use 2dp
         else:
-            return round(float(v), 5)  # forex pairs use 5dp
+            return round(adjusted, 5)  # forex pairs use 5dp
     entry = rp(entry)
     sl = rp(sl)
     tp1 = rp(tp1)
@@ -692,6 +701,12 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
     current_price = price_data.get("price", "--") if price_data else "--"
     if current_price == "--" and candles:
         current_price = candles[0]["close"]
+    if isinstance(current_price, float):
+        # Gold and indices: 2dp; forex: 5dp
+        if symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP:
+            current_price = round(current_price, 2)
+        else:
+            current_price = round(current_price, 5)
 
     rec_emoji = "🔥" if rec == "STRONG" else "⚡" if rec == "MODERATE" else "👀"
     dir_emoji = "📈" if direction == "BUY" else "📉" if direction == "SELL" else "↔️"
@@ -757,7 +772,18 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                          "close": float(r["Close"])}
                         for _, r in _hist.iloc[::-1].iterrows()
                     ][:20]
-                    price_data = {"price": candles_1h[0]["close"]}
+                    # For XAUUSD use 1m candles for the most current price; fall back to 1h close
+                    if symbol.upper() == "XAUUSD":
+                        try:
+                            _1m = yf.Ticker("GC=F").history(period="1d", interval="1m")
+                            live_price = round(float(_1m["Close"].iloc[-1]), 2) if not _1m.empty else round(candles_1h[0]["close"], 2)
+                        except Exception:
+                            live_price = round(candles_1h[0]["close"], 2)
+                        # Subtract futures basis to approximate MT5 spot price
+                        live_price = round(live_price + FUTURES_SPOT_OFFSET.get(symbol.upper(), 0), 2)
+                        price_data = {"price": live_price}
+                    else:
+                        price_data = {"price": candles_1h[0]["close"]}
                     ranges = [c["high"] - c["low"] for c in candles_1h[:14]]
                     atr_val = sum(ranges) / len(ranges)
                     thresholds = {
@@ -958,10 +984,12 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 _live_price = float(_candles[0]["close"]) if _candles else None
                 _tolerance = 12.0
             elif _symbol.upper() == "XAUUSD":
-                # Use yFinance GC=F for live gold price — no Twelve Data credits
+                # Use 1m GC=F candle, then subtract futures basis to match spot entry levels
                 try:
                     _gc_hist = yf.Ticker("GC=F").history(period="1d", interval="1m")
                     _live_price = float(_gc_hist["Close"].iloc[-1]) if not _gc_hist.empty else None
+                    if _live_price is not None:
+                        _live_price = round(_live_price + FUTURES_SPOT_OFFSET.get("XAUUSD", 0), 2)
                 except Exception:
                     _live_price = None
                 _tolerance = 12.0
