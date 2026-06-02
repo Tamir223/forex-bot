@@ -166,13 +166,13 @@ def _check_profit_target(state, profile):
 def get_status_report(state: DrawdownState, profile: PropFirmProfile) -> str:
     target_pct = (state.total_pnl / profile.profit_target * 100) if profile.profit_target else 0
     if profile.drawdown_type == DrawdownType.TRAILING:
-        drawdown_used = state.peak_equity - state.current_balance
+        drawdown_used = max(0.0, state.peak_equity - state.current_balance)
         drawdown_label = f"Trailing (peak: ${state.peak_equity:,.2f})"
     elif profile.drawdown_type == DrawdownType.EOD:
-        drawdown_used = state.today_start_balance - state.current_balance
+        drawdown_used = max(0.0, state.today_start_balance - state.current_balance)
         drawdown_label = "EOD (resets each day)"
     else:
-        drawdown_used = state.starting_balance - state.current_balance
+        drawdown_used = max(0.0, state.starting_balance - state.current_balance)
         drawdown_label = "Static" if profile.drawdown_type == DrawdownType.STATIC else "Balance-based"
     drawdown_remaining = profile.max_total_loss - drawdown_used
     daily_loss_today = min(state.today_pnl, 0)

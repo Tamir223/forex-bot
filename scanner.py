@@ -561,13 +561,13 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
     try:
         from scanner_improvements import get_session_score_bonus
         hour = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).hour
-        if 7 <= hour <= 10:
+        if 7 <= hour < 10:
             _session = "London Open"
-        elif 13 <= hour <= 16:
-            _session = "NY Open"
-        elif 10 <= hour <= 12:
+        elif 10 <= hour < 13:
             _session = "London"
-        elif 16 <= hour <= 21:
+        elif 13 <= hour < 16:
+            _session = "NY Open"
+        elif 16 <= hour < 21:
             _session = "NY"
         else:
             _session = "Asian"

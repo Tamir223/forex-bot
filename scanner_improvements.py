@@ -20,16 +20,16 @@ logger = logging.getLogger(__name__)
 # All functions that need pair-specific tolerances should call get_pip_spec().
 
 PIP_SPECS = {
-    "EURUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0007},
-    "GBPUSD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.0008},
-    "AUDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0006},
-    "NZDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0006},
-    "USDCAD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.0007},
-    "USDCHF": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0007},
-    "USDJPY": {"pip": 0.01,   "min_sl": 0.10,   "min_atr": 0.05},
+    "EURUSD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.0007},  # 12 pips
+    "GBPUSD": {"pip": 0.0001, "min_sl": 0.0015, "min_atr": 0.0008},  # 15 pips — most volatile forex
+    "AUDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0006},  # 10 pips
+    "NZDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0006},  # 10 pips
+    "USDCAD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.0007},  # 12 pips
+    "USDCHF": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0007},  # 10 pips
+    "USDJPY": {"pip": 0.01,   "min_sl": 0.12,   "min_atr": 0.05},    # 12 pips JPY
     "EURJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.08},
     "GBPJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.10},
-    "XAUUSD": {"pip": 0.01,   "min_sl": 5.0,    "min_atr": 3.0},
+    "XAUUSD": {"pip": 0.01,   "min_sl": 12.0,   "min_atr": 3.0},     # 12 points — gold needs room
     "XAGUSD": {"pip": 0.001,  "min_sl": 0.05,   "min_atr": 0.03},
 }
 
