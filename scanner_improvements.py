@@ -438,20 +438,30 @@ def detect_rejection_candle(candles: list, direction: str, ob_zone_mid: float) -
 
 def is_ranging_market(candles: list) -> bool:
     """
-    Returns True if total price movement across last 4 candles < 0.3% of price.
+    Returns True if total price movement across last 4 candles < 0.15% of price.
+    Exception: if the last 10 candles show a move > 1% in either direction
+    (strong trend move just occurred), return False to allow OB retest setups.
     """
     if not candles or len(candles) < 4:
         return False
 
-    recent = candles[:4]
-    max_high = max(c["high"] for c in recent)
-    min_low = min(c["low"] for c in recent)
     current_price = candles[0]["close"]
-
     if current_price == 0:
         return False
 
-    return (max_high - min_low) / current_price < 0.003
+    # Exception: suppress ranging filter after a strong momentum move
+    if len(candles) >= 10:
+        lookback = candles[:10]
+        lb_high = max(c["high"] for c in lookback)
+        lb_low = min(c["low"] for c in lookback)
+        if (lb_high - lb_low) / current_price > 0.01:
+            return False
+
+    recent = candles[:4]
+    max_high = max(c["high"] for c in recent)
+    min_low = min(c["low"] for c in recent)
+
+    return (max_high - min_low) / current_price < 0.0015
 
 
 # ─── 10. PREVIOUS DAY HIGH/LOW ────────────────────────────────────────────────
