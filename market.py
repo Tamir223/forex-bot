@@ -9,6 +9,20 @@ import requests
 import yfinance as yf
 from config import TWELVE_DATA_API_KEY
 
+# yFinance forex tickers — used as fallback when Twelve Data is rate-limited
+YFINANCE_FOREX_MAP = {
+    "EURUSD": "EURUSD=X",
+    "GBPUSD": "GBPUSD=X",
+    "USDJPY": "USDJPY=X",
+    "AUDUSD": "AUDUSD=X",
+    "USDCAD": "USDCAD=X",
+    "NZDUSD": "NZDUSD=X",
+    "USDCHF": "USDCHF=X",
+    "EURGBP": "EURGBP=X",
+    "EURJPY": "EURJPY=X",
+    "GBPJPY": "GBPJPY=X",
+}
+
 # Mirrors scanner.YFINANCE_FUTURES_MAP — kept here to avoid a circular import
 # (scanner.py imports from market.py).  Keep in sync when the map changes.
 YFINANCE_FUTURES_MAP = {
@@ -63,36 +77,65 @@ def normalize_symbol(pair: str) -> str:
     return SYMBOL_MAP.get(upper, upper)
 
 
+def _get_live_price_yfinance(pair: str) -> dict | None:
+    """yFinance fallback for live forex price using 1m candles."""
+    ticker = YFINANCE_FOREX_MAP.get(pair.upper())
+    if not ticker:
+        return None
+    try:
+        hist = yf.Ticker(ticker).history(period="1d", interval="1m")
+        if hist.empty:
+            return None
+        price = round(float(hist["Close"].iloc[-1]), 5)
+        logger.info(f"[market] yFinance fallback price for {pair}: {price}")
+        return {"price": price, "symbol": pair, "source": "yfinance"}
+    except Exception as e:
+        logger.error(f"yFinance live price error for {pair}: {e}")
+        return None
+
+
 def get_live_price(pair: str) -> dict:
     """
     Get current price for a pair.
-    Returns: { price, symbol, timestamp } or None
+    Tries Twelve Data first; falls back to yFinance on failure or rate limit.
+    Returns: { price, symbol } or None
     """
-    if not TWELVE_DATA_API_KEY or not pair:
+    if not pair:
         return None
 
-    symbol = normalize_symbol(pair)
-    if not symbol:
+    upper = pair.upper()
+
+    # XAUUSD and futures always use yFinance — no Twelve Data credits
+    if upper == "XAUUSD" or upper in YFINANCE_FUTURES_MAP:
+        yf_ticker = "GC=F" if upper == "XAUUSD" else YFINANCE_FUTURES_MAP[upper]
+        try:
+            hist = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
+            if not hist.empty:
+                return {"price": round(float(hist["Close"].iloc[-1]), 2), "symbol": pair}
+        except Exception as e:
+            logger.error(f"yFinance price error for {pair}: {e}")
         return None
 
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/price",
-            params={"symbol": symbol, "apikey": TWELVE_DATA_API_KEY},
-            timeout=5
-        )
-        data = resp.json()
-        if data.get("status") == "error" or "price" not in data:
-            logger.warning(f"Price fetch failed for {symbol}: {data.get('message', 'unknown error')}")
-            return None
+    # Forex — try Twelve Data, fall back to yFinance
+    td_result = None
+    if TWELVE_DATA_API_KEY:
+        symbol = normalize_symbol(pair)
+        if symbol:
+            try:
+                resp = requests.get(
+                    f"{BASE_URL}/price",
+                    params={"symbol": symbol, "apikey": TWELVE_DATA_API_KEY},
+                    timeout=5
+                )
+                data = resp.json()
+                if data.get("status") != "error" and "price" in data:
+                    return {"price": float(data["price"]), "symbol": symbol}
+                logger.warning(f"Price fetch failed for {symbol}: {data.get('message', 'unknown error')}")
+            except Exception as e:
+                logger.error(f"Live price error for {pair}: {e}")
 
-        return {
-            "price": float(data["price"]),
-            "symbol": symbol,
-        }
-    except Exception as e:
-        logger.error(f"Live price error for {pair}: {e}")
-        return None
+    # Twelve Data unavailable or rate-limited — fall back to yFinance
+    return _get_live_price_yfinance(pair)
 
 
 def _get_atr_yfinance(pair: str, yf_ticker: str, interval: str = "1h", period: int = 14) -> dict | None:
@@ -141,6 +184,9 @@ def get_atr(pair: str, interval: str = "1h", period: int = 14) -> dict:
         return _get_atr_yfinance(pair, YFINANCE_FUTURES_MAP[upper], interval, period)
 
     if not TWELVE_DATA_API_KEY:
+        # No API key — go straight to yFinance fallback for forex
+        if upper in YFINANCE_FOREX_MAP:
+            return _get_atr_yfinance(pair, YFINANCE_FOREX_MAP[upper], interval, period)
         return None
 
     symbol = normalize_symbol(pair)
@@ -178,6 +224,9 @@ def get_atr(pair: str, interval: str = "1h", period: int = 14) -> dict:
         data = resp.json()
         if data.get("status") == "error" or "values" not in data:
             logger.warning(f"ATR fetch failed for {symbol}: {data.get('message', 'unknown')}")
+            if upper in YFINANCE_FOREX_MAP:
+                logger.info(f"[market] Falling back to yFinance ATR for {pair}")
+                return _get_atr_yfinance(pair, YFINANCE_FOREX_MAP[upper], interval, period)
             return None
 
         atr_value = float(data["values"][0]["atr"])
@@ -198,6 +247,9 @@ def get_atr(pair: str, interval: str = "1h", period: int = 14) -> dict:
         }
     except Exception as e:
         logger.error(f"ATR error for {pair}: {e}")
+        if upper in YFINANCE_FOREX_MAP:
+            logger.info(f"[market] Falling back to yFinance ATR for {pair} after exception")
+            return _get_atr_yfinance(pair, YFINANCE_FOREX_MAP[upper], interval, period)
         return None
 
 

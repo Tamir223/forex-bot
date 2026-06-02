@@ -152,6 +152,32 @@ def get_candles_yfinance(symbol: str, outputsize: int = 50) -> list | None:
         return None
 
 
+def _get_candles_yfinance_forex(symbol: str, outputsize: int = 50) -> list | None:
+    """Fetch forex 15M candles from yFinance as Twelve Data fallback."""
+    from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
+    ticker = _YF_FOREX_MAP.get(symbol.upper())
+    if not ticker:
+        return None
+    try:
+        hist = yf.Ticker(ticker).history(period="5d", interval="15m")
+        if hist.empty:
+            return None
+        result = []
+        for ts, row in hist.iloc[::-1].iterrows():
+            result.append({
+                "datetime": str(ts),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": float(row.get("Volume", 0)),
+            })
+        return result[:outputsize]
+    except Exception as e:
+        logger.error(f"yFinance forex candle error for {symbol}: {e}")
+        return None
+
+
 def get_candles(symbol: str, interval: str = "15min", outputsize: int = 50) -> list | None:
     """Fetch candles — uses yFinance for futures and XAUUSD, Twelve Data for forex."""
     if symbol.upper() in YFINANCE_FUTURES_MAP:
@@ -176,7 +202,11 @@ def get_candles(symbol: str, interval: str = "15min", outputsize: int = 50) -> l
         except Exception as e:
             logger.error(f"yFinance candle error for XAUUSD: {e}")
             return None
+    from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
+
     if not TWELVE_DATA_API_KEY:
+        if symbol.upper() in _YF_FOREX_MAP:
+            return _get_candles_yfinance_forex(symbol, outputsize)
         return None
     td_symbol = normalize_symbol(symbol)
     if not td_symbol:
@@ -195,6 +225,9 @@ def get_candles(symbol: str, interval: str = "15min", outputsize: int = 50) -> l
         data = resp.json()
         if data.get("status") == "error" or "values" not in data:
             logger.warning(f"Candle fetch failed for {symbol}: {data.get('message', 'unknown')}")
+            if symbol.upper() in _YF_FOREX_MAP:
+                logger.info(f"[scanner] Falling back to yFinance candles for {symbol}")
+                return _get_candles_yfinance_forex(symbol, outputsize)
             return None
         candles = data["values"]
         result = []
