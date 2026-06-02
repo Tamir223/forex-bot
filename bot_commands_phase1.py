@@ -233,3 +233,17 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     alerts = await run_scan(watchlist, bot, [str(update.effective_user.id)], force=True)
     if alerts == 0:
         await update.message.reply_text("✅ Scan complete — no strong setups found right now. Markets may be ranging or in low volatility.")
+
+
+async def cmd_bias(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = get_user_by_chat_id(str(update.effective_user.id))
+    if not user:
+        await update.message.reply_text("❌ No active subscription.")
+        return
+    await update.message.reply_text("📊 Fetching daily bias for your watchlist...")
+    from database import get_user_watchlist
+    from scanner import build_bias_report, DEFAULT_WATCHLIST
+    watchlist_str = get_user_watchlist(user.id)
+    watchlist = [s.strip() for s in watchlist_str.split(",")] if watchlist_str else DEFAULT_WATCHLIST
+    report = build_bias_report(watchlist)
+    await update.message.reply_text(report, parse_mode="Markdown")

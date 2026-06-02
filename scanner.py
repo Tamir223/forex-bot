@@ -18,7 +18,8 @@ from scanner_improvements import (
     get_loss_warning_message, run_pre_scan_checks,
     detect_liquidity_sweep, detect_rejection_candle, is_ranging_market,
     get_previous_day_levels, is_optimal_time_for_pair, validate_risk_reward,
-    check_pair_correlation, detect_mtf_ob_confluence, detect_momentum
+    check_pair_correlation, detect_mtf_ob_confluence, detect_momentum,
+    check_daily_bias_alignment
 )
 import requests
 import yfinance as yf
@@ -513,6 +514,27 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         if mom_ok:
             score += 2 if "Strong" in mom_desc else 1
             factors.append(mom_desc)
+
+    # Daily bias alignment check
+    if symbol is not None and trend in ("bullish", "bearish"):
+        try:
+            _trade_dir = "BUY" if trend == "bullish" else "SELL"
+            _bias_ok, _bias_msg = check_daily_bias_alignment(symbol, _trade_dir)
+            if not _bias_ok:
+                # Confirmed conflict — penalty depends on bias strength
+                from scanner_improvements import get_daily_bias as _get_db
+                _db = _get_db(symbol)
+                if _db.get("strength") == "strong":
+                    score -= 2
+                    factors.append("⚠️ Against confirmed daily bias — high risk")
+                else:
+                    score -= 1
+                    factors.append("⚠️ Daily bias conflict — proceed with caution")
+            elif _bias_msg:
+                score += 1
+                factors.append(_bias_msg)
+        except Exception:
+            pass
 
     recommendation = "STRONG" if score >= 8 else "MODERATE" if score >= 5 else "WEAK"
 
@@ -1085,12 +1107,32 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
     return alerts_sent
 
 
+def build_bias_report(symbols: list) -> str:
+    """Build a formatted daily bias report for the given symbol list."""
+    from scanner_improvements import get_daily_bias
+    lines = ["📊 *DAILY BIAS REPORT*", "━━━━━━━━━━━━━━━━━━━━"]
+    for sym in symbols:
+        try:
+            b = get_daily_bias(sym)
+            bias = b["bias"]
+            strength = b["strength"]
+            reason = b["reason"]
+            emoji = "🟢" if bias == "bullish" else "🔴" if bias == "bearish" else "⚪"
+            lines.append(f"{emoji} *{sym}*: {bias.upper()} ({strength}) — {reason}")
+        except Exception:
+            lines.append(f"⚪ *{sym}*: data unavailable")
+    lines += ["━━━━━━━━━━━━━━━━━━━━", "Check this every morning before trading."]
+    return "\n".join(lines)
+
+
 async def start_scanner(bot, get_active_users_fn):
     """
     Main scanner loop. Runs every SCAN_INTERVAL seconds.
     Call this from main.py alongside start_bot().
     """
     logger.info("[scanner] Scanner started")
+    _bias_sent_date = None  # track last date bias report was sent
+
     while True:
         try:
             interval = get_session_interval()
@@ -1116,6 +1158,24 @@ async def start_scanner(bot, get_active_users_fn):
                     symbols = DEFAULT_WATCHLIST
                 all_symbols.update(symbols)
                 user_chat_ids.append(user.telegram_chat_id)
+
+            # 5:30 AM UTC daily bias report — sent once per trading day
+            _now = datetime.now(timezone.utc)
+            _today = _now.date()
+            if (_now.hour == 5 and _now.minute < 35 and
+                    _today.weekday() < 5 and _bias_sent_date != _today):
+                try:
+                    _bias_symbols = list(all_symbols)[:8]  # cap at 8 to keep message readable
+                    _report = build_bias_report(_bias_symbols)
+                    for _cid in user_chat_ids:
+                        try:
+                            await bot.send_message(chat_id=_cid, text=_report, parse_mode="Markdown")
+                        except Exception as _be:
+                            logger.error(f"[scanner] bias report send error to {_cid}: {_be}")
+                    _bias_sent_date = _today
+                    logger.info(f"[scanner] Daily bias report sent to {len(user_chat_ids)} users")
+                except Exception as _bre:
+                    logger.error(f"[scanner] bias report build error: {_bre}")
 
             await run_scan(list(all_symbols), bot, user_chat_ids)
 

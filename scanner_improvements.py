@@ -46,16 +46,10 @@ def get_pip_spec(symbol: str) -> dict:
 # High impact news times UTC — updated weekly
 # Format: (hour, minute, description)
 HIGH_IMPACT_NEWS = [
-    # Monday
-    (0, 0, "Weekly open"),
-    # Tuesday-Friday common slots
+    # Last-resort fallback only — ForexFactory live feed is the primary source.
+    # Only include times that are nearly always high-impact regardless of the calendar.
     (8, 30, "US Core PCE / GDP / NFP / CPI"),
     (13, 30, "US economic data"),
-    (14, 0, "US economic data"),
-    (15, 0, "US economic data"),
-    (18, 0, "FOMC minutes"),
-    (19, 0, "Fed speeches"),
-    # GBP events
     (7, 0, "BOE / UK data"),
     (9, 0, "ECB / EUR data"),
 ]
@@ -905,3 +899,138 @@ def detect_momentum(candles: list, direction: str) -> tuple[bool, str]:
         return True, f"Momentum confirmed — consecutive {dir_label} candles"
 
     return False, ""
+
+
+# ─── 16. DAILY BIAS ───────────────────────────────────────────────────────────
+
+_DAILY_BIAS_FUTURES_MAP = {
+    'ES': 'ES=F', 'MES': 'MES=F', 'NQ': 'NQ=F', 'MNQ': 'MNQ=F',
+    'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
+    'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F', 'XAUUSD': 'GC=F',
+}
+
+
+def get_daily_bias(symbol: str) -> dict:
+    """
+    Get the daily candle bias for a symbol.
+    Returns dict with bias, strength, confirmed flag, and reason.
+    """
+    _default = {"bias": "neutral", "strength": "weak", "today_candle": "neutral",
+                "confirmed": False, "reason": "Insufficient data"}
+    sym = symbol.upper()
+    try:
+        candles = []
+        ticker = _DAILY_BIAS_FUTURES_MAP.get(sym)
+        if ticker:
+            import yfinance as yf
+            hist = yf.Ticker(ticker).history(period="10d", interval="1d")
+            if hist.empty or len(hist) < 3:
+                return _default
+            for _, row in hist.iloc[-5:].iterrows():
+                candles.append({
+                    "open": float(row["Open"]), "high": float(row["High"]),
+                    "low": float(row["Low"]),  "close": float(row["Close"]),
+                })
+        else:
+            try:
+                from config import TWELVE_DATA_API_KEY
+                from market import normalize_symbol
+                td_sym = normalize_symbol(sym)
+                if not td_sym or not TWELVE_DATA_API_KEY:
+                    return _default
+                resp = requests.get(
+                    "https://api.twelvedata.com/time_series",
+                    params={"symbol": td_sym, "interval": "1day",
+                            "outputsize": 5, "apikey": TWELVE_DATA_API_KEY},
+                    timeout=8,
+                )
+                data = resp.json()
+                if "values" not in data:
+                    return _default
+                for c in reversed(data["values"]):
+                    candles.append({
+                        "open": float(c["open"]), "high": float(c["high"]),
+                        "low":  float(c["low"]),  "close": float(c["close"]),
+                    })
+            except Exception:
+                return _default
+
+        if len(candles) < 3:
+            return _default
+
+        # Analyse last 3 daily candles (index -3, -2, -1 = oldest to newest)
+        last3 = candles[-3:]
+
+        def _candle_dir(c):
+            return "bullish" if c["close"] > c["open"] else "bearish"
+
+        def _body_ratio(c):
+            rng = c["high"] - c["low"]
+            return abs(c["close"] - c["open"]) / rng if rng else 0
+
+        today = last3[-1]
+        today_dir = _candle_dir(today)
+        today_strength = "strong" if _body_ratio(today) > 0.6 else "moderate"
+
+        directions = [_candle_dir(c) for c in last3]
+        bullish_count = directions.count("bullish")
+        bearish_count = directions.count("bearish")
+
+        if bullish_count >= 2:
+            bias = "bullish"
+            confirmed = bullish_count >= 2
+        elif bearish_count >= 2:
+            bias = "bearish"
+            confirmed = bearish_count >= 2
+        else:
+            bias = "neutral"
+            confirmed = False
+
+        # Strength: strong if today's candle body > 60% AND confirmed
+        if confirmed and today_strength == "strong":
+            strength = "strong"
+        elif confirmed:
+            strength = "moderate"
+        else:
+            strength = "weak"
+
+        consecutive = sum(1 for d in reversed(directions) if d == today_dir)
+        if consecutive == 3:
+            reason = f"3 consecutive {today_dir} daily candles"
+        elif confirmed:
+            reason = f"2 of 3 daily candles {bias}"
+        else:
+            reason = f"Today {today_dir}, mixed recent"
+
+        return {
+            "bias": bias,
+            "strength": strength,
+            "today_candle": today_dir,
+            "confirmed": confirmed,
+            "reason": reason,
+        }
+
+    except Exception as e:
+        logger.error(f"[daily_bias] {symbol}: {e}")
+        return _default
+
+
+def check_daily_bias_alignment(symbol: str, direction: str) -> tuple[bool, str]:
+    """
+    Check if trade direction aligns with the daily bias.
+    Returns (aligned, message).
+    """
+    bias = get_daily_bias(symbol)
+    b = bias["bias"]
+    confirmed = bias["confirmed"]
+    strength = bias["strength"]
+
+    if direction.upper() == "BUY" and b == "bearish" and confirmed:
+        return False, f"⚠️ DAILY BIAS CONFLICT — Trading BUY against confirmed bearish daily bias. High risk."
+    if direction.upper() == "SELL" and b == "bullish" and confirmed:
+        return False, f"⚠️ DAILY BIAS CONFLICT — Trading SELL against confirmed bullish daily bias. High risk."
+
+    if b != "neutral" and confirmed:
+        return True, f"✅ Daily bias {b} confirms {direction.upper()} direction"
+
+    return True, ""

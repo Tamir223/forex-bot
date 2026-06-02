@@ -37,7 +37,7 @@ from bot_commands_phase1 import (
     cmd_firmlist, cmd_setfirm, cmd_firm,
     cmd_challenge, cmd_status, cmd_logtrade,
     cmd_history, cmd_resetfirm, callback_reset,
-    cmd_watch, cmd_scan
+    cmd_watch, cmd_scan, cmd_bias
 )
 
 logger = logging.getLogger(__name__)
@@ -523,6 +523,7 @@ async def set_bot_commands(app):
         BotCommand("resetfirm", "Reset your challenge tracker"),
         BotCommand("watch", "Set your scanner watchlist (e.g. /watch ES NQ XAUUSD)"),
         BotCommand("scan", "Trigger an instant manual scan of your watchlist"),
+        BotCommand("bias", "Daily bias report for your watchlist pairs"),
         BotCommand("cancel", "Cancel current operation"),
     ]
     await app.bot.set_my_commands(commands)
@@ -730,6 +731,7 @@ async def start_bot():
     app.add_handler(CommandHandler("resetfirm", cmd_resetfirm))
     app.add_handler(CommandHandler("watch", cmd_watch))
     app.add_handler(CommandHandler("scan", cmd_scan))
+    app.add_handler(CommandHandler("bias", cmd_bias))
     app.add_handler(CallbackQueryHandler(callback_reset, pattern="^reset_"))
     app.add_handler(CallbackQueryHandler(callback_autograde, pattern="^autograde_"))
     app.add_handler(CommandHandler("accounts", cmd_accounts))
