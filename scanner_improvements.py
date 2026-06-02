@@ -438,9 +438,14 @@ def detect_rejection_candle(candles: list, direction: str, ob_zone_mid: float) -
 
 def is_ranging_market(candles: list) -> bool:
     """
-    Returns True if total price movement across last 4 candles < 0.15% of price.
-    Exception: if the last 10 candles show a move > 1% in either direction
-    (strong trend move just occurred), return False to allow OB retest setups.
+    Returns True only when ALL three conditions are met simultaneously:
+    1. 4-candle range < 0.15% of price
+    2. 10-candle range < 0.5% of price
+    3. No liquidity sweep in the last 5 candles
+
+    A liquidity sweep is a candle whose wick pierced beyond the prior 3-candle
+    high/low but whose body closed back inside — a sign of institutional activity
+    that never occurs in a truly ranging market.
     """
     if not candles or len(candles) < 4:
         return False
@@ -449,19 +454,39 @@ def is_ranging_market(candles: list) -> bool:
     if current_price == 0:
         return False
 
-    # Exception: suppress ranging filter after a strong momentum move
+    # Condition 1: 4-candle range < 0.15%
+    recent4 = candles[:4]
+    range4 = (max(c["high"] for c in recent4) - min(c["low"] for c in recent4)) / current_price
+    if range4 >= 0.0015:
+        return False
+
+    # Condition 2: 10-candle range < 0.5%
     if len(candles) >= 10:
-        lookback = candles[:10]
-        lb_high = max(c["high"] for c in lookback)
-        lb_low = min(c["low"] for c in lookback)
-        if (lb_high - lb_low) / current_price > 0.01:
+        lookback10 = candles[:10]
+        range10 = (max(c["high"] for c in lookback10) - min(c["low"] for c in lookback10)) / current_price
+        if range10 >= 0.005:
             return False
 
-    recent = candles[:4]
-    max_high = max(c["high"] for c in recent)
-    min_low = min(c["low"] for c in recent)
+    # Condition 3: no liquidity sweep in the last 5 candles
+    # A sweep: wick breaks the prior-3-candle high or low, but candle closes back inside
+    if len(candles) >= 5:
+        for i in range(5):
+            candle = candles[i]
+            # need at least 3 candles before this one for the reference window
+            if i + 3 >= len(candles):
+                break
+            prior3 = candles[i + 1: i + 4]
+            prior_high = max(c["high"] for c in prior3)
+            prior_low  = min(c["low"]  for c in prior3)
+            close = candle["close"]
+            # Bullish sweep: wick below prior low but close back above it
+            if candle["low"] < prior_low and close > prior_low:
+                return False
+            # Bearish sweep: wick above prior high but close back below it
+            if candle["high"] > prior_high and close < prior_high:
+                return False
 
-    return (max_high - min_low) / current_price < 0.0015
+    return True
 
 
 # ─── 10. PREVIOUS DAY HIGH/LOW ────────────────────────────────────────────────
