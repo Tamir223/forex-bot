@@ -644,14 +644,14 @@ def get_previous_day_levels(candles: list) -> dict:
 # ─── 11. TIME OF DAY FILTER PER PAIR ─────────────────────────────────────────
 
 PAIR_OPTIMAL_HOURS = {
-    "EURUSD": [(7, 16)],            # London open through NY session
-    "GBPUSD": [(7, 16)],            # London open through NY session
-    "XAUUSD": [(7, 16)],            # London open through NY session
-    "USDJPY": [(0, 3), (7, 16)],    # Asian session + London/NY
-    "AUDUSD": [(7, 14)],            # London open through early NY
-    "NZDUSD": [(7, 14)],            # London open through early NY
-    "USDCAD": [(12, 20)],           # NY session (most active for CAD)
-    "USDCHF": [(7, 16)],            # London open through NY session
+    "EURUSD": [(7, 21)],            # London open through NY close
+    "GBPUSD": [(7, 21)],            # London open through NY close
+    "XAUUSD": [(7, 21)],            # London open through NY close
+    "USDJPY": [(0, 3), (7, 21)],    # Asian session + London/NY close
+    "AUDUSD": [(7, 17)],            # London open through mid NY
+    "NZDUSD": [(7, 17)],            # London open through mid NY
+    "USDCAD": [(12, 21)],           # NY session close (most active for CAD)
+    "USDCHF": [(7, 21)],            # London open through NY close
     "EURJPY": [(0, 3), (7, 16)],
     "GBPJPY": [(0, 3), (7, 16)],
     "ES":     [(12, 16)],           # NY open 8 AM EDT = 12:00 UTC
