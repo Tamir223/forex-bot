@@ -665,12 +665,13 @@ def build_auto_signal(symbol: str, direction: str, price: float,
             sl = round(price * 0.998, 5) if not spec else round(price - spec["typical_sl_pts"], 2)
 
         sl_dist = abs(entry - sl)
-        if not spec:
-            sl_dist = max(sl_dist, _min_sl_dist(symbol))
-            sl = round(entry - sl_dist, 2) if symbol.upper() in ("XAUUSD",) else round(entry - sl_dist, 5)
-        tp1 = round(entry + sl_dist * 1.5, 5)
-        tp2 = round(entry + sl_dist * 2.5, 5)
-        tp3 = round(entry + sl_dist * 4.0, 5)
+        sl_dist = max(sl_dist, _min_sl_dist(symbol))
+        _use_2dp = spec or symbol.upper() in ("XAUUSD", "US30", "NAS100")
+        sl = round(entry - sl_dist, 2) if _use_2dp else round(entry - sl_dist, 5)
+        tp1 = round(entry + sl_dist * 1.5, 2 if _use_2dp else 5)
+        tp2 = round(entry + sl_dist * 2.5, 2 if _use_2dp else 5)
+        tp3 = round(entry + sl_dist * 4.0, 2 if _use_2dp else 5)
+        logger.debug(f"[build_signal] {symbol} BUY sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     else:  # SELL
         if ob and ob["type"] == "bearish_ob":
@@ -684,12 +685,13 @@ def build_auto_signal(symbol: str, direction: str, price: float,
             sl = round(price * 1.002, 5) if not spec else round(price + spec["typical_sl_pts"], 2)
 
         sl_dist = abs(sl - entry)
-        if not spec:
-            sl_dist = max(sl_dist, _min_sl_dist(symbol))
-            sl = round(entry + sl_dist, 2) if symbol.upper() in ("XAUUSD",) else round(entry + sl_dist, 5)
-        tp1 = round(entry - sl_dist * 1.5, 5)
-        tp2 = round(entry - sl_dist * 2.5, 5)
-        tp3 = round(entry - sl_dist * 4.0, 5)
+        sl_dist = max(sl_dist, _min_sl_dist(symbol))
+        _use_2dp = spec or symbol.upper() in ("XAUUSD", "US30", "NAS100")
+        sl = round(entry + sl_dist, 2) if _use_2dp else round(entry + sl_dist, 5)
+        tp1 = round(entry - sl_dist * 1.5, 2 if _use_2dp else 5)
+        tp2 = round(entry - sl_dist * 2.5, 2 if _use_2dp else 5)
+        tp3 = round(entry - sl_dist * 4.0, 2 if _use_2dp else 5)
+        logger.debug(f"[build_signal] {symbol} SELL sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     # Build setup description
     setup_parts = []
@@ -713,6 +715,15 @@ def build_auto_signal(symbol: str, direction: str, price: float,
 
     factor_str = "; ".join(factors[:3]) if factors else "confluence confirmed"
     trend_dir = "Bullish" if direction == "BUY" else "Bearish"
+
+    # Enforce minimum 1.5:1 TP1 floor before offset is applied
+    _tp1_min_dist = sl_dist * 1.5
+    if direction == "BUY" and (tp1 - entry) < _tp1_min_dist - 0.0001:
+        tp1 = round(entry + _tp1_min_dist, 2 if _use_2dp else 5)
+        logger.warning(f"[build_signal] {symbol} BUY TP1 corrected to 1.5R: tp1={tp1}")
+    elif direction == "SELL" and (entry - tp1) < _tp1_min_dist - 0.0001:
+        tp1 = round(entry - _tp1_min_dist, 2 if _use_2dp else 5)
+        logger.warning(f"[build_signal] {symbol} SELL TP1 corrected to 1.5R: tp1={tp1}")
 
     # Round prices cleanly and apply spot offset for instruments where yFinance
     # returns futures prices that differ from MT5 spot price
