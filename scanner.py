@@ -94,12 +94,12 @@ def _cache_signal(signal_text: str) -> str:
 
 
 def get_cached_signal(key: str) -> str | None:
-    """Retrieve a cached signal by key. Returns None if missing or older than 10 minutes."""
+    """Retrieve a cached signal by key. Returns None if missing or older than 5 minutes."""
     entry = AUTO_SIGNAL_CACHE.get(key)
     if entry is None:
         return None
     age = datetime.now(timezone.utc) - entry["timestamp"]
-    if age.total_seconds() > 600:
+    if age.total_seconds() > 300:
         del AUTO_SIGNAL_CACHE[key]
         return None
     return entry["signal"]
@@ -653,12 +653,12 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     spec = get_spec(symbol) if is_futures(symbol) else None
 
     if direction == "BUY":
-        # Entry: OB mid if available, else FVG top, else current price
+        # Entry: if price is inside OB/FVG zone use current price, else use zone mid (limit order)
         if ob and ob["type"] == "bullish_ob":
-            entry = ob["mid"]
+            entry = price if ob["low"] <= price <= ob["high"] else ob["mid"]
             sl = round(ob["low"] - (ob["high"] - ob["low"]) * 0.1, 5)
         elif fvg and fvg["type"] == "bullish_fvg":
-            entry = fvg["top"]
+            entry = price if fvg["bottom"] <= price <= fvg["top"] else fvg["top"]
             sl = round(fvg["bottom"] - (fvg["top"] - fvg["bottom"]) * 0.5, 5)
         else:
             entry = price
@@ -674,11 +674,12 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         logger.info(f"[build_signal] {symbol} BUY sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     else:  # SELL
+        # Entry: if price is inside OB/FVG zone use current price, else use zone mid (limit order)
         if ob and ob["type"] == "bearish_ob":
-            entry = ob["mid"]
+            entry = price if ob["low"] <= price <= ob["high"] else ob["mid"]
             sl = round(ob["high"] + (ob["high"] - ob["low"]) * 0.1, 5)
         elif fvg and fvg["type"] == "bearish_fvg":
-            entry = fvg["bottom"]
+            entry = price if fvg["bottom"] <= price <= fvg["top"] else fvg["bottom"]
             sl = round(fvg["top"] + (fvg["top"] - fvg["bottom"]) * 0.5, 5)
         else:
             entry = price
@@ -1052,6 +1053,12 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             "deviation": deviation,
             "correlation_warning": corr_warning,
             "bias_unknown": score_data.get("bias_unknown", False),
+            # Stored for fresh signal regeneration at grade time
+            "ob": ob,
+            "fvg": fvg,
+            "structure": structure,
+            "htf_bias": htf_bias or {},
+            "score_data": score_data,
         }
 
     except Exception as e:
@@ -1069,13 +1076,15 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         if not signal_text:
             return False
 
-        # Entry validation — reject if price has moved outside tolerance since signal fired
+        # Entry validation — reject if price has moved outside strict tolerance since signal fired
         import re as _re
         _limit_note = None
+        _symbol = result.get("symbol", "")
+        _direction = result.get("direction", "")
         _entry_match = _re.search(r"Entry Zone:\s*([\d.]+)", signal_text)
+        _live_price = None
         if _entry_match:
             _entry_price = float(_entry_match.group(1))
-            _symbol = result.get("symbol", "")
             if _symbol.upper() in YFINANCE_FUTURES_MAP:
                 _candles = get_candles_yfinance(_symbol, outputsize=5)
                 _live_price = float(_candles[0]["close"]) if _candles else None
@@ -1089,14 +1098,13 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                         _live_price = round(_live_price + FUTURES_SPOT_OFFSET.get("XAUUSD", 0), 2)
                 except Exception:
                     _live_price = None
-                _tolerance = 12.0
+                _tolerance = 8.0
             else:
                 _price_data = get_live_price(_symbol)
                 _live_price = float(_price_data["price"]) if _price_data else None
-                _tolerance = 0.0012
+                _tolerance = 0.08 if "JPY" in _symbol.upper() else 0.0008
             if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
                 _score = result.get("score", 0)
-                _direction = result.get("direction", "")
                 if _score == 10:
                     if _direction == "SELL" and _live_price < _entry_price:
                         _limit_note = (
@@ -1116,6 +1124,24 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                         text=f"⏰ Signal expired — {_symbol} entry at {_entry_price} but price is now at {_live_price}. Entry zone missed."
                     )
                     return False
+
+        # Regenerate signal with fresh live price so entry reflects current OB zone position
+        _ob = result.get("ob")
+        _fvg = result.get("fvg")
+        if _live_price is not None and (_ob or _fvg):
+            try:
+                _fresh_signal = build_auto_signal(
+                    _symbol, _direction, _live_price,
+                    _ob, _fvg,
+                    result.get("structure", {}),
+                    result.get("score_data", {}),
+                    result.get("htf_bias", {}),
+                )
+                if _fresh_signal:
+                    signal_text = _fresh_signal
+                    logger.info(f"[auto-grade] {_symbol} signal regenerated with live price {_live_price}")
+            except Exception as _regen_err:
+                logger.warning(f"[auto-grade] {_symbol} signal regen failed: {_regen_err} — using cached signal")
 
         from claude import analyze_signal
         from report import execute_report, blocked_report
