@@ -50,11 +50,12 @@ HIGH_IMPACT_NEWS = [
     # Only include times that are nearly always high-impact regardless of the calendar.
     (8, 30, "US Core PCE / GDP / NFP / CPI"),
     (13, 30, "US economic data"),
+    (14, 0, "US economic data — 10AM EDT"),
     (7, 0, "BOE / UK data"),
     (9, 0, "ECB / EUR data"),
 ]
 
-NEWS_BLOCK_MINUTES_BEFORE = 30
+NEWS_BLOCK_MINUTES_BEFORE = 45
 NEWS_BLOCK_MINUTES_AFTER = 30
 
 def is_news_window() -> tuple[bool, str]:
@@ -75,6 +76,7 @@ def is_news_window() -> tuple[bool, str]:
         if resp.status_code == 200:
             events = resp.json()
             today = now.strftime("%Y-%m-%d")
+            high_today = []
             for event in events:
                 if event.get("impact") != "High":
                     continue
@@ -85,20 +87,29 @@ def is_news_window() -> tuple[bool, str]:
                 if not event_time or event_time == "Tentative":
                     continue
                 try:
-                    # Parse time like "8:30am"
                     from datetime import datetime as dt
                     t = dt.strptime(event_time.upper(), "%I:%M%p")
                     event_minutes = t.hour * 60 + t.minute
-                    # Convert ET to UTC (+4 or +5 depending on DST)
+                    # Convert ET to UTC (+4 EDT)
                     event_minutes_utc = event_minutes + 4 * 60
                     if event_minutes_utc > 24 * 60:
                         event_minutes_utc -= 24 * 60
+                    utc_h, utc_m = divmod(event_minutes_utc, 60)
+                    high_today.append((utc_h, utc_m, event.get("title", "?"), event_time))
 
                     diff = current_minutes - event_minutes_utc
                     if -NEWS_BLOCK_MINUTES_BEFORE <= diff <= NEWS_BLOCK_MINUTES_AFTER:
+                        logging.debug(
+                            "[NEWS] FF today high-impact events: %s",
+                            [(h, m, d, et) for h, m, d, et in high_today]
+                        )
                         return True, f"High impact news: {event.get('title', 'USD event')}"
                 except Exception:
                     continue
+            logging.debug(
+                "[NEWS] FF today high-impact events (no block): %s",
+                [(h, m, d, et) for h, m, d, et in high_today]
+            )
     except Exception:
         pass
 
@@ -144,6 +155,7 @@ def check_upcoming_news(lookahead_minutes: int = 45) -> tuple[bool, str, int]:
         if resp.status_code == 200:
             events = resp.json()
             today = now.strftime("%Y-%m-%d")
+            high_today = []
             for event in events:
                 if event.get("impact") != "High":
                     continue
@@ -160,11 +172,21 @@ def check_upcoming_news(lookahead_minutes: int = 45) -> tuple[bool, str, int]:
                     event_minutes_utc = event_minutes + 4 * 60
                     if event_minutes_utc > 24 * 60:
                         event_minutes_utc -= 24 * 60
+                    utc_h, utc_m = divmod(event_minutes_utc, 60)
                     minutes_until = event_minutes_utc - current_minutes
+                    high_today.append((utc_h, utc_m, event.get("title", "?"), event_time, minutes_until))
                     if 0 < minutes_until <= lookahead_minutes:
+                        logging.debug(
+                            "[NEWS upcoming] FF today high-impact events: %s",
+                            [(h, m, d, et, mu) for h, m, d, et, mu in high_today]
+                        )
                         return True, f"High impact news: {event.get('title', 'USD event')}", minutes_until
                 except Exception:
                     continue
+            logging.debug(
+                "[NEWS upcoming] FF today high-impact events (none blocking): %s",
+                [(h, m, d, et, mu) for h, m, d, et, mu in high_today]
+            )
     except Exception:
         pass
 
