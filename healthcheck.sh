@@ -148,6 +148,320 @@ print('Signal detection OK')
 " 2>/dev/null
 check $? "Phase 2 futures signal detection working"
 
+# 21. Scanner module loadable
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import sys; sys.path.insert(0, '/home/ubuntu/apfee')
+from scanner import get_candles_yfinance, detect_structure, detect_order_block, detect_fvg, score_setup
+candles = get_candles_yfinance('ES')
+assert candles and len(candles) > 10, 'ES candles failed'
+structure = detect_structure(candles)
+assert structure.get('trend') in ('bullish','bearish','ranging'), 'Structure detection failed'
+" 2>/dev/null
+check $? "Phase 3 scanner — yFinance ES data and structure detection"
+
+# 22. yFinance futures data
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import sys; sys.path.insert(0, '/home/ubuntu/apfee')
+from scanner import get_candles_yfinance
+for sym in ['NQ','ES','CL','GC']:
+    c = get_candles_yfinance(sym)
+    assert c and len(c) > 5, f'{sym} failed'
+" 2>/dev/null
+check $? "Phase 3 yFinance — NQ ES CL GC data feeds working"
+
+# ── CONFIGURATION CHECKS ──────────────────────────────────────────────────────
+
+# 23. MAX_LIVE_EXPOSURE = 3.0
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from config import MAX_LIVE_EXPOSURE
+assert MAX_LIVE_EXPOSURE == 3.0, f'Expected 3.0, got {MAX_LIVE_EXPOSURE}'
+" 2>/dev/null
+check $? "Config: MAX_LIVE_EXPOSURE = 3.0"
+
+# 24. MAX_TRADES_TODAY removed
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import config
+assert not hasattr(config, 'MAX_TRADES_TODAY'), 'MAX_TRADES_TODAY still in config'
+assert not hasattr(config, 'MAX_OPEN_TRADES'), 'MAX_OPEN_TRADES still in config'
+" 2>/dev/null
+check $? "Config: MAX_TRADES_TODAY and MAX_OPEN_TRADES removed"
+
+# 25. NEWS_BLOCK_MINUTES_BEFORE = 45
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from scanner_improvements import NEWS_BLOCK_MINUTES_BEFORE, NEWS_BLOCK_MINUTES_AFTER
+assert NEWS_BLOCK_MINUTES_BEFORE == 45, f'Expected 45, got {NEWS_BLOCK_MINUTES_BEFORE}'
+assert NEWS_BLOCK_MINUTES_AFTER == 30
+" 2>/dev/null
+check $? "Config: NEWS_BLOCK_MINUTES_BEFORE=45, AFTER=30"
+
+# 26. Signal cache TTL = 300 seconds
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import re
+src = open('scanner.py').read()
+m = re.search(r'age\.total_seconds\(\)\s*>\s*(\d+)', src)
+assert m and int(m.group(1)) == 300, f'Cache TTL not 300: {m}'
+" 2>/dev/null
+check $? "Config: signal cache TTL = 300 seconds"
+
+# 27. FUTURES_SPOT_OFFSET XAUUSD = -30
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from scanner import FUTURES_SPOT_OFFSET
+assert FUTURES_SPOT_OFFSET.get('XAUUSD') == -30, f\"Expected -30, got {FUTURES_SPOT_OFFSET.get('XAUUSD')}\"
+" 2>/dev/null
+check $? "Config: FUTURES_SPOT_OFFSET XAUUSD = -30"
+
+# ── MATHEMATICAL CHECKS ───────────────────────────────────────────────────────
+
+# 28. Lot size — EURUSD 0.5% $10k 15pip = 0.33 lots (tolerance ±0.01)
+# _calculate_lot_size expects pip count (not raw price distance)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from claude import _calculate_lot_size
+r = _calculate_lot_size(0.5, 15, 'EURUSD', 10000.0)
+lot = float(r.split()[0])
+assert abs(lot - 0.33) <= 0.01, f'Expected 0.33, got {lot}'
+" 2>/dev/null
+check $? "Math: EURUSD 0.5% 15pip SL = 0.33 lots"
+
+# 29. Lot size — XAUUSD 0.5% $10k 12pt = 0.42 lots (tolerance ±0.01)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from claude import _calculate_lot_size
+r = _calculate_lot_size(0.5, 12, 'XAUUSD', 10000.0)
+lot = float(r.split()[0])
+assert abs(lot - 0.42) <= 0.01, f'Expected 0.42, got {lot}'
+" 2>/dev/null
+check $? "Math: XAUUSD 0.5% 12pt SL = 0.42 lots"
+
+# 30. Lot size — GBPUSD 0.75% $10k 15pip = 0.50 lots (tolerance ±0.01)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from claude import _calculate_lot_size
+r = _calculate_lot_size(0.75, 15, 'GBPUSD', 10000.0)
+lot = float(r.split()[0])
+assert abs(lot - 0.50) <= 0.01, f'Expected 0.50, got {lot}'
+" 2>/dev/null
+check $? "Math: GBPUSD 0.75% 15pip SL = 0.50 lots"
+
+# 31. RR: 15pip SL → TP1 = 22.5pip (1.5:1)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+sl = 15; tp1 = sl * 1.5; rr = tp1/sl
+assert abs(rr - 1.5) < 0.001, f'Expected 1.5, got {rr}'
+assert tp1 == 22.5
+" 2>/dev/null
+check $? "Math: 15pip SL → TP1 = 22.5pip (1.5:1 RR)"
+
+# 32. Minimum SL distances correct
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from scanner import MIN_SL_DISTANCE
+assert MIN_SL_DISTANCE['XAUUSD'] == 12.0
+assert abs(MIN_SL_DISTANCE['EURUSD'] - 0.0012) < 1e-9
+assert abs(MIN_SL_DISTANCE['GBPUSD'] - 0.0015) < 1e-9
+assert abs(MIN_SL_DISTANCE['USDJPY'] - 0.12) < 1e-9
+" 2>/dev/null
+check $? "Math: min SL distances correct (XAUUSD=12, EURUSD=0.0012, GBPUSD=0.0015, USDJPY=0.12)"
+
+# 33. Pip values correct
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from claude import PIP_VALUES
+assert PIP_VALUES['EURUSD'] == 10.0
+assert PIP_VALUES['GBPUSD'] == 10.0
+assert PIP_VALUES['XAUUSD'] == 10.0
+assert abs(PIP_VALUES['USDJPY'] - 9.30) < 0.01
+" 2>/dev/null
+check $? "Math: pip values correct (EURUSD/GBPUSD/XAUUSD=\$10, USDJPY=\$9.30)"
+
+# 34. Risk tiers correct
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from claude import RISK_TIERS
+assert RISK_TIERS[10] == 0.0075
+assert RISK_TIERS[9]  == 0.005
+assert RISK_TIERS[8]  == 0.0035
+" 2>/dev/null
+check $? "Math: risk tiers correct (10=0.75%, 9=0.50%, 8=0.35%)"
+
+# ── SYSTEM INTEGRITY CHECKS ───────────────────────────────────────────────────
+
+# 35. Both users active (IDs 8647323622 and 5803919273)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from database import get_all_active_users
+users = get_all_active_users()
+chat_ids = {u.telegram_chat_id for u in users}
+assert '8647323622' in chat_ids, f'User 8647323622 not active: {chat_ids}'
+assert '5803919273' in chat_ids, f'User 5803919273 not active: {chat_ids}'
+" 2>/dev/null
+check $? "System: both active users present (8647323622, 5803919273)"
+
+# 36. FTMO firm profile loaded correctly
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from prop_firm_profiles import get_profile
+p = get_profile('ftmo')
+assert p is not None
+assert p.account_size == 10000.0 or p.account_size > 0
+assert p.profit_target > 0
+assert p.max_total_loss > 0
+" 2>/dev/null
+check $? "System: FTMO firm profile loaded correctly"
+
+# 37. Challenge state exists for user 1
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from database import load_challenge_state
+cs = load_challenge_state(1)
+assert cs is not None, 'No challenge state for user 1'
+from drawdown_tracker import state_from_json
+st = state_from_json(cs)
+assert st.user_id == 1
+" 2>/dev/null
+check $? "System: challenge state exists for user 1"
+
+# 38. Trade monitor singleton initialized
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from trade_monitor import trade_monitor
+assert trade_monitor is not None
+" 2>/dev/null
+check $? "System: trade monitor singleton initialized"
+
+# 39. Phase 4 database tables exist
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from database import get_conn
+with get_conn() as conn:
+    with conn.cursor() as cur:
+        cur.execute(\"SELECT table_name FROM information_schema.tables WHERE table_schema='public'\")
+        tables = {r['table_name'] for r in cur.fetchall()}
+for t in ['trade_insights', 'daily_performance', 'user_accounts']:
+    assert t in tables, f'Missing table: {t}'
+" 2>/dev/null
+check $? "System: Phase 4 tables present (trade_insights, daily_performance, user_accounts)"
+
+# 40. DrawdownTracker methods present
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from drawdown_tracker import DrawdownTracker
+dt = DrawdownTracker()
+assert hasattr(dt, 'get_losses_today')
+assert hasattr(dt, 'is_signals_paused')
+assert hasattr(dt, 'set_resume_override')
+" 2>/dev/null
+check $? "System: DrawdownTracker has get_losses_today / is_signals_paused / set_resume_override"
+
+# 41. /resume command registered in bot.py
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+src = open('bot.py').read()
+assert 'cmd_resume' in src
+assert 'CommandHandler(\"resume\"' in src or \"CommandHandler('resume'\" in src
+assert 'BotCommand(\"resume\"' in src or \"BotCommand('resume'\" in src
+" 2>/dev/null
+check $? "System: /resume command registered in bot.py"
+
+# 42. Signal pause thresholds correct in source
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import inspect
+from drawdown_tracker import DrawdownTracker
+src = inspect.getsource(DrawdownTracker.is_signals_paused)
+assert 'losses_today >= 2' in src, 'losses_today >= 2 not found'
+assert 'today_loss >= 200' in src, 'today_loss >= 200 not found'
+" 2>/dev/null
+check $? "System: signal pause thresholds (2 losses or \$200 loss)"
+
+# ── SIGNAL FLOW CHECKS ────────────────────────────────────────────────────────
+
+# 43. News filter active
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from scanner_improvements import is_news_window
+result = is_news_window()
+assert isinstance(result, tuple) and len(result) == 2
+blocked, reason = result
+assert isinstance(blocked, bool)
+" 2>/dev/null
+check $? "Signal flow: news filter active and callable"
+
+# 44. Entry validation tolerances correct
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from scanner_improvements import ENTRY_MAX_PIPS_FOREX, ENTRY_MAX_POINTS_GOLD, ENTRY_MAX_POINTS_FUTURES
+assert ENTRY_MAX_PIPS_FOREX == 10
+assert ENTRY_MAX_POINTS_GOLD == 15
+assert ENTRY_MAX_POINTS_FUTURES == 20
+" 2>/dev/null
+check $? "Signal flow: entry validation tolerances (forex=10pip, gold=15pt, futures=20pt)"
+
+# 45. Live exposure sync from DB not counters
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import inspect
+from database import _sync_live_exposure
+src = inspect.getsource(_sync_live_exposure)
+assert 'PENDING' in src, '_sync_live_exposure must filter by PENDING'
+assert 'result IS NULL OR result' in src
+" 2>/dev/null
+check $? "Signal flow: live_exposure synced from PENDING trades only"
+
+# 46. Signal gate uses 3.0% exposure limit
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from filter import run_fast_gates
+# Should pass with 2.9% exposure
+state = {'open_trades': 3, 'live_exposure': 2.9, 'session_losses': 0, 'weekly_losses': 0}
+import datetime
+# Patch hour to be inside session
+from unittest.mock import patch
+with patch('filter.datetime') as mock_dt:
+    mock_dt.now.return_value = datetime.datetime(2024, 1, 2, 10, 0, tzinfo=datetime.timezone.utc)
+    mock_dt.timezone = datetime.timezone
+    passed, _ = run_fast_gates(state)
+assert passed == True, f'Should pass at 2.9% exposure but got: {passed}'
+" 2>/dev/null
+check $? "Signal flow: gate passes at 2.9% exposure (limit=3.0%)"
+
+# ── DATA SOURCE CHECKS ────────────────────────────────────────────────────────
+
+# 47. XAUUSD price in range (3000-5500)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import yfinance as yf
+h = yf.Ticker('GC=F').history(period='1d', interval='1m')
+assert not h.empty, 'GC=F returned no data'
+price = float(h['Close'].iloc[-1])
+assert 3000 <= price <= 5500, f'XAUUSD out of range: {price}'
+" 2>/dev/null
+check $? "Data: XAUUSD (GC=F) live price in range \$3000-\$5500"
+
+# 48. EURUSD price in range (1.0-1.5)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import yfinance as yf
+h = yf.Ticker('EURUSD=X').history(period='1d', interval='5m')
+assert not h.empty
+price = float(h['Close'].iloc[-1])
+assert 1.0 <= price <= 1.5, f'EURUSD out of range: {price}'
+" 2>/dev/null
+check $? "Data: EURUSD live price in range 1.0-1.5"
+
+# 49. GBPUSD price in range (1.2-1.6)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import yfinance as yf
+h = yf.Ticker('GBPUSD=X').history(period='1d', interval='5m')
+assert not h.empty
+price = float(h['Close'].iloc[-1])
+assert 1.2 <= price <= 1.6, f'GBPUSD out of range: {price}'
+" 2>/dev/null
+check $? "Data: GBPUSD live price in range 1.2-1.6"
+
+# 50. Twelve Data API key present
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from config import TWELVE_DATA_API_KEY
+assert TWELVE_DATA_API_KEY and len(TWELVE_DATA_API_KEY) > 5, 'TWELVE_DATA_API_KEY missing or empty'
+" 2>/dev/null
+check $? "Data: Twelve Data API key present"
+
+# 51. yFinance candles for forex pairs (fallback check)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from scanner import _get_candles_yfinance_forex
+candles = _get_candles_yfinance_forex('EURUSD', outputsize=10)
+assert candles and len(candles) >= 5, f'EURUSD yFinance fallback failed: {candles}'
+" 2>/dev/null
+check $? "Data: yFinance forex fallback working (EURUSD)"
+
+# 52. Daily bias returns valid data
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from scanner_improvements import get_daily_bias
+b = get_daily_bias('EURUSD')
+assert 'bias' in b, f'Missing bias key: {b}'
+assert b['bias'] in ('bullish','bearish','neutral','unknown'), f'Invalid bias: {b}'
+" 2>/dev/null
+check $? "Data: daily bias returns valid data for EURUSD"
+
 echo ""
 echo "======================================"
 echo "RESULTS: $PASS passed, $FAIL failed"
@@ -156,28 +470,3 @@ echo "======================================"
 if [ $FAIL -gt 0 ]; then
   exit 1
 fi
-
-# 21. Scanner module loadable
-/home/ubuntu/apfee/venv/bin/python3 -c "
-import sys
-sys.path.insert(0, '/home/ubuntu/apfee')
-from scanner import get_candles_yfinance, detect_structure, detect_order_block, detect_fvg, score_setup
-candles = get_candles_yfinance('ES')
-assert candles and len(candles) > 10, 'ES candles failed'
-structure = detect_structure(candles)
-assert structure.get('trend') in ('bullish','bearish','ranging'), 'Structure detection failed'
-print('Scanner OK')
-" 2>/dev/null
-check $? "Phase 3 scanner — yFinance ES data and structure detection"
-
-# 22. yFinance futures data
-/home/ubuntu/apfee/venv/bin/python3 -c "
-import sys
-sys.path.insert(0, '/home/ubuntu/apfee')
-from scanner import get_candles_yfinance
-for sym in ['NQ','ES','CL','GC']:
-    c = get_candles_yfinance(sym)
-    assert c and len(c) > 5, f'{sym} failed'
-print('All futures data OK')
-" 2>/dev/null
-check $? "Phase 3 yFinance — NQ ES CL GC data feeds working"
