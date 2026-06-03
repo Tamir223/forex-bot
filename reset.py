@@ -12,10 +12,16 @@ from database import reset_weekly_losses_all, get_all_active_users, get_state, g
 
 logger = logging.getLogger(__name__)
 
+DAILY_LOSS_LIMIT_DOLLARS = 500.0
+
 
 async def send_eod_report(bot_token: str):
     """Send end-of-day challenge report to all active users"""
     from telegram import Bot
+    from database import load_challenge_state, get_user_firm
+    from drawdown_tracker import state_from_json
+    from prop_firm_profiles import get_profile
+
     bot = Bot(token=bot_token)
     today = date.today()
     users = get_all_active_users()
@@ -24,8 +30,30 @@ async def send_eod_report(bot_token: str):
         if not user.telegram_chat_id:
             continue
         try:
-            state = get_state(user.id)
+            user_state = get_state(user.id)
 
+            # Load challenge state — the only reliable source of P&L in dollars
+            firm_code = get_user_firm(user.id)
+            profile = get_profile(firm_code)
+            challenge_json = load_challenge_state(user.id)
+
+            if challenge_json:
+                ch = state_from_json(challenge_json)
+                daily_pnl_dollars = ch.today_pnl
+                challenge_pnl_dollars = ch.total_pnl
+                account_size = ch.account_size or (profile.account_size if profile else 10000.0)
+                current_balance = ch.current_balance
+                profit_target_dollars = profile.profit_target if profile else 1000.0
+                target_balance = ch.starting_balance + profit_target_dollars
+            else:
+                account_size = profile.account_size if profile else 10000.0
+                daily_pnl_dollars = 0.0
+                challenge_pnl_dollars = 0.0
+                current_balance = account_size
+                profit_target_dollars = profile.profit_target if profile else 1000.0
+                target_balance = account_size + profit_target_dollars
+
+            # Blocked trades today
             blocked_today = 0
             try:
                 with get_conn() as conn:
@@ -41,25 +69,25 @@ async def send_eod_report(bot_token: str):
             except Exception as e:
                 logger.error(f"Blocked count query error for user {user.id}: {e}")
 
-            daily_pnl = state.daily_pnl
-            challenge_pnl = getattr(state, "challenge_pnl", 0.0) or 0.0
-            challenge_target = getattr(state, "challenge_target", 10.0) or 10.0
+            daily_pnl_pct = (daily_pnl_dollars / account_size * 100) if account_size else 0.0
+            challenge_pnl_pct = (challenge_pnl_dollars / account_size * 100) if account_size else 0.0
+            daily_loss_dollars = abs(min(0.0, daily_pnl_dollars))
+            daily_limit_used_pct = (daily_loss_dollars / DAILY_LOSS_LIMIT_DOLLARS * 100)
+            target_remaining = max(0.0, target_balance - current_balance)
 
-            daily_sign = "+" if daily_pnl >= 0 else ""
-            ch_sign = "+" if challenge_pnl >= 0 else ""
-            daily_loss_used = abs(min(0.0, daily_pnl))
-            target_remaining = max(0.0, challenge_target - challenge_pnl)
+            daily_sign = "+" if daily_pnl_dollars >= 0 else ""
+            ch_sign = "+" if challenge_pnl_dollars >= 0 else ""
 
             msg = (
                 f"📋 END OF DAY REPORT — {today.strftime('%Y-%m-%d')}\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"Trades taken:    {state.trades_today}\n"
-                f"Trades blocked:  {blocked_today}\n"
-                f"Daily P&L:       {daily_sign}{daily_pnl:.1f}%\n"
-                f"Challenge P&L:   {ch_sign}{challenge_pnl:.1f}%\n"
-                f"Daily limit used: {daily_loss_used:.1f}% of 5%\n"
+                f"Trades taken:     {user_state.trades_today}\n"
+                f"Trades blocked:   {blocked_today}\n"
+                f"Daily P&L:        {daily_sign}${daily_pnl_dollars:,.2f} ({daily_sign}{daily_pnl_pct:.2f}%)\n"
+                f"Challenge P&L:    {ch_sign}${challenge_pnl_dollars:,.2f} ({ch_sign}{challenge_pnl_pct:.2f}%)\n"
+                f"Daily limit used: ${daily_loss_dollars:,.2f} / ${DAILY_LOSS_LIMIT_DOLLARS:,.0f} ({daily_limit_used_pct:.1f}%)\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"Target remaining: {target_remaining:.1f}% to {challenge_target:.0f}%\n"
+                f"Target remaining: ${target_remaining:,.2f} remaining\n"
                 f"See you tomorrow. Stay disciplined."
             )
             await bot.send_message(chat_id=int(user.telegram_chat_id), text=msg)
