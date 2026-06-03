@@ -159,7 +159,11 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         result['lot_size_suggestion'] = market_ctx.get('lot_size_suggestion')
 
         # Tiered risk sizing based on confidence score
-        confidence_score = int(result.get("confidence") or 9)
+        raw = result.get("confidence", 9)
+        if isinstance(raw, str):
+            confidence_score = int(raw.split("/")[0].strip())
+        else:
+            confidence_score = int(raw or 9)
         risk_percent = RISK_TIERS.get(confidence_score, 0.005)
         if not risk_percent or risk_percent <= 0:
             risk_percent = 0.005
