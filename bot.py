@@ -518,7 +518,7 @@ async def set_bot_commands(app):
         BotCommand("watch", "Set your scanner watchlist (e.g. /watch ES NQ XAUUSD)"),
         BotCommand("scan", "Trigger an instant manual scan of your watchlist"),
         BotCommand("bias", "Daily bias report for your watchlist pairs"),
-        BotCommand("resume", "Resume signals after consecutive loss pause"),
+        BotCommand("resume", "Resume signals after 2-loss pause"),
         BotCommand("cancel", "Cancel current operation"),
     ]
     await app.bot.set_my_commands(commands)
