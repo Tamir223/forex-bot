@@ -19,7 +19,9 @@ from scanner_improvements import (
     detect_liquidity_sweep, detect_rejection_candle, is_ranging_market,
     get_previous_day_levels, is_optimal_time_for_pair, validate_risk_reward,
     check_pair_correlation, detect_mtf_ob_confluence, detect_momentum,
-    check_daily_bias_alignment
+    check_daily_bias_alignment,
+    detect_equal_highs_lows, detect_market_structure_shift,
+    check_premium_discount_zone, is_kill_zone
 )
 import requests
 import yfinance as yf
@@ -603,6 +605,37 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         if mom_ok:
             score += 2 if "Strong" in mom_desc else 1
             factors.append(mom_desc)
+
+        # Equal highs/lows — liquidity pools at institutional levels
+        eq_ok, eq_desc = detect_equal_highs_lows(candles, direction_str)
+        if eq_ok:
+            score += 2
+            factors.append(eq_desc)
+
+        # Market structure shift — full reversal confirmation
+        mss_ok, mss_desc = detect_market_structure_shift(candles, direction_str)
+        if mss_ok:
+            score += 2
+            factors.append(mss_desc)
+        elif mss_desc:
+            score = max(0, score - 2)
+            factors.append(f"⚠️ {mss_desc}")
+
+        # Premium/discount zone filter
+        _entry_px = candles[0]["close"]
+        pd_ok, pd_desc = check_premium_discount_zone(candles, _entry_px, direction_str)
+        if pd_desc:
+            if pd_ok:
+                score += 1
+            else:
+                score = max(0, score - 1)
+            factors.append(pd_desc)
+
+    # Kill zone timing bonus — peak institutional activity windows
+    _kz_ok, _kz_desc = is_kill_zone(symbol or "")
+    if _kz_ok:
+        score += 1
+        factors.append(_kz_desc)
 
     # Daily bias alignment check — single get_daily_bias call, result shared for both
     # alignment check and strength lookup, and to flag unknown bias to callers

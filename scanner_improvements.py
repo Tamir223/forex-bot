@@ -1112,3 +1112,183 @@ def check_daily_bias_alignment(symbol: str, direction: str, _prefetched: dict = 
         return True, f"✅ Daily bias {b} confirms {direction.upper()} direction"
 
     return True, ""
+
+
+# ─── 17. EQUAL HIGHS/LOWS DETECTION ──────────────────────────────────────────
+
+def detect_equal_highs_lows(candles: list, direction: str) -> tuple[bool, str]:
+    """
+    Detect equal highs (SELL) or equal lows (BUY) liquidity pools in last 20 candles.
+    Swing high/low: candle is higher/lower than 2 candles on each side.
+    Equal = within 3 pips/points of each other.
+    Returns (detected, description).
+    """
+    if not candles or len(candles) < 5:
+        return False, ""
+
+    recent = candles[:20]
+    n = len(recent)
+    if n < 5:
+        return False, ""
+
+    current_price = recent[0]["close"]
+    if current_price > 500:
+        tol = 3.0       # gold/indices: 3 points
+    elif current_price > 20:
+        tol = 0.03      # JPY pairs: 3 pips
+    else:
+        tol = 0.0003    # forex: 3 pips
+
+    if direction.upper() == "SELL":
+        swing_highs = []
+        for i in range(2, n - 2):
+            h = recent[i]["high"]
+            if (h > recent[i-1]["high"] and h > recent[i-2]["high"] and
+                    h > recent[i+1]["high"] and h > recent[i+2]["high"]):
+                swing_highs.append(h)
+        for j in range(len(swing_highs)):
+            cluster = [swing_highs[j]]
+            for k in range(j + 1, len(swing_highs)):
+                if abs(swing_highs[k] - swing_highs[j]) <= tol:
+                    cluster.append(swing_highs[k])
+            if len(cluster) >= 2:
+                level = round(sum(cluster) / len(cluster), 5)
+                return True, f"Equal highs liquidity pool at {level} — banks will sweep this"
+    else:  # BUY
+        swing_lows = []
+        for i in range(2, n - 2):
+            l = recent[i]["low"]
+            if (l < recent[i-1]["low"] and l < recent[i-2]["low"] and
+                    l < recent[i+1]["low"] and l < recent[i+2]["low"]):
+                swing_lows.append(l)
+        for j in range(len(swing_lows)):
+            cluster = [swing_lows[j]]
+            for k in range(j + 1, len(swing_lows)):
+                if abs(swing_lows[k] - swing_lows[j]) <= tol:
+                    cluster.append(swing_lows[k])
+            if len(cluster) >= 2:
+                level = round(sum(cluster) / len(cluster), 5)
+                return True, f"Equal lows liquidity pool at {level} — banks will sweep this"
+
+    return False, ""
+
+
+# ─── 18. MARKET STRUCTURE SHIFT DETECTION ────────────────────────────────────
+
+def detect_market_structure_shift(candles: list, direction: str) -> tuple[bool, str]:
+    """
+    Detect a full market structure shift (MSS) — stronger than BOS, confirms reversal.
+    Bullish MSS: prior lower highs + lower lows, current close breaks above most recent swing high.
+    Bearish MSS: prior higher highs + higher lows, current close breaks below most recent swing low.
+    Returns (detected_in_direction, description).
+    If detected against direction: returns (False, 'MSS against signal direction').
+    """
+    if not candles or len(candles) < 10:
+        return False, ""
+
+    recent = candles[:20]
+    n = len(recent)
+    if n < 8:
+        return False, ""
+
+    current_close = recent[0]["close"]
+
+    # Analyse structure in candles[2:] — skip the 2 most recent (possible MSS candles)
+    structure = recent[2:]
+    sc_n = len(structure)
+    if sc_n < 6:
+        return False, ""
+
+    swing_highs = []  # (index, price) — index within structure[], newest-first
+    swing_lows = []
+
+    for i in range(2, sc_n - 2):
+        h = structure[i]["high"]
+        l = structure[i]["low"]
+        if (h > structure[i-1]["high"] and h > structure[i-2]["high"] and
+                h > structure[i+1]["high"] and h > structure[i+2]["high"]):
+            swing_highs.append((i, h))
+        if (l < structure[i-1]["low"] and l < structure[i-2]["low"] and
+                l < structure[i+1]["low"] and l < structure[i+2]["low"]):
+            swing_lows.append((i, l))
+
+    if len(swing_highs) < 2 or len(swing_lows) < 2:
+        return False, ""
+
+    # Smallest index = most recent; largest index = oldest (newest-first array)
+    most_recent_sh = min(swing_highs, key=lambda x: x[0])[1]
+    oldest_sh = max(swing_highs, key=lambda x: x[0])[1]
+    most_recent_sl = min(swing_lows, key=lambda x: x[0])[1]
+    oldest_sl = max(swing_lows, key=lambda x: x[0])[1]
+
+    lower_highs = most_recent_sh < oldest_sh
+    lower_lows = most_recent_sl < oldest_sl
+    higher_highs = most_recent_sh > oldest_sh
+    higher_lows = most_recent_sl > oldest_sl
+
+    if direction.upper() == "BUY":
+        if lower_highs and lower_lows and current_close > most_recent_sh:
+            return True, "Market structure shift confirmed — full BUY reversal"
+        if higher_highs and higher_lows and current_close < most_recent_sl:
+            return False, "MSS against signal direction"
+    else:  # SELL
+        if higher_highs and higher_lows and current_close < most_recent_sl:
+            return True, "Market structure shift confirmed — full SELL reversal"
+        if lower_highs and lower_lows and current_close > most_recent_sh:
+            return False, "MSS against signal direction"
+
+    return False, ""
+
+
+# ─── 19. PREMIUM/DISCOUNT ZONE FILTER ────────────────────────────────────────
+
+def check_premium_discount_zone(candles: list, entry: float, direction: str) -> tuple[bool, str]:
+    """
+    Filter entries by whether they sit in a premium or discount zone.
+    Range of last 20 candles split at equilibrium (midpoint).
+    BUY in discount (below equilibrium) → favourable.
+    SELL in premium (above equilibrium) → favourable.
+    Returns (is_favourable, description). Empty description = neutral/no data.
+    """
+    if not candles or len(candles) < 5:
+        return True, ""
+
+    recent = candles[:20]
+    range_high = max(c["high"] for c in recent)
+    range_low = min(c["low"] for c in recent)
+
+    if range_high == range_low:
+        return True, ""
+
+    equilibrium = (range_high + range_low) / 2
+
+    if direction.upper() == "BUY":
+        if entry <= equilibrium:
+            return True, "Entry in discount zone — buying at value"
+        return False, "Buying in premium zone — unfavorable"
+    else:  # SELL
+        if entry >= equilibrium:
+            return True, "Entry in premium zone — selling at premium"
+        return False, "Selling in discount zone — unfavorable"
+
+
+# ─── 20. KILL ZONE TIMING BONUS ──────────────────────────────────────────────
+
+def is_kill_zone(symbol: str) -> tuple[bool, str]:
+    """
+    Check if current UTC time falls within a high-probability institutional kill zone.
+    London Kill Zone: 07:00-09:00 UTC
+    NY Kill Zone:     12:00-14:00 UTC
+    NY Lunch Kill Zone: 14:00-16:00 UTC
+    Returns (in_kill_zone, description).
+    """
+    hour = datetime.now(timezone.utc).hour
+
+    if 7 <= hour < 9:
+        return True, "Kill zone active — London Kill Zone — peak institutional activity"
+    if 12 <= hour < 14:
+        return True, "Kill zone active — NY Kill Zone — peak institutional activity"
+    if 14 <= hour < 16:
+        return True, "Kill zone active — NY Lunch Kill Zone — peak institutional activity"
+
+    return False, ""
