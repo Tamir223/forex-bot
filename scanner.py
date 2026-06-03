@@ -1055,6 +1055,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
 
         # Entry validation — reject if price has moved outside tolerance since signal fired
         import re as _re
+        _limit_note = None
         _entry_match = _re.search(r"Entry Zone:\s*([\d.]+)", signal_text)
         if _entry_match:
             _entry_price = float(_entry_match.group(1))
@@ -1078,11 +1079,27 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 _live_price = float(_price_data["price"]) if _price_data else None
                 _tolerance = 0.0012
             if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=f"⏰ Signal expired — {_symbol} entry at {_entry_price} but price is now at {_live_price}. Entry zone missed."
-                )
-                return False
+                _score = result.get("score", 0)
+                _direction = result.get("direction", "")
+                if _score == 10:
+                    if _direction == "SELL" and _live_price < _entry_price:
+                        _limit_note = (
+                            f"⚠️ Entry zone passed — price already moved in your direction.\n"
+                            f"📌 LIMIT ORDER SUGGESTION: Set a Sell Limit at {_entry_price} if price retraces back to the OB zone.\n"
+                            f"Cancel limit order before 8:00 AM EDT if unfilled."
+                        )
+                    elif _direction == "BUY" and _live_price > _entry_price:
+                        _limit_note = (
+                            f"⚠️ Entry zone passed — price already moved in your direction.\n"
+                            f"📌 LIMIT ORDER SUGGESTION: Set a Buy Limit at {_entry_price} if price retraces back to the OB zone.\n"
+                            f"Cancel limit order before 8:00 AM EDT if unfilled."
+                        )
+                if _limit_note is None:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=f"⏰ Signal expired — {_symbol} entry at {_entry_price} but price is now at {_live_price}. Entry zone missed."
+                    )
+                    return False
 
         from claude import analyze_signal
         from report import execute_report, blocked_report
@@ -1131,6 +1148,8 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             return False
 
         report_text = priority_header + execute_report(analysis)
+        if _limit_note:
+            report_text += f"\n\n{_limit_note}"
 
         # Store for WIN/LOSS tracking
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
