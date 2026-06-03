@@ -1200,9 +1200,9 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         if _limit_note:
             report_text += f"\n\n{_limit_note}"
 
-        _cons_losses = _dt.get_consecutive_losses(user.id)
-        if _cons_losses == 1:
-            report_text += "\n\n⚠️ 1 consecutive loss today — another loss pauses signals. Trade carefully."
+        _losses_today = _dt.get_losses_today(user.id)
+        if _losses_today == 1:
+            report_text += "\n\n⚠️ 1 loss today — another loss pauses signals. Trade carefully."
 
         # Store for WIN/LOSS tracking
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup

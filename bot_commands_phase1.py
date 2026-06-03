@@ -83,12 +83,12 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     from drawdown_tracker import DrawdownTracker
     dt = DrawdownTracker()
-    consecutive = dt.get_consecutive_losses(user.id)
+    losses_today = dt.get_losses_today(user.id)
     paused, pause_reason = dt.is_signals_paused(user.id)
     status_text = get_status_report(state, profile)
     extra = [f"\n📊 Trades Today: {state.trades_today}"]
-    if consecutive > 0:
-        extra.append(f"🔴 Consecutive Losses: {consecutive}")
+    if losses_today > 0:
+        extra.append(f"❌ Losses Today: {losses_today}")
     if paused:
         extra.append(f"⏸ Signals Paused: Yes — {pause_reason}")
     status_text += "\n" + "\n".join(extra)

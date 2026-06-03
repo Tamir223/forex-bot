@@ -18,27 +18,24 @@ _resume_overrides: dict = {}
 
 
 class DrawdownTracker:
-    def get_consecutive_losses(self, user_id: int) -> int:
+    def get_losses_today(self, user_id: int) -> int:
         from database import get_conn
         try:
+            today_midnight = datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
             with get_conn() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        """SELECT result FROM trades
-                           WHERE user_id = %s AND result IN ('WIN', 'LOSS')
-                           ORDER BY created_at DESC LIMIT 10""",
-                        (user_id,)
+                        """SELECT COUNT(*) AS cnt FROM trades
+                           WHERE user_id = %s AND result = 'LOSS'
+                           AND created_at >= %s""",
+                        (user_id, today_midnight)
                     )
-                    rows = cur.fetchall()
-            consecutive = 0
-            for row in rows:
-                if row['result'] == 'LOSS':
-                    consecutive += 1
-                else:
-                    break
-            return consecutive
+                    row = cur.fetchone()
+            return int(row['cnt']) if row else 0
         except Exception as e:
-            logger.error(f"get_consecutive_losses error: {e}")
+            logger.error(f"get_losses_today error: {e}")
             return 0
 
     def is_signals_paused(self, user_id: int) -> tuple:
@@ -51,9 +48,9 @@ class DrawdownTracker:
             else:
                 del _resume_overrides[user_id]
 
-        consecutive = self.get_consecutive_losses(user_id)
-        if consecutive >= 2:
-            return True, "2 consecutive losses — signals paused. Type /resume to continue."
+        losses_today = self.get_losses_today(user_id)
+        if losses_today >= 2:
+            return True, "2 losses today — signals paused. Type /resume to continue trading."
 
         from database import get_state
         state = get_state(user_id)
