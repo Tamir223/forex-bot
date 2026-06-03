@@ -5,13 +5,68 @@ TNL Trader — Phase 1
 
 import json
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from typing import Optional
 from dataclasses import dataclass, asdict
 
 from prop_firm_profiles import PropFirmProfile, DrawdownType
 
 logger = logging.getLogger(__name__)
+
+# In-memory resume overrides: user_id -> midnight UTC expiry
+_resume_overrides: dict = {}
+
+
+class DrawdownTracker:
+    def get_consecutive_losses(self, user_id: int) -> int:
+        from database import get_conn
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """SELECT result FROM trades
+                           WHERE user_id = %s AND result IN ('WIN', 'LOSS')
+                           ORDER BY created_at DESC LIMIT 10""",
+                        (user_id,)
+                    )
+                    rows = cur.fetchall()
+            consecutive = 0
+            for row in rows:
+                if row['result'] == 'LOSS':
+                    consecutive += 1
+                else:
+                    break
+            return consecutive
+        except Exception as e:
+            logger.error(f"get_consecutive_losses error: {e}")
+            return 0
+
+    def is_signals_paused(self, user_id: int) -> tuple:
+        global _resume_overrides
+        override_expiry = _resume_overrides.get(user_id)
+        if override_expiry:
+            now = datetime.now(timezone.utc)
+            if now < override_expiry:
+                return False, ""
+            else:
+                del _resume_overrides[user_id]
+
+        consecutive = self.get_consecutive_losses(user_id)
+        if consecutive >= 2:
+            return True, "2 consecutive losses — signals paused. Type /resume to continue."
+
+        from database import get_state
+        state = get_state(user_id)
+        today_loss = -state.daily_pnl if state.daily_pnl < 0 else 0
+        if today_loss >= 200:
+            return True, "Daily loss $200 reached — signals paused. Type /resume to continue."
+
+        return False, ""
+
+    def set_resume_override(self, user_id: int):
+        now = datetime.now(timezone.utc)
+        midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        _resume_overrides[user_id] = midnight
 
 
 @dataclass

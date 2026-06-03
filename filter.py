@@ -64,9 +64,6 @@ def run_fast_gates(state: dict) -> tuple[bool, str]:
     if not (SESSION_START_HOUR <= hour <= SESSION_END_HOUR):
         return False, f"Outside trading session. Active {SESSION_START_HOUR}:00 to {SESSION_END_HOUR}:00 UTC."
 
-    if state.get("trades_today", 0) >= MAX_TRADES_TODAY:
-        return False, f"Daily trade limit of {MAX_TRADES_TODAY} reached."
-
     if state.get("open_trades", 0) >= MAX_OPEN_TRADES:
         return False, f"Maximum open trades of {MAX_OPEN_TRADES} reached."
 

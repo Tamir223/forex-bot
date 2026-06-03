@@ -1072,6 +1072,13 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
     Called when scanner score is 9 or 10 — no user tap needed.
     """
     try:
+        from drawdown_tracker import DrawdownTracker
+        _dt = DrawdownTracker()
+        _paused, _pause_reason = _dt.is_signals_paused(user.id)
+        if _paused:
+            logger.info(f"[auto-grade] {user.id} signals paused — {_pause_reason}")
+            return False
+
         signal_text = result.get("auto_signal", "")
         if not signal_text:
             return False
@@ -1192,6 +1199,10 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         report_text = priority_header + execute_report(analysis)
         if _limit_note:
             report_text += f"\n\n{_limit_note}"
+
+        _cons_losses = _dt.get_consecutive_losses(user.id)
+        if _cons_losses == 1:
+            report_text += "\n\n⚠️ 1 consecutive loss today — another loss pauses signals. Trade carefully."
 
         # Store for WIN/LOSS tracking
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup

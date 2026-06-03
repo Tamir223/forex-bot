@@ -81,7 +81,18 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not profile:
         await update.message.reply_text("❌ Invalid firm profile. Use /challenge to restart.")
         return
-    await update.message.reply_text(get_status_report(state, profile), parse_mode="Markdown")
+    from drawdown_tracker import DrawdownTracker
+    dt = DrawdownTracker()
+    consecutive = dt.get_consecutive_losses(user.id)
+    paused, pause_reason = dt.is_signals_paused(user.id)
+    status_text = get_status_report(state, profile)
+    extra = [f"\n📊 Trades Today: {state.trades_today}"]
+    if consecutive > 0:
+        extra.append(f"🔴 Consecutive Losses: {consecutive}")
+    if paused:
+        extra.append(f"⏸ Signals Paused: Yes — {pause_reason}")
+    status_text += "\n" + "\n".join(extra)
+    await update.message.reply_text(status_text, parse_mode="Markdown")
 
 
 async def cmd_logtrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -247,3 +258,14 @@ async def cmd_bias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     watchlist = [s.strip() for s in watchlist_str.split(",")] if watchlist_str else DEFAULT_WATCHLIST
     report = build_bias_report(watchlist)
     await update.message.reply_text(report, parse_mode="Markdown")
+
+
+async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = get_user_by_chat_id(str(update.effective_user.id))
+    if not user:
+        await update.message.reply_text("❌ No active subscription.")
+        return
+    from drawdown_tracker import DrawdownTracker
+    dt = DrawdownTracker()
+    dt.set_resume_override(user.id)
+    await update.message.reply_text("✅ Signals resumed. Trade carefully — you have consecutive losses today.")
