@@ -159,9 +159,12 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         result['lot_size_suggestion'] = market_ctx.get('lot_size_suggestion')
 
         # Tiered risk sizing based on confidence score
-        confidence_score = int(result.get("confidence", 9))
-        risk_percent = RISK_TIERS.get(confidence_score, 0.0050) * 100  # Store as percentage (0.75)
-        result['risk_percent'] = round(risk_percent, 4)
+        confidence_score = int(result.get("confidence") or 9)
+        risk_percent = RISK_TIERS.get(confidence_score, 0.005)
+        if not risk_percent or risk_percent <= 0:
+            risk_percent = 0.005
+        result['risk_percent'] = round(risk_percent * 100, 4)  # Store as percentage (0.75)
+        risk_percent = result['risk_percent']
         # Always recalculate lot size with tiered risk
         if result.get('stop_loss') and result.get('entry_zone'):
             sl_pts_tiered = _compute_sl_pts(str(result['entry_zone']), str(result['stop_loss']), pair)

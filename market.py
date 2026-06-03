@@ -32,6 +32,10 @@ YFINANCE_FUTURES_MAP = {
 }
 # XAUUSD is handled via yFinance using the gold futures ticker
 _XAUUSD_YF_TICKER = "GC=F"
+# Mirrors scanner.FUTURES_SPOT_OFFSET — GC=F trades ~30 pts above MT5 XAUUSD spot
+_FUTURES_SPOT_OFFSET = {
+    "XAUUSD": -30,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +115,9 @@ def get_live_price(pair: str) -> dict:
         try:
             hist = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
             if not hist.empty:
-                return {"price": round(float(hist["Close"].iloc[-1]), 2), "symbol": pair}
+                raw = round(float(hist["Close"].iloc[-1]), 2)
+                price = round(raw + _FUTURES_SPOT_OFFSET.get(upper, 0), 2)
+                return {"price": price, "symbol": pair}
         except Exception as e:
             logger.error(f"yFinance price error for {pair}: {e}")
         return None
