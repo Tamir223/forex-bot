@@ -153,13 +153,13 @@ def get_current_session() -> str:
     return "Off-Session"
 
 
-def get_candles_yfinance(symbol: str, outputsize: int = 50) -> list | None:
+def get_candles_yfinance(symbol: str, outputsize: int = 200) -> list | None:
     """Fetch futures candles from yFinance (free, no rate limit)."""
     try:
         ticker = YFINANCE_FUTURES_MAP.get(symbol.upper())
         if not ticker:
             return None
-        hist = yf.Ticker(ticker).history(period="2d", interval="15m")
+        hist = yf.Ticker(ticker).history(period="10d", interval="15m")
         if hist.empty:
             return None
         # Convert to our candle format, newest first
@@ -179,14 +179,14 @@ def get_candles_yfinance(symbol: str, outputsize: int = 50) -> list | None:
         return None
 
 
-def _get_candles_yfinance_forex(symbol: str, outputsize: int = 50) -> list | None:
+def _get_candles_yfinance_forex(symbol: str, outputsize: int = 200) -> list | None:
     """Fetch forex 15M candles from yFinance as Twelve Data fallback."""
     from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
     ticker = _YF_FOREX_MAP.get(symbol.upper())
     if not ticker:
         return None
     try:
-        hist = yf.Ticker(ticker).history(period="5d", interval="15m")
+        hist = yf.Ticker(ticker).history(period="10d", interval="15m")
         if hist.empty:
             return None
         result = []
@@ -205,14 +205,14 @@ def _get_candles_yfinance_forex(symbol: str, outputsize: int = 50) -> list | Non
         return None
 
 
-def get_candles(symbol: str, interval: str = "15min", outputsize: int = 50) -> list | None:
+def get_candles(symbol: str, interval: str = "15min", outputsize: int = 200) -> list | None:
     """Fetch candles — uses yFinance for futures and XAUUSD, Twelve Data for forex."""
     if symbol.upper() in YFINANCE_FUTURES_MAP:
         return get_candles_yfinance(symbol, outputsize)
     if symbol.upper() == "XAUUSD":
         # Use yFinance GC=F for gold — free, no Twelve Data credits consumed
         try:
-            hist = yf.Ticker("GC=F").history(period="2d", interval="15m")
+            hist = yf.Ticker("GC=F").history(period="10d", interval="15m")
             if hist.empty:
                 return None
             result = []
@@ -419,8 +419,8 @@ def get_htf_bias(symbol: str) -> dict:
     try:
         if symbol.upper() in YFINANCE_FUTURES_MAP:
             ticker = YFINANCE_FUTURES_MAP[symbol.upper()]
-            h1 = yf.Ticker(ticker).history(period="5d", interval="1h")
-            h4 = yf.Ticker(ticker).history(period="20d", interval="4h")
+            h1 = yf.Ticker(ticker).history(period="14d", interval="1h")
+            h4 = yf.Ticker(ticker).history(period="30d", interval="4h")
             d1 = yf.Ticker(ticker).history(period="60d", interval="1d")
             if h1.empty or h4.empty or d1.empty:
                 return result
@@ -444,8 +444,8 @@ def get_htf_bias(symbol: str) -> dict:
                     return [{"close": float(c["close"])} for c in data["values"]]
                 except Exception:
                     return []
-            h1_raw = fetch_td("1h")
-            h4_raw = fetch_td("4h")
+            h1_raw = fetch_td("1h", 100)
+            h4_raw = fetch_td("4h", 60)
             d1_raw = fetch_td("1day", 60)
             if not h1_raw or not h4_raw or not d1_raw:
                 return result
@@ -822,7 +822,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
       Guarantee: score >= 9 always sends regardless of range/session flags
     """
     try:
-        candles = get_candles(symbol, interval="15min", outputsize=50)
+        candles = get_candles(symbol, interval="15min", outputsize=200)
         if not candles or len(candles) < 10:
             return None
 

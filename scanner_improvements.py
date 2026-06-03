@@ -596,7 +596,7 @@ def is_ranging_market(candles: list) -> bool:
 
 def get_previous_day_levels(candles: list) -> dict:
     """
-    Find previous day high and low from candles list (newest first).
+    Find PDH/PDL across last 5 trading days from candles list (newest first).
     Returns dict with pdh, pdl, current_price.
     """
     if not candles:
@@ -604,8 +604,7 @@ def get_previous_day_levels(candles: list) -> dict:
 
     current_price = candles[0]["close"]
     current_day = datetime.now(timezone.utc).date()
-    prev_day_candles = []
-    prev_day_date = None
+    past_days: dict = {}
 
     for c in candles:
         dt_str = c.get("datetime", "")
@@ -618,16 +617,17 @@ def get_previous_day_levels(candles: list) -> dict:
                 c_dt = datetime.strptime(str(dt_str)[:16], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
             c_day = c_dt.date()
             if c_day < current_day:
-                if prev_day_date is None:
-                    prev_day_date = c_day
-                if c_day == prev_day_date:
-                    prev_day_candles.append(c)
+                past_days.setdefault(c_day, []).append(c)
         except Exception:
             continue
 
-    if prev_day_candles:
-        pdh = max(c["high"] for c in prev_day_candles)
-        pdl = min(c["low"] for c in prev_day_candles)
+    # Use up to the 5 most recent past trading days
+    sorted_days = sorted(past_days.keys(), reverse=True)[:5]
+    multi_day_candles = [c for day in sorted_days for c in past_days[day]]
+
+    if multi_day_candles:
+        pdh = max(c["high"] for c in multi_day_candles)
+        pdl = min(c["low"] for c in multi_day_candles)
         return {"pdh": round(pdh, 5), "pdl": round(pdl, 5), "current_price": round(current_price, 5)}
 
     # Fallback: older half of available candles
@@ -871,12 +871,12 @@ def detect_mtf_ob_confluence(symbol: str, current_ob: dict, direction: str) -> t
         return low_a <= high_b + tol and low_b <= high_a + tol
 
     try:
-        # 1H: 5-day history at 1h interval, 50 candles
-        candles_1h = _fetch_htf_candles(symbol, "1h", "5d", "1h", 50)
+        # 1H: 14-day history at 1h interval, 100 candles
+        candles_1h = _fetch_htf_candles(symbol, "1h", "14d", "1h", 100)
         ob_1h = _detect_ob_htf(candles_1h, trend) if candles_1h else None
 
-        # 4H: 20-day history at 4h interval, 30 candles
-        candles_4h = _fetch_htf_candles(symbol, "4h", "20d", "4h", 30)
+        # 4H: 30-day history at 4h interval, 60 candles
+        candles_4h = _fetch_htf_candles(symbol, "4h", "30d", "4h", 60)
         ob_4h = _detect_ob_htf(candles_4h, trend) if candles_4h else None
 
         h1_conf = bool(ob_1h and _overlaps(ob_low, ob_high, ob_1h["low"], ob_1h["high"], tol_1h))
@@ -961,10 +961,10 @@ def get_daily_bias(symbol: str) -> dict:
         ticker = _DAILY_BIAS_FUTURES_MAP.get(sym)
         if ticker:
             import yfinance as yf
-            hist = yf.Ticker(ticker).history(period="10d", interval="1d")
+            hist = yf.Ticker(ticker).history(period="30d", interval="1d")
             if hist.empty or len(hist) < 3:
                 return _default
-            for _, row in hist.iloc[-5:].iterrows():
+            for _, row in hist.iloc[-20:].iterrows():
                 candles.append({
                     "open": float(row["Open"]), "high": float(row["High"]),
                     "low": float(row["Low"]),  "close": float(row["Close"]),
@@ -979,7 +979,7 @@ def get_daily_bias(symbol: str) -> dict:
                     resp = requests.get(
                         "https://api.twelvedata.com/time_series",
                         params={"symbol": td_sym, "interval": "1day",
-                                "outputsize": 5, "apikey": TWELVE_DATA_API_KEY},
+                                "outputsize": 20, "apikey": TWELVE_DATA_API_KEY},
                         timeout=8,
                     )
                     data = resp.json()
@@ -998,10 +998,10 @@ def get_daily_bias(symbol: str) -> dict:
                     return _default
                 try:
                     import yfinance as yf
-                    hist = yf.Ticker(yf_ticker).history(period="5d", interval="1d")
+                    hist = yf.Ticker(yf_ticker).history(period="30d", interval="1d")
                     if hist.empty or len(hist) < 3:
                         return _default
-                    for _, row in hist.iloc[-5:].iterrows():
+                    for _, row in hist.iloc[-20:].iterrows():
                         candles.append({
                             "open": float(row["Open"]), "high": float(row["High"]),
                             "low":  float(row["Low"]),  "close": float(row["Close"]),
