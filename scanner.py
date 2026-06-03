@@ -128,13 +128,11 @@ def is_scan_window() -> bool:
 def get_session_interval() -> int:
     """
     Return scan interval in seconds based on current session.
-    London open (7-10 UTC) and NY open (13-16 UTC) = every 5 min.
-    All other hours = every 15 min.
+    Prime session 07:00-20:00 UTC (London open + NY session) = every 5 min.
+    Off session 20:00-07:00 UTC = every 15 min.
     """
     hour = datetime.now(timezone.utc).hour
-    london_open = 7 <= hour < 10
-    ny_open = 13 <= hour < 16
-    if london_open or ny_open:
+    if 7 <= hour < 20:
         return 300   # 5 minutes
     return 900       # 15 minutes
 

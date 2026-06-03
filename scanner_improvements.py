@@ -622,18 +622,22 @@ def get_previous_day_levels(candles: list) -> dict:
 # ─── 11. TIME OF DAY FILTER PER PAIR ─────────────────────────────────────────
 
 PAIR_OPTIMAL_HOURS = {
-    "GBPUSD": [(6, 9)],
-    "EURUSD": [(7, 11)],
-    "USDJPY": [(0, 3), (7, 12)],   # Asian session (JPY most active) + London/NY overlap
-    "EURJPY": [(0, 3), (7, 12)],
-    "GBPJPY": [(0, 3), (7, 12)],
-    "XAUUSD": [(6, 10), (13, 15)],
-    "ES":     [(13, 16)],
-    "MES":    [(13, 16)],
-    "NQ":     [(13, 16)],
-    "MNQ":    [(13, 16)],
-    "CL":     [(13, 16)],
-    "MCL":    [(13, 16)],
+    "EURUSD": [(7, 16)],            # London open through NY session
+    "GBPUSD": [(7, 16)],            # London open through NY session
+    "XAUUSD": [(7, 16)],            # London open through NY session
+    "USDJPY": [(0, 3), (7, 16)],    # Asian session + London/NY
+    "AUDUSD": [(7, 14)],            # London open through early NY
+    "NZDUSD": [(7, 14)],            # London open through early NY
+    "USDCAD": [(12, 20)],           # NY session (most active for CAD)
+    "USDCHF": [(7, 16)],            # London open through NY session
+    "EURJPY": [(0, 3), (7, 16)],
+    "GBPJPY": [(0, 3), (7, 16)],
+    "ES":     [(12, 16)],           # NY open 8 AM EDT = 12:00 UTC
+    "MES":    [(12, 16)],
+    "NQ":     [(12, 16)],
+    "MNQ":    [(12, 16)],
+    "CL":     [(12, 16)],
+    "MCL":    [(12, 16)],
 }
 
 def is_optimal_time_for_pair(symbol: str) -> tuple[bool, str]:
