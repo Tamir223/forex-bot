@@ -671,7 +671,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         tp1 = round(entry + sl_dist * 1.5, 2 if _use_2dp else 5)
         tp2 = round(entry + sl_dist * 2.5, 2 if _use_2dp else 5)
         tp3 = round(entry + sl_dist * 4.0, 2 if _use_2dp else 5)
-        logger.debug(f"[build_signal] {symbol} BUY sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
+        logger.info(f"[build_signal] {symbol} BUY sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     else:  # SELL
         if ob and ob["type"] == "bearish_ob":
@@ -691,7 +691,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         tp1 = round(entry - sl_dist * 1.5, 2 if _use_2dp else 5)
         tp2 = round(entry - sl_dist * 2.5, 2 if _use_2dp else 5)
         tp3 = round(entry - sl_dist * 4.0, 2 if _use_2dp else 5)
-        logger.debug(f"[build_signal] {symbol} SELL sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
+        logger.info(f"[build_signal] {symbol} SELL sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     # Build setup description
     setup_parts = []
