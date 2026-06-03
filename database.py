@@ -272,6 +272,33 @@ def get_all_active_users() -> list:
 
 # ─── STATE FUNCTIONS ──────────────────────────────────────────────────────────
 
+def _sync_live_exposure(user_id: int, conn) -> tuple:
+    """Recalculate open_trades and live_exposure from actual PENDING trades.
+    Returns (open_trades, live_exposure) and updates user_state in DB."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT COUNT(*) AS cnt, COALESCE(SUM(risk_percent), 0.0) AS exposure
+                   FROM trades
+                   WHERE user_id = %s AND (result IS NULL OR result = 'PENDING')""",
+                (user_id,)
+            )
+            row = cur.fetchone()
+            open_trades = int(row['cnt']) if row else 0
+            live_exposure = float(row['exposure']) if row else 0.0
+            cur.execute(
+                """UPDATE user_state
+                   SET open_trades = %s, live_exposure = %s
+                   WHERE user_id = %s""",
+                (open_trades, live_exposure, user_id)
+            )
+        conn.commit()
+        return open_trades, live_exposure
+    except Exception as e:
+        logger.error(f"_sync_live_exposure error: {e}")
+        return 0, 0.0
+
+
 def get_state(user_id: int) -> UserState:
     try:
         with get_conn() as conn:
@@ -280,16 +307,19 @@ def get_state(user_id: int) -> UserState:
                     "SELECT * FROM user_state WHERE user_id = %s", (user_id,)
                 )
                 row = cur.fetchone()
-                if row:
-                    return UserState(**row)
-                # Create if missing
-                cur.execute(
-                    "INSERT INTO user_state (user_id) VALUES (%s) RETURNING *",
-                    (user_id,)
-                )
-                row = cur.fetchone()
-                conn.commit()
-                return UserState(**row)
+                if not row:
+                    cur.execute(
+                        "INSERT INTO user_state (user_id) VALUES (%s) RETURNING *",
+                        (user_id,)
+                    )
+                    row = cur.fetchone()
+                    conn.commit()
+            # Always recalculate exposure from live trades to prevent stale counts
+            open_trades, live_exposure = _sync_live_exposure(user_id, conn)
+            state = UserState(**row)
+            state.open_trades = open_trades
+            state.live_exposure = live_exposure
+            return state
     except Exception as e:
         logger.error(f"get_state error: {e}")
         return UserState(user_id=user_id)
