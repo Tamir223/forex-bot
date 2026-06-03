@@ -924,6 +924,37 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(f"[scanner] {symbol} no actionable direction — skipping")
             return None
 
+        # ── TIER 3.5: HARD BIAS FILTER ────────────────────────────────────────
+        # Confirmed strong/moderate bias conflict → hard block; weak → -2 penalty
+        try:
+            from scanner_improvements import get_daily_bias as _gbias
+            _daily = _gbias(symbol)
+            _bias_dir = _daily.get("bias", "neutral")
+            _bias_confirmed = _daily.get("confirmed", False)
+            _bias_strength = _daily.get("strength", "weak")
+            _conflict = (
+                (direction == "BUY" and _bias_dir == "bearish") or
+                (direction == "SELL" and _bias_dir == "bullish")
+            )
+            if _conflict and _bias_confirmed:
+                if _bias_strength in ("moderate", "strong"):
+                    logger.info(
+                        f"[scanner] {symbol} {direction} blocked — confirmed {_bias_dir} bias conflict"
+                    )
+                    return None
+                else:  # weak confirmed bias — penalty but allow if score >= 9
+                    score_data["score"] = max(0, score_data["score"] - 2)
+                    final_score = score_data["score"]
+                    score_data["recommendation"] = (
+                        "STRONG" if final_score >= 8 else
+                        "MODERATE" if final_score >= 5 else "WEAK"
+                    )
+                    score_data["factors"] = score_data.get("factors", []) + [
+                        "⚠️ Confirmed bias conflict (weak) — -2 penalty"
+                    ]
+        except Exception:
+            pass
+
         # ── TIER 4: POST-SCORE BLOCKS ─────────────────────────────────────────
         # Score threshold — 9+ guarantee overrides range/session penalties
         if final_score < 7:
