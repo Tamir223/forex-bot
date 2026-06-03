@@ -914,6 +914,12 @@ _DAILY_BIAS_FUTURES_MAP = {
     'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F', 'XAUUSD': 'GC=F',
 }
 
+_FOREX_YFINANCE_MAP = {
+    'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
+    'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X', 'NZDUSD': 'NZDUSD=X',
+    'USDCHF': 'USDCHF=X',
+}
+
 
 def get_daily_bias(symbol: str) -> dict:
     """
@@ -938,28 +944,44 @@ def get_daily_bias(symbol: str) -> dict:
                     "low": float(row["Low"]),  "close": float(row["Close"]),
                 })
         else:
+            td_success = False
             try:
                 from config import TWELVE_DATA_API_KEY
                 from market import normalize_symbol
                 td_sym = normalize_symbol(sym)
-                if not td_sym or not TWELVE_DATA_API_KEY:
-                    return _default
-                resp = requests.get(
-                    "https://api.twelvedata.com/time_series",
-                    params={"symbol": td_sym, "interval": "1day",
-                            "outputsize": 5, "apikey": TWELVE_DATA_API_KEY},
-                    timeout=8,
-                )
-                data = resp.json()
-                if "values" not in data:
-                    return _default
-                for c in reversed(data["values"]):
-                    candles.append({
-                        "open": float(c["open"]), "high": float(c["high"]),
-                        "low":  float(c["low"]),  "close": float(c["close"]),
-                    })
+                if td_sym and TWELVE_DATA_API_KEY:
+                    resp = requests.get(
+                        "https://api.twelvedata.com/time_series",
+                        params={"symbol": td_sym, "interval": "1day",
+                                "outputsize": 5, "apikey": TWELVE_DATA_API_KEY},
+                        timeout=8,
+                    )
+                    data = resp.json()
+                    if "values" in data:
+                        for c in reversed(data["values"]):
+                            candles.append({
+                                "open": float(c["open"]), "high": float(c["high"]),
+                                "low":  float(c["low"]),  "close": float(c["close"]),
+                            })
+                        td_success = True
             except Exception:
-                return _default
+                pass
+            if not td_success:
+                yf_ticker = _FOREX_YFINANCE_MAP.get(sym)
+                if not yf_ticker:
+                    return _default
+                try:
+                    import yfinance as yf
+                    hist = yf.Ticker(yf_ticker).history(period="5d", interval="1d")
+                    if hist.empty or len(hist) < 3:
+                        return _default
+                    for _, row in hist.iloc[-5:].iterrows():
+                        candles.append({
+                            "open": float(row["Open"]), "high": float(row["High"]),
+                            "low":  float(row["Low"]),  "close": float(row["Close"]),
+                        })
+                except Exception:
+                    return _default
 
         if len(candles) < 3:
             return _default
