@@ -462,6 +462,40 @@ assert b['bias'] in ('bullish','bearish','neutral','unknown'), f'Invalid bias: {
 " 2>/dev/null
 check $? "Data: daily bias returns valid data for EURUSD"
 
+# ── PATTERN DETECTION CHECKS ──────────────────────────────────────────────────
+
+# 53. Equal highs/lows function exists
+grep -c 'detect_equal_highs_lows' /home/ubuntu/apfee/scanner_improvements.py | grep -q '[1-9]'
+check $? "Pattern: equal highs/lows function exists"
+
+# 54. MSS function exists
+grep -c 'detect_market_structure_shift' /home/ubuntu/apfee/scanner_improvements.py | grep -q '[1-9]'
+check $? "Pattern: MSS function exists"
+
+# 55. Premium/discount function exists
+grep -c 'check_premium_discount_zone' /home/ubuntu/apfee/scanner_improvements.py | grep -q '[1-9]'
+check $? "Pattern: premium/discount function exists"
+
+# 56. Kill zone function exists
+grep -c 'is_kill_zone' /home/ubuntu/apfee/scanner_improvements.py | grep -q '[1-9]'
+check $? "Pattern: kill zone function exists"
+
+# 57. All 4 patterns imported in scanner.py
+grep -cE 'detect_equal_highs_lows|detect_market_structure_shift|check_premium_discount_zone|is_kill_zone' /home/ubuntu/apfee/scanner.py | grep -q '[1-9]'
+check $? "Pattern: all 4 patterns imported in scanner"
+
+# 58. Kill zone UTC times correct (07-09, 12-14, 14-16)
+grep -q '07.*09\|12.*14\|14.*16' /home/ubuntu/apfee/scanner_improvements.py
+check $? "Pattern: kill zone UTC times correct (07-09, 12-14, 14-16)"
+
+# 59. Equal highs/lows score +2
+grep -A5 'detect_equal_highs_lows' /home/ubuntu/apfee/scanner.py | grep -q '+2\|+= 2'
+check $? "Pattern: equal highs/lows score +2"
+
+# 60. MSS score +2/-2
+grep -A5 'detect_market_structure_shift' /home/ubuntu/apfee/scanner.py | grep -q '+2\|+= 2'
+check $? "Pattern: MSS score +2/-2"
+
 echo ""
 echo "======================================"
 echo "RESULTS: $PASS passed, $FAIL failed"

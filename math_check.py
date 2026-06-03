@@ -318,6 +318,90 @@ except Exception as e:
     fail("Configuration sanity", str(e))
 
 
+# ── PATTERN DETECTION CHECKS ──────────────────────────────────────────────────
+section("PATTERN DETECTION CHECKS:")
+
+try:
+    from scanner_improvements import (
+        detect_equal_highs_lows,
+        detect_market_structure_shift,
+        check_premium_discount_zone,
+        is_kill_zone,
+    )
+    PATTERN_IMPORTS_OK = True
+except Exception as e:
+    fail("Pattern detection imports", str(e))
+    PATTERN_IMPORTS_OK = False
+
+if PATTERN_IMPORTS_OK:
+    import re as _re
+
+    def _mc(close, high=None, low=None):
+        return {
+            "open":  close - 0.0002,
+            "close": close,
+            "high":  high if high is not None else close + 0.0002,
+            "low":   low  if low  is not None else close - 0.0002,
+        }
+
+    _mock = [_mc(1.1050) for _ in range(20)]
+
+    # Callable and return type checks
+    for _fn, _args, _label in [
+        (detect_equal_highs_lows,    (_mock, "BUY"),           "detect_equal_highs_lows → tuple(bool, str)"),
+        (detect_market_structure_shift, (_mock, "BUY"),        "detect_market_structure_shift → tuple(bool, str)"),
+        (check_premium_discount_zone, (_mock, 1.1050, "BUY"),  "check_premium_discount_zone → tuple(bool, str)"),
+        (is_kill_zone,               ("EURUSD",),              "is_kill_zone → tuple(bool, str)"),
+    ]:
+        try:
+            _r = _fn(*_args)
+            assert isinstance(_r, tuple) and len(_r) == 2, f"not a 2-tuple: {_r!r}"
+            assert isinstance(_r[0], bool), f"[0] not bool: {type(_r[0])}"
+            assert isinstance(_r[1], str),  f"[1] not str: {type(_r[1])}"
+            ok(_label)
+        except Exception as _e:
+            fail(_label, str(_e))
+
+    # Score impact verification via scanner.py source
+    try:
+        _src = open(os.path.join(os.path.dirname(__file__), "scanner.py")).read()
+
+        # Kill zone: +1
+        if _re.search(r'_kz_ok\b.{0,60}score\s*\+=\s*1', _src, _re.DOTALL):
+            ok("Kill zone score impact: +1 confirmed")
+        else:
+            fail("Kill zone score impact", "score += 1 not found after _kz_ok")
+
+        # Equal highs/lows: +2
+        if _re.search(r'eq_ok\b.{0,60}score\s*\+=\s*2', _src, _re.DOTALL):
+            ok("Equal highs/lows score impact: +2 confirmed")
+        else:
+            fail("Equal highs/lows score impact", "score += 2 not found after eq_ok")
+
+        # MSS: +2 in direction, -2 against
+        _mss_plus  = _re.search(r'mss_ok\b.{0,60}score\s*\+=\s*2', _src, _re.DOTALL)
+        _mss_minus = _re.search(r'score\s*=\s*max\(0,\s*score\s*-\s*2\)', _src)
+        if _mss_plus and _mss_minus:
+            ok("MSS score impact: +2 in direction, -2 against confirmed")
+        else:
+            fail("MSS score impact",
+                 f"plus={'found' if _mss_plus else 'missing'}, "
+                 f"minus={'found' if _mss_minus else 'missing'}")
+
+        # Premium/discount: +1 favourable, -1 unfavourable
+        _pd_plus  = _re.search(r'pd_ok\b.{0,200}score\s*\+=\s*1', _src, _re.DOTALL)
+        _pd_minus = _re.search(r'score\s*=\s*max\(0,\s*score\s*-\s*1\)', _src)
+        if _pd_plus and _pd_minus:
+            ok("Premium/discount score impact: +1/-1 confirmed")
+        else:
+            fail("Premium/discount score impact",
+                 f"plus={'found' if _pd_plus else 'missing'}, "
+                 f"minus={'found' if _pd_minus else 'missing'}")
+
+    except Exception as _e:
+        fail("Pattern score impact checks", str(_e))
+
+
 # ── PRINT RESULTS ─────────────────────────────────────────────────────────────
 for line in RESULTS:
     print(line)
