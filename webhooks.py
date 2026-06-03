@@ -107,9 +107,14 @@ async def stripe_webhook(request: Request):
             customer_id = data.get("customer") if isinstance(data, dict) else getattr(data, "customer", None)
             user = get_user_by_stripe_customer(customer_id)
             if user:
-                set_user_active(user.id, False)
-                await send_cancellation_message(user)
-                logger.info(f"Deactivated {user.email}")
+                # Protect owner accounts from accidental deactivation
+                PROTECTED_CHAT_IDS = ["8647323622", "5803919273"]
+                if user.telegram_chat_id in PROTECTED_CHAT_IDS:
+                    logger.warning(f"Protected account {user.email} — skipping deactivation from {event_type}")
+                else:
+                    set_user_active(user.id, False)
+                    await send_cancellation_message(user)
+                    logger.info(f"Deactivated {user.email}")
         except Exception as e:
             logger.error(f"Cancellation handler error: {e}")
 
