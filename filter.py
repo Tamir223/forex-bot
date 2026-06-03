@@ -6,7 +6,7 @@ All gate logic including confluence scoring.
 import logging
 from datetime import datetime, timezone
 from config import (
-    CONFIDENCE_THRESHOLD, MAX_TRADES_TODAY, MAX_OPEN_TRADES,
+    CONFIDENCE_THRESHOLD,
     MAX_LIVE_EXPOSURE, MAX_SESSION_LOSSES, MAX_WEEKLY_LOSSES,
     SESSION_START_HOUR, SESSION_END_HOUR, MIN_CONFLUENCE
 )
@@ -63,9 +63,6 @@ def run_fast_gates(state: dict) -> tuple[bool, str]:
 
     if not (SESSION_START_HOUR <= hour <= SESSION_END_HOUR):
         return False, f"Outside trading session. Active {SESSION_START_HOUR}:00 to {SESSION_END_HOUR}:00 UTC."
-
-    if state.get("open_trades", 0) >= MAX_OPEN_TRADES:
-        return False, f"Maximum open trades of {MAX_OPEN_TRADES} reached."
 
     if state.get("live_exposure", 0) >= MAX_LIVE_EXPOSURE:
         return False, f"Live exposure limit of {MAX_LIVE_EXPOSURE}% reached."
