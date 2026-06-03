@@ -907,18 +907,25 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         final_score = score_data["score"]
         score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
 
-        # Resolve trade direction — for ranging structure fall back to HTF bias
+        # Resolve trade direction — for ranging 15M fall back to H4+Daily alignment
         direction = score_data.get("direction")
         if direction is None and htf_bias:
-            htf_dir = htf_bias.get("bias", "unclear")
-            if htf_dir == "bullish":
+            _h4 = htf_bias.get("h4_trend", "unclear")
+            _d1 = htf_bias.get("d1_trend", "unclear")
+            if _h4 == _d1 == "bullish":
                 direction = "BUY"
                 score_data["direction"] = "BUY"
-                score_data["factors"] = score_data.get("factors", []) + ["Direction from HTF bias (15M structure ranging)"]
-            elif htf_dir == "bearish":
+                _htf_aligned = htf_bias.get("aligned", False)
+                _tag = "H1+H4+Daily aligned bullish" if _htf_aligned else "H4+Daily aligned bullish"
+                score_data["factors"] = score_data.get("factors", []) + [f"Direction from HTF bias — {_tag} (15M ranging)"]
+                logger.info(f"[scanner] {symbol} 15M ranging — direction BUY from {_tag}")
+            elif _h4 == _d1 == "bearish":
                 direction = "SELL"
                 score_data["direction"] = "SELL"
-                score_data["factors"] = score_data.get("factors", []) + ["Direction from HTF bias (15M structure ranging)"]
+                _htf_aligned = htf_bias.get("aligned", False)
+                _tag = "H1+H4+Daily aligned bearish" if _htf_aligned else "H4+Daily aligned bearish"
+                score_data["factors"] = score_data.get("factors", []) + [f"Direction from HTF bias — {_tag} (15M ranging)"]
+                logger.info(f"[scanner] {symbol} 15M ranging — direction SELL from {_tag}")
 
         if not direction:
             logger.info(f"[scanner] {symbol} no actionable direction — skipping")
