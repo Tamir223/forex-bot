@@ -83,11 +83,12 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
             market_ctx["provider_trades"] = stats.get("total_trades", 0)
             market_ctx["provider_modifier"] = stats.get("confidence_modifier", 0)
 
-        # Historical win rate for this pair+direction
+        # Historical win rate for this pair+direction — requires 10+ trades to be meaningful
         if pair and direction:
             wr = _get_historical_win_rate(pair, direction)
-            market_ctx["hist_win_rate"] = wr.get("win_rate")
-            market_ctx["hist_total"] = wr.get("total", 0)
+            hist_total = wr.get("total", 0)
+            market_ctx["hist_total"] = hist_total
+            market_ctx["hist_win_rate"] = wr.get("win_rate") if hist_total >= 10 else None
 
         # Correlation warning (BUY on correlated USD pairs only)
         market_ctx["correlation_warning"] = _check_correlated_pairs(pair, direction, user_id)
