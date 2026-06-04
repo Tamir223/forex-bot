@@ -97,10 +97,6 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         account_size = float(account_state.get("account_size", 10000))
         from futures_instruments import is_futures
         max_contracts = account_state.get("max_contracts") if is_futures(pair or "") else None
-        market_ctx["lot_size_suggestion"] = (
-            _calculate_lot_size(float(risk_pct), sl_pts, pair, account_size, max_contracts)
-            if risk_pct and sl_pts else None
-        )
         market_ctx["is_futures"] = is_futures(pair or "")
 
         # Early exits
@@ -148,15 +144,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         result.setdefault("invalidation_level", None)
         result.setdefault("is_futures", market_ctx.get("is_futures", False))
         result["signal_source"] = provider or result.get("signal_source") or "UNKNOWN"
-        # Always override Claude's lot size with our own calculation — Claude gets it wrong for futures/forex
-        # Recalculate lot size using Claude's stop_loss if quick parse missed it
-        if not market_ctx.get('lot_size_suggestion') and result.get('stop_loss') and result.get('entry_zone'):
-            sl_pts_final = _compute_sl_pts(str(result['entry_zone']), str(result['stop_loss']), pair)
-            risk_pct2 = account_state.get('risk_percent') or 1.0
-            account_size2 = float(account_state.get('account_size', 10000))
-            max_contracts2 = account_state.get('max_contracts')
-            market_ctx['lot_size_suggestion'] = _calculate_lot_size(float(risk_pct2), sl_pts_final, pair, account_size2, max_contracts2) if sl_pts_final else None
-        result['lot_size_suggestion'] = market_ctx.get('lot_size_suggestion')
+        result['lot_size_suggestion'] = None
 
         # Tiered risk sizing — prefer scanner score injected via account_state (reliable),
         # fall back to Claude's confidence field (may be a string like "9/10")
@@ -339,7 +327,7 @@ def _get_historical_win_rate(pair: str, direction: str) -> dict:
         cur.close()
         conn.close()
         if row:
-            wins, losses = row[0], row[1]
+            wins, losses = row['wins'], row['losses']
             total = wins + losses
             if total > 0:
                 return {"win_rate": round((wins / total) * 100), "total": total}
@@ -360,7 +348,7 @@ def _check_correlated_pairs(pair: str, direction: str, user_id: int) -> bool:
             "SELECT COUNT(*) FROM trades WHERE user_id = %s AND pair = ANY(%s) AND result IS NULL",
             (user_id, other)
         )
-        count = cur.fetchone()[0]
+        count = cur.fetchone()['count']
         cur.close()
         conn.close()
         return count > 0

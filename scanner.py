@@ -732,10 +732,13 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         direction_str = "BUY" if trend == "bullish" else "SELL"
         ob_mid = ob["mid"] if ob else (candles[0]["close"] if candles else 0.0)
 
+        _factor_offset = FUTURES_SPOT_OFFSET.get(symbol.upper() if symbol else "", 0)
+
         sweep_ok, swept_level = detect_liquidity_sweep(candles, direction_str)
         if sweep_ok:
             score += 2
-            factors.append(f"Liquidity sweep confirmed at {swept_level} — institutional entry signal")
+            _swept_disp = round(swept_level + _factor_offset, 3) if _factor_offset else swept_level
+            factors.append(f"Liquidity sweep confirmed at {_swept_disp} — institutional entry signal")
 
         rej_ok, candle_type = detect_rejection_candle(candles, direction_str, ob_mid)
         if rej_ok:
@@ -763,6 +766,13 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         eq_ok, eq_desc = detect_equal_highs_lows(candles, direction_str)
         if eq_ok:
             score += 2
+            if _factor_offset and eq_desc:
+                import re as _re_eq
+                eq_desc = _re_eq.sub(
+                    r'at ([\d.]+)',
+                    lambda m: f'at {round(float(m.group(1)) + _factor_offset, 3)}',
+                    eq_desc
+                )
             factors.append(eq_desc)
 
         # Market structure shift — full reversal confirmation
@@ -1474,7 +1484,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             "score": _scanner_score,  # inject scanner score so analyze_signal uses it for risk tier
         }
 
-        analysis = analyze_signal(signal_text, state_dict)
+        analysis = analyze_signal(signal_text, state_dict, user_id=user.id)
         if not analysis:
             return False
 

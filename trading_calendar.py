@@ -52,63 +52,7 @@ def check_news_window(pair: str, hours_ahead: int = 2) -> dict:
     if not pair:
         return {"has_news": False, "events": [], "warning_message": None}
 
-    try:
-        now_utc = datetime.now(timezone.utc)
-        window_end = now_utc + timedelta(hours=hours_ahead)
-
-        # MyFXBook calendar endpoint - no auth required
-        resp = requests.get(
-            "https://www.myfxbook.com/api/get-economic-calendar.json",
-            params={
-                "start": now_utc.strftime("%Y-%m-%d %H:%M"),
-                "end": window_end.strftime("%Y-%m-%d %H:%M"),
-            },
-            timeout=5
-        )
-
-        if resp.status_code != 200:
-            logger.warning(f"Calendar API returned {resp.status_code}")
-            return _fallback_check(pair)
-
-        data = resp.json()
-        if not data.get("error") is False:
-            return _fallback_check(pair)
-
-        events = data.get("calendar", [])
-        affected_currencies = get_affected_currencies(pair)
-        matching_events = []
-
-        for event in events:
-            impact = str(event.get("impact", "")).lower()
-            currency = str(event.get("currency", "")).upper()
-            title = str(event.get("title", "")).lower()
-
-            if impact not in ["high", "3"]:
-                continue
-
-            if currency not in affected_currencies:
-                continue
-
-            matching_events.append({
-                "title": event.get("title"),
-                "currency": currency,
-                "time": event.get("date"),
-                "impact": impact
-            })
-
-        if matching_events:
-            titles = ", ".join([e["title"] for e in matching_events[:3]])
-            return {
-                "has_news": True,
-                "events": matching_events,
-                "warning_message": f"High impact news in next {hours_ahead}h: {titles}"
-            }
-
-        return {"has_news": False, "events": [], "warning_message": None}
-
-    except Exception as e:
-        logger.error(f"Calendar check error: {e}")
-        return _fallback_check(pair)
+    return _fallback_check(pair)
 
 
 def _fallback_check(pair: str) -> dict:
