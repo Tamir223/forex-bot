@@ -408,8 +408,8 @@ def get_htf_bias(symbol: str) -> dict:
             d1_trend = "bullish" if d1["Close"].iloc[-1] > d1["Close"].iloc[0] else "bearish"
         else:
             from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
-            _yf_sym = ("GC=F" if upper == "XAUUSD"
-                       else _YF_FOREX_MAP.get(upper))
+            _yf_sym = ("GC=F" if symbol.upper() == "XAUUSD"
+                       else _YF_FOREX_MAP.get(symbol.upper()))
             if not _yf_sym:
                 return result
             h1 = yf.Ticker(_yf_sym).history(period="14d", interval="1h")

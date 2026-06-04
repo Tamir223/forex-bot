@@ -557,6 +557,13 @@ def is_ranging_market(candles: list) -> bool:
     if current_price == 0:
         return False
 
+    # Early exit: 20-candle range > 0.5% means the market is NOT ranging
+    if len(candles) >= 20:
+        lookback20 = candles[:20]
+        range20 = (max(c["high"] for c in lookback20) - min(c["low"] for c in lookback20)) / current_price
+        if range20 > 0.005:
+            return False
+
     # Condition 1: 4-candle range < 0.15%
     recent4 = candles[:4]
     range4 = (max(c["high"] for c in recent4) - min(c["low"] for c in recent4)) / current_price
