@@ -170,9 +170,10 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         logger.info(f"[risk] raw={result.get('confidence')} parsed={confidence_score} tier={risk_percent}")
         result['risk_percent'] = round(risk_percent * 100, 4)  # Store as percentage (0.75)
         risk_percent = result['risk_percent']
-        if not risk_percent or risk_percent <= 0:
-            risk_percent = 0.005
-            logger.warning("[risk] risk_percent was 0 — defaulting to 0.5%")
+        if not result.get('risk_percent') or result.get('risk_percent') <= 0:
+            result['risk_percent'] = 0.50
+            risk_percent = result['risk_percent']
+            logger.warning("[risk] risk_percent was 0 — forced to 0.50%")
         # Always recalculate lot size with tiered risk
         if result.get('stop_loss') and result.get('entry_zone'):
             sl_pts_tiered = _compute_sl_pts(str(result['entry_zone']), str(result['stop_loss']), pair)

@@ -1117,7 +1117,8 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             if _live_price is not None:
                 logger.info(f"[grade] direction={_direction} live={_live_price} entry={_entry_price} diff={abs(_live_price - _entry_price)}")
             if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
-                _score = result.get("score", 0)
+                _score = int(result.get("score", 0))
+                logger.info(f"[grade_block] score={_score} type={type(_score)} direction={_direction} live={_live_price} entry={_entry_price}")
                 if _score == 10:
                     if _direction == "SELL" and _live_price < _entry_price:
                         _limit_note = (
@@ -1187,9 +1188,10 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         # Override risk tier from scanner score — Claude's confidence field can mismatch
         # (e.g. returns "10/10" string for a 9/10 signal), so source of truth is the scanner score
         from claude import RISK_TIERS as _RISK_TIERS
-        _scanner_score = result.get('score', 9)
+        _scanner_score = int(result.get('score', 9))
         _scanner_risk = _RISK_TIERS.get(_scanner_score, 0.005)
         analysis['risk_percent'] = round(_scanner_risk * 100, 4)
+        logger.info(f"[risk_override] scanner_score={_scanner_score} risk={_scanner_risk} analysis_risk={analysis.get('risk_percent')}")
 
         # Apply firm risk cap
         if profile:
