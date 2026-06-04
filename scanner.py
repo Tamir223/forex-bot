@@ -109,6 +109,10 @@ def _min_sl_dist(symbol: str) -> float:
 # Tracks last known bias per symbol for shift detection
 _last_bias: dict = {}
 
+# News-resumption alert state — fires once when a news block clears
+_news_was_blocked: bool = False
+_news_resume_sent: bool = False
+
 
 def _cache_signal(signal_text: str) -> str:
     """Store a signal and return its short cache key."""
@@ -1764,6 +1768,36 @@ async def start_scanner(bot, get_active_users_fn):
                     logger.info(f"[scanner] Daily bias report sent to {len(user_chat_ids)} users")
                 except Exception as _bre:
                     logger.error(f"[scanner] bias report build error: {_bre}")
+
+            # ── NEWS RESUMPTION ALERT ────────────────────────────────────────
+            global _news_was_blocked, _news_resume_sent
+            _currently_blocked, _ = is_news_window()
+
+            if _currently_blocked and not _news_was_blocked:
+                _news_was_blocked = True
+                _news_resume_sent = False
+                logger.info("[scanner] News window opened — resumption alert armed")
+
+            elif not _currently_blocked and _news_was_blocked and not _news_resume_sent:
+                resume_msg = (
+                    "✅ News window cleared — scanner resuming.\n"
+                    "All pairs now active. Watch for fresh setups."
+                )
+                try:
+                    _bias_symbols = list(all_symbols)[:8]
+                    _bias_report = build_bias_report(_bias_symbols)
+                    post_news_msg = f"📊 Post-news bias update:\n{_bias_report}"
+                    for _cid in user_chat_ids:
+                        try:
+                            await bot.send_message(chat_id=_cid, text=resume_msg)
+                            await bot.send_message(chat_id=_cid, text=post_news_msg, parse_mode="Markdown")
+                        except Exception as _se:
+                            logger.error(f"[scanner] news resume send error to {_cid}: {_se}")
+                    logger.info(f"[scanner] News resumption alert sent to {len(user_chat_ids)} users")
+                except Exception as _re:
+                    logger.error(f"[scanner] news resumption alert error: {_re}")
+                _news_resume_sent = True
+                _news_was_blocked = False
 
             await run_scan(list(all_symbols), bot, user_chat_ids)
 
