@@ -48,6 +48,32 @@ import uuid as _uuid
 AUTO_SIGNAL_CACHE = {}
 MAX_CACHE_SIZE = 200
 
+# Twelve Data circuit breaker — once daily credits are exhausted, skip TD calls
+# until the next UTC midnight rather than hitting the API on every scan cycle.
+import time as _time
+_td_credits_exhausted_until: float = 0.0  # epoch seconds
+
+
+def _td_available() -> bool:
+    """Return False once TD daily limit has been hit (until next UTC midnight)."""
+    return _time.time() >= _td_credits_exhausted_until
+
+
+def _mark_td_exhausted() -> None:
+    """Disable TD calls for the rest of the current UTC day."""
+    global _td_credits_exhausted_until
+    from datetime import timedelta
+    _next_midnight = (
+        datetime.now(timezone.utc)
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        + timedelta(days=1)
+    )
+    _td_credits_exhausted_until = _next_midnight.timestamp()
+    logger.warning(
+        f"[candles] Twelve Data credits exhausted — yFinance-only until "
+        f"{_next_midnight.strftime('%Y-%m-%d %H:%M UTC')}"
+    )
+
 # Rotation index for spreading Twelve Data API calls across scan cycles
 _scan_rotation_index = 0
 
@@ -233,8 +259,8 @@ def get_candles(symbol: str, interval: str = "15min", outputsize: int = 200) -> 
             return None
     from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
 
-    # Forex — TD primary, yFinance fallback
-    if TWELVE_DATA_API_KEY:
+    # Forex — TD primary, yFinance fallback (skipped when daily credits exhausted)
+    if TWELVE_DATA_API_KEY and _td_available():
         td_symbol = normalize_symbol(symbol)
         try:
             resp = requests.get(f"{BASE_URL}/time_series",
@@ -253,7 +279,11 @@ def get_candles(symbol: str, interval: str = "15min", outputsize: int = 200) -> 
                         "volume": float(v.get("volume", 0)),
                     })
                 return candles
-            logger.warning(f"[candles] TD failed for {symbol}: {data.get('message', 'unknown')} — falling back to yFinance")
+            _msg = data.get("message", "unknown")
+            if "credits" in _msg.lower():
+                _mark_td_exhausted()
+            else:
+                logger.warning(f"[candles] TD failed for {symbol}: {_msg} — falling back to yFinance")
         except Exception as e:
             logger.warning(f"[candles] TD exception for {symbol}: {e} — falling back to yFinance")
 
@@ -424,7 +454,7 @@ def get_htf_bias(symbol: str) -> dict:
             h1_trend = h4_trend = d1_trend = None
 
             # TD primary for forex HTF candles (not XAUUSD — uses yFinance GC=F)
-            if TWELVE_DATA_API_KEY and symbol.upper() != "XAUUSD":
+            if TWELVE_DATA_API_KEY and symbol.upper() != "XAUUSD" and _td_available():
                 try:
                     td_symbol = normalize_symbol(symbol)
                     def _fetch_td_htf(interval, outputsize=30):
@@ -434,6 +464,8 @@ def get_htf_bias(symbol: str) -> dict:
                         data = resp.json()
                         if data.get("status") != "error" and "values" in data:
                             return [float(v["close"]) for v in data["values"]]
+                        if "credits" in data.get("message", "").lower():
+                            _mark_td_exhausted()
                         return None
                     _h1 = _fetch_td_htf("1h", 30)
                     _h4 = _fetch_td_htf("4h", 30)
