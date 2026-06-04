@@ -280,8 +280,8 @@ def _sync_live_exposure(user_id: int, conn) -> tuple:
             cur.execute(
                 """SELECT COUNT(*) AS cnt, COALESCE(SUM(risk_percent), 0.0) AS exposure
                    FROM trades
-                   WHERE user_id = %s AND (result IS NULL OR result = 'PENDING')
-                     AND created_at > NOW() - INTERVAL '24 hours'""",
+                   WHERE user_id = %s AND result = 'PENDING'
+                     AND created_at > NOW() - INTERVAL '1 hour'""",
                 (user_id,)
             )
             row = cur.fetchone()

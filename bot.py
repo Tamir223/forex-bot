@@ -577,6 +577,17 @@ async def callback_trade_button(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         if trade_id:
             update_trade_result(trade_id, "SKIPPED")
+        try:
+            from database import get_conn
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE trades SET result='CANCELLED' WHERE user_id=%s AND result='PENDING' AND created_at > NOW() - INTERVAL '1 hour'",
+                        (user.id,)
+                    )
+                conn.commit()
+        except Exception as _e:
+            logger.error(f"PENDING cleanup error on NO: {_e}")
         await context.bot.send_message(chat_id=chat_id, text=trade_skipped())
 
 
@@ -605,6 +616,17 @@ async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE)
             chat_id=chat_id,
             text="⚠️ Signal expired. Send /scan for fresh setups."
         )
+        try:
+            from database import get_conn
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE trades SET result='CANCELLED' WHERE user_id=%s AND result='PENDING' AND created_at > NOW() - INTERVAL '1 hour'",
+                        (user.id,)
+                    )
+                conn.commit()
+        except Exception as _e:
+            logger.error(f"PENDING cleanup error on signal expiry: {_e}")
         return
 
     # Remove the Grade button so it can only be tapped once

@@ -1170,6 +1170,17 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                         chat_id=chat_id,
                         text=f"⏰ Signal expired — {_symbol} entry at {_entry_price} but price is now at {_live_price}. Entry zone missed."
                     )
+                    try:
+                        from database import get_conn
+                        with get_conn() as conn:
+                            with conn.cursor() as cur:
+                                cur.execute(
+                                    "UPDATE trades SET result='CANCELLED' WHERE user_id=%s AND result='PENDING' AND created_at > NOW() - INTERVAL '1 hour'",
+                                    (user.id,)
+                                )
+                            conn.commit()
+                    except Exception as _ce:
+                        logger.error(f"PENDING cleanup error on signal expiry: {_ce}")
                     return False
 
         # Regenerate signal with fresh live price so entry reflects current OB zone position
