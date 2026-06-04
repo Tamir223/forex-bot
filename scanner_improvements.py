@@ -872,12 +872,14 @@ def _detect_ob_htf(candles: list, trend: str) -> dict | None:
     return None
 
 
-def detect_mtf_ob_confluence(symbol: str, current_ob: dict, direction: str) -> tuple[bool, str]:
+def detect_mtf_ob_confluence(symbol: str, current_ob: dict, direction: str,
+                              candles_1h: list = None, candles_4h: list = None) -> tuple[bool, str]:
     """
     Check if the 15M order block also aligns with a 1H or 4H order block at the same level.
     Triple timeframe OB confluence is the highest probability SMC setup.
     Returns (confluence_found, description).
     Scoring applied by caller: triple→+3, 4H only→+2, 1H only→+1.
+    Pass candles_1h/candles_4h (newest-first) to skip API fetches.
     """
     if not current_ob:
         return False, ""
@@ -896,13 +898,12 @@ def detect_mtf_ob_confluence(symbol: str, current_ob: dict, direction: str) -> t
         return low_a <= high_b + tol and low_b <= high_a + tol
 
     try:
-        # 1H: 14-day history at 1h interval, 100 candles
-        candles_1h = _fetch_htf_candles(symbol, "1h", "14d", "1h", 100)
-        ob_1h = _detect_ob_htf(candles_1h, trend) if candles_1h else None
+        # Use pre-fetched candles if provided, else fetch from API
+        _c1h = candles_1h if candles_1h else _fetch_htf_candles(symbol, "1h", "14d", "1h", 100)
+        ob_1h = _detect_ob_htf(_c1h, trend) if _c1h else None
 
-        # 4H: 30-day history at 4h interval, 60 candles
-        candles_4h = _fetch_htf_candles(symbol, "4h", "30d", "4h", 60)
-        ob_4h = _detect_ob_htf(candles_4h, trend) if candles_4h else None
+        _c4h = candles_4h if candles_4h else _fetch_htf_candles(symbol, "4h", "30d", "4h", 60)
+        ob_4h = _detect_ob_htf(_c4h, trend) if _c4h else None
 
         h1_conf = bool(ob_1h and _overlaps(ob_low, ob_high, ob_1h["low"], ob_1h["high"], tol_1h))
         h4_conf = bool(ob_4h and _overlaps(ob_low, ob_high, ob_4h["low"], ob_4h["high"], tol_4h))
@@ -972,9 +973,10 @@ _FOREX_YFINANCE_MAP = {
 }
 
 
-def get_daily_bias(symbol: str) -> dict:
+def get_daily_bias(symbol: str, candles: list = None) -> dict:
     """
     Get the daily candle bias for a symbol.
+    Pass candles (newest-first) to skip the API fetch and use pre-fetched data.
     Returns dict with bias, strength, confirmed flag, and reason.
     """
     _default = {"bias": "unknown", "strength": "weak", "today_candle": "neutral",
@@ -982,15 +984,24 @@ def get_daily_bias(symbol: str) -> dict:
                 "intraday_override": False, "intraday_move_pct": 0.0}
     sym = symbol.upper()
     try:
-        candles = []
+        if candles and len(candles) >= 3:
+            # Pre-fetched candles are newest-first; reverse to oldest→newest for computation
+            _daily_candles = list(reversed(candles))
+        else:
+            _daily_candles = None
+
+        # Build raw_candles (oldest→newest) either from pre-fetched data or API
+        raw_candles = []
         ticker = _DAILY_BIAS_FUTURES_MAP.get(sym)
-        if ticker:
+        if _daily_candles is not None:
+            raw_candles = _daily_candles
+        elif ticker:
             import yfinance as yf
             hist = yf.Ticker(ticker).history(period="30d", interval="1d")
             if hist.empty or len(hist) < 3:
                 return _default
             for _, row in hist.iloc[-20:].iterrows():
-                candles.append({
+                raw_candles.append({
                     "open": float(row["Open"]), "high": float(row["High"]),
                     "low": float(row["Low"]),  "close": float(row["Close"]),
                 })
@@ -1010,9 +1021,8 @@ def get_daily_bias(symbol: str) -> dict:
                     )
                     data = resp.json()
                     if data.get("status") != "error" and "values" in data:
-                        # TD returns newest-first; reverse for oldest→newest order
                         for v in reversed(data["values"]):
-                            candles.append({
+                            raw_candles.append({
                                 "open": float(v["open"]), "high": float(v["high"]),
                                 "low":  float(v["low"]),  "close": float(v["close"]),
                             })
@@ -1028,14 +1038,14 @@ def get_daily_bias(symbol: str) -> dict:
                     if hist.empty or len(hist) < 3:
                         return _default
                     for _, row in hist.iloc[-20:].iterrows():
-                        candles.append({
+                        raw_candles.append({
                             "open": float(row["Open"]), "high": float(row["High"]),
                             "low":  float(row["Low"]),  "close": float(row["Close"]),
                         })
                 except Exception:
                     return _default
 
-        if len(candles) < 3:
+        if len(raw_candles) < 3:
             return _default
 
         def _candle_dir(c):
@@ -1048,10 +1058,10 @@ def get_daily_bias(symbol: str) -> dict:
         def _score(c):
             return 1 if c["close"] > c["open"] else -1
 
-        # candles are oldest→newest; last entry is today
-        today       = candles[-1]
-        yesterday   = candles[-2]
-        two_days    = candles[-3]
+        # raw_candles are oldest→newest; last entry is today
+        today       = raw_candles[-1]
+        yesterday   = raw_candles[-2]
+        two_days    = raw_candles[-3]
 
         today_dir   = _candle_dir(today)
         today_ratio = _body_ratio(today)

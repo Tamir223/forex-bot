@@ -340,9 +340,9 @@ def detect_structure(candles: list) -> dict:
     }
 
 
-def detect_order_block(candles: list, trend: str) -> dict | None:
+def detect_order_block(candles: list, trend: str, max_candles_back: int = 20) -> dict | None:
     """
-    Detect the most recent order block.
+    Detect the most recent order block within max_candles_back candles.
     Bullish OB: last bearish candle before a strong bullish move.
     Bearish OB: last bullish candle before a strong bearish move.
     """
@@ -352,7 +352,7 @@ def detect_order_block(candles: list, trend: str) -> dict | None:
     try:
         if trend == "bullish":
             # Find last bearish candle before current rally
-            for i in range(1, min(15, len(candles))):
+            for i in range(1, min(max_candles_back, len(candles))):
                 c = candles[i]
                 if c["close"] < c["open"]:  # bearish candle
                     # Check if followed by bullish move
@@ -368,7 +368,7 @@ def detect_order_block(candles: list, trend: str) -> dict | None:
 
         elif trend == "bearish":
             # Find last bullish candle before current drop
-            for i in range(1, min(15, len(candles))):
+            for i in range(1, min(max_candles_back, len(candles))):
                 c = candles[i]
                 if c["close"] > c["open"]:  # bullish candle
                     # Check if followed by bearish move
@@ -431,10 +431,120 @@ def detect_fvg(candles: list) -> dict | None:
     return None
 
 
+# ─── UNIFIED DATA CACHE ───────────────────────────────────────────────────────
+_symbol_data_cache: dict = {}  # {symbol: {"data": bundle, "fetched_at": epoch_seconds}}
 
-def get_htf_bias(symbol: str) -> dict:
+
+def fetch_all_timeframes(symbol: str) -> dict:
+    """
+    Fetch all timeframes once via yFinance and return a unified bundle.
+    Cached per symbol for 4 minutes — every component reads from this single source.
+
+    Returns dict with keys: symbol, price, candles_15m, candles_1h, candles_4h,
+    candles_daily (all newest-first), atr (dict), timestamp.
+    """
+    sym = symbol.upper()
+    cached = _symbol_data_cache.get(sym)
+    if cached and (_time.time() - cached["fetched_at"]) < 240:
+        return cached["data"]
+
+    from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
+    from scanner_improvements import get_pip_spec as _get_pip_spec
+
+    if sym in YFINANCE_FUTURES_MAP:
+        yf_ticker = YFINANCE_FUTURES_MAP[sym]
+    elif sym == "XAUUSD":
+        yf_ticker = "GC=F"
+    else:
+        yf_ticker = _YF_FOREX_MAP.get(sym)
+
+    def _to_candles(hist):
+        if hist is None or hist.empty:
+            return []
+        result = []
+        for ts, row in hist.iloc[::-1].iterrows():
+            result.append({
+                "datetime": str(ts),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": float(row.get("Volume", 0)),
+            })
+        return result
+
+    candles_15m: list = []
+    candles_1h: list  = []
+    candles_4h: list  = []
+    candles_daily: list = []
+    price: float = 0.0
+    atr_data: dict = {}
+
+    try:
+        if yf_ticker:
+            tk = yf.Ticker(yf_ticker)
+            candles_15m   = _to_candles(tk.history(period="10d", interval="15m"))[:200]
+            candles_1h    = _to_candles(tk.history(period="14d", interval="1h"))[:100]
+            candles_4h    = _to_candles(tk.history(period="30d", interval="4h"))[:60]
+            candles_daily = _to_candles(tk.history(period="30d", interval="1d"))[:20]
+
+            price = candles_15m[0]["close"] if candles_15m else 0.0
+
+            if sym == "XAUUSD":
+                try:
+                    _1m = yf.Ticker("GC=F").history(period="1d", interval="1m")
+                    if not _1m.empty:
+                        price = float(_1m["Close"].iloc[-1])
+                except Exception:
+                    pass
+                price = round(price + FUTURES_SPOT_OFFSET.get(sym, 0), 2)
+
+            if len(candles_15m) >= 14:
+                ranges = [c["high"] - c["low"] for c in candles_15m[:14]]
+                atr_val = sum(ranges) / len(ranges)
+                _futures_thr = {
+                    "ES": 5.0, "MES": 5.0, "NQ": 20.0, "MNQ": 20.0,
+                    "CL": 0.3, "MCL": 0.3, "GC": 5.0, "MGC": 5.0,
+                    "RTY": 3.0, "YM": 50.0, "XAUUSD": 3.0,
+                }
+                threshold = _futures_thr.get(sym, _get_pip_spec(sym).get("min_atr", 0.0007))
+                atr_data = {"atr": atr_val, "is_low_volatility": atr_val < threshold}
+
+    except Exception as e:
+        logger.error(f"[fetch_all_timeframes] {symbol}: {e}")
+
+    bundle = {
+        "symbol": sym,
+        "price": price,
+        "candles_15m": candles_15m,
+        "candles_1h": candles_1h,
+        "candles_4h": candles_4h,
+        "candles_daily": candles_daily,
+        "atr": atr_data,
+        "timestamp": datetime.utcnow(),
+    }
+    _symbol_data_cache[sym] = {"data": bundle, "fetched_at": _time.time()}
+    return bundle
+
+
+def get_htf_bias(symbol: str, candles_1h: list = None, candles_4h: list = None, candles_daily: list = None) -> dict:
     """Get Daily, 4H, and 1H trend bias for multi-timeframe confirmation."""
     result = {"h1_trend": "unclear", "h4_trend": "unclear", "d1_trend": "unclear", "aligned": False, "bias": "unclear"}
+    try:
+        # Fast path — use pre-fetched candles (newest-first) from the unified bundle
+        if candles_1h and candles_4h and candles_daily:
+            h1_trend = "bullish" if candles_1h[0]["close"]    > candles_1h[-1]["close"]    else "bearish"
+            h4_trend = "bullish" if candles_4h[0]["close"]    > candles_4h[-1]["close"]    else "bearish"
+            d1_trend = "bullish" if candles_daily[0]["close"] > candles_daily[-1]["close"] else "bearish"
+            result["h1_trend"] = h1_trend
+            result["h4_trend"] = h4_trend
+            result["d1_trend"] = d1_trend
+            all_aligned = h1_trend == h4_trend == d1_trend
+            result["aligned"] = all_aligned
+            result["bias"] = h1_trend if all_aligned else ("mixed" if h1_trend != h4_trend else h4_trend)
+            return result
+    except Exception as _e:
+        logger.debug(f"[get_htf_bias] pre-fetch path failed for {symbol}: {_e} — falling back to fetch")
     try:
         if symbol.upper() in YFINANCE_FUTURES_MAP:
             ticker = YFINANCE_FUTURES_MAP[symbol.upper()]
@@ -502,7 +612,7 @@ def get_htf_bias(symbol: str) -> dict:
     return result
 
 
-def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None, candles: list = None, symbol: str = None) -> dict:
+def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None, candles: list = None, symbol: str = None, candles_1h: list = None, candles_4h: list = None, daily_bias: dict = None) -> dict:
     """
     Score the overall setup quality. Returns score 0-10 and recommendation.
     """
@@ -531,7 +641,9 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         # MTF OB confluence — check 1H and 4H alignment with the 15M OB
         if symbol is not None:
             _direction_str = "BUY" if trend == "bullish" else "SELL"
-            _mtf_found, _mtf_desc = detect_mtf_ob_confluence(symbol, ob, _direction_str)
+            _mtf_found, _mtf_desc = detect_mtf_ob_confluence(
+                symbol, ob, _direction_str, candles_1h=candles_1h, candles_4h=candles_4h
+            )
             if _mtf_found:
                 if "Triple" in _mtf_desc:
                     score += 3
@@ -673,18 +785,18 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         score += 1
         factors.append(_kz_desc)
 
-    # Daily bias alignment check — single get_daily_bias call, result shared for both
-    # alignment check and strength lookup, and to flag unknown bias to callers
+    # Daily bias alignment check — uses pre-fetched daily_bias if provided (no extra API call)
     _bias_unknown = False
     if symbol is not None and trend in ("bullish", "bearish"):
         try:
-            from scanner_improvements import get_daily_bias as _get_db
-            _db = _get_db(symbol)
-            _bias_unknown = (_db.get("bias") == "unknown")
+            if daily_bias is None:
+                from scanner_improvements import get_daily_bias as _get_db
+                daily_bias = _get_db(symbol)
+            _bias_unknown = (daily_bias.get("bias") == "unknown")
             _trade_dir = "BUY" if trend == "bullish" else "SELL"
-            _bias_ok, _bias_msg = check_daily_bias_alignment(symbol, _trade_dir, _prefetched=_db)
+            _bias_ok, _bias_msg = check_daily_bias_alignment(symbol, _trade_dir, _prefetched=daily_bias)
             if not _bias_ok:
-                if _db.get("strength") == "strong":
+                if daily_bias.get("strength") == "strong":
                     score -= 2
                 else:
                     score -= 1
@@ -929,55 +1041,19 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
       Guarantee: score >= 9 always sends regardless of range/session flags
     """
     try:
-        candles = get_candles(symbol, interval="15min", outputsize=200)
+        # ── UNIFIED DATA FETCH ───────────────────────────────────────────────
+        # Single call fetches all timeframes (cached 4 min) — every component
+        # below reads from this bundle instead of fetching independently.
+        _data = fetch_all_timeframes(symbol)
+        candles = _data.get("candles_15m", [])
         if not candles or len(candles) < 10:
             return None
 
         # Flag ranging candles early — penalty applied after scoring, not a hard block
         is_ranging_candles = is_ranging_market(candles)
 
-        # Fetch price and ATR data
-        if symbol.upper() in YFINANCE_FUTURES_MAP or symbol.upper() == "XAUUSD":
-            yf_ticker = YFINANCE_FUTURES_MAP.get(symbol.upper(), "GC=F")
-            try:
-                _hist = yf.Ticker(yf_ticker).history(period="2d", interval="1h")
-                if not _hist.empty and len(_hist) >= 5:
-                    candles_1h = [
-                        {"high": float(r["High"]), "low": float(r["Low"]),
-                         "close": float(r["Close"])}
-                        for _, r in _hist.iloc[::-1].iterrows()
-                    ][:20]
-                    # For XAUUSD use 1m candles for the most current price; fall back to 1h close
-                    if symbol.upper() == "XAUUSD":
-                        try:
-                            _1m = yf.Ticker("GC=F").history(period="1d", interval="1m")
-                            live_price = round(float(_1m["Close"].iloc[-1]), 2) if not _1m.empty else round(candles_1h[0]["close"], 2)
-                        except Exception:
-                            live_price = round(candles_1h[0]["close"], 2)
-                        # Subtract futures basis to approximate MT5 spot price
-                        live_price = round(live_price + FUTURES_SPOT_OFFSET.get(symbol.upper(), 0), 2)
-                        price_data = {"price": live_price}
-                    else:
-                        price_data = {"price": candles_1h[0]["close"]}
-                    ranges = [c["high"] - c["low"] for c in candles_1h[:14]]
-                    atr_val = sum(ranges) / len(ranges)
-                    thresholds = {
-                        "ES": 5.0, "MES": 5.0, "NQ": 20.0, "MNQ": 20.0,
-                        "CL": 0.3, "MCL": 0.3, "GC": 5.0, "MGC": 5.0,
-                        "RTY": 3.0, "YM": 50.0, "XAUUSD": 3.0,
-                    }
-                    threshold = thresholds.get(symbol.upper(), 1.0)
-                    atr_data = {"atr": atr_val, "is_low_volatility": atr_val < threshold}
-                else:
-                    price_data = None
-                    atr_data = None
-            except Exception as _yfe:
-                logger.error(f"[scanner] yFinance price/ATR error for {symbol}: {_yfe}")
-                price_data = None
-                atr_data = None
-        else:
-            price_data = get_live_price(symbol)
-            atr_data = get_atr(symbol)
+        price_data = {"price": _data["price"]} if _data.get("price") else None
+        atr_data   = _data.get("atr") or None
 
         # ── TIER 1: HARD BLOCKS ──────────────────────────────────────────────
         news_blocked, news_reason = is_news_window()
@@ -1000,8 +1076,24 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         ob = detect_order_block(candles, trend)
         fvg = detect_fvg(candles)
-        htf_bias = get_htf_bias(symbol)
-        score_data = score_setup(structure, ob, fvg, atr_data, htf_bias, candles=candles, symbol=symbol)
+
+        # Single daily_bias fetch — reused for direction fallback, TIER 3.5 block, and score_setup
+        from scanner_improvements import get_daily_bias as _get_daily_bias
+        daily_bias = _get_daily_bias(symbol, candles=_data.get("candles_daily"))
+
+        htf_bias = get_htf_bias(
+            symbol,
+            candles_1h=_data.get("candles_1h"),
+            candles_4h=_data.get("candles_4h"),
+            candles_daily=_data.get("candles_daily"),
+        )
+        score_data = score_setup(
+            structure, ob, fvg, atr_data, htf_bias,
+            candles=candles, symbol=symbol,
+            candles_1h=_data.get("candles_1h"),
+            candles_4h=_data.get("candles_4h"),
+            daily_bias=daily_bias,
+        )
 
         # ── TIER 2: SCORE PENALTIES ──────────────────────────────────────────
         if is_ranging_candles:
@@ -1024,40 +1116,33 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         final_score = score_data["score"]
         score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
 
-        # Resolve trade direction — for ranging 15M fall back to H4+Daily alignment
+        # Resolve trade direction — for ranging 15M fall back to daily bias
         direction = score_data.get("direction")
-        if direction is None and htf_bias:
-            _h4 = htf_bias.get("h4_trend", "unclear")
-            _d1 = htf_bias.get("d1_trend", "unclear")
-            if _h4 == _d1 == "bullish":
+        if direction is None and daily_bias:
+            _db = daily_bias.get("bias", "neutral")
+            if _db == "bullish":
                 direction = "BUY"
                 score_data["direction"] = "BUY"
-                _htf_aligned = htf_bias.get("aligned", False)
-                _tag = "H1+H4+Daily aligned bullish" if _htf_aligned else "H4+Daily aligned bullish"
-                score_data["factors"] = score_data.get("factors", []) + [f"Direction from HTF bias — {_tag} (15M ranging)"]
-                logger.info(f"[scanner] {symbol} 15M ranging — direction BUY from {_tag}")
-            elif _h4 == _d1 == "bearish":
+                score_data["factors"] = score_data.get("factors", []) + ["Direction from daily bias — bullish (15M ranging)"]
+                logger.info(f"[scanner] {symbol} 15M ranging — direction BUY from daily bias")
+            elif _db == "bearish":
                 direction = "SELL"
                 score_data["direction"] = "SELL"
-                _htf_aligned = htf_bias.get("aligned", False)
-                _tag = "H1+H4+Daily aligned bearish" if _htf_aligned else "H4+Daily aligned bearish"
-                score_data["factors"] = score_data.get("factors", []) + [f"Direction from HTF bias — {_tag} (15M ranging)"]
-                logger.info(f"[scanner] {symbol} 15M ranging — direction SELL from {_tag}")
+                score_data["factors"] = score_data.get("factors", []) + ["Direction from daily bias — bearish (15M ranging)"]
+                logger.info(f"[scanner] {symbol} 15M ranging — direction SELL from daily bias")
 
         if not direction:
             logger.info(f"[scanner] {symbol} no actionable direction — skipping")
             return None
 
         # ── TIER 3.5: HARD BIAS FILTER ────────────────────────────────────────
-        # Confirmed strong/moderate bias conflict → hard block; weak → -2 penalty
+        # Reuses already-fetched daily_bias — no extra API call
         try:
-            from scanner_improvements import get_daily_bias as _gbias
-            _daily = _gbias(symbol)
-            _bias_dir = _daily.get("bias", "neutral")
-            _bias_confirmed = _daily.get("confirmed", False)
-            _bias_strength = _daily.get("strength", "weak")
+            _bias_dir       = daily_bias.get("bias", "neutral")
+            _bias_confirmed = daily_bias.get("confirmed", False)
+            _bias_strength  = daily_bias.get("strength", "weak")
             _conflict = (
-                (direction == "BUY" and _bias_dir == "bearish") or
+                (direction == "BUY"  and _bias_dir == "bearish") or
                 (direction == "SELL" and _bias_dir == "bullish")
             )
             if _conflict and _bias_confirmed:
