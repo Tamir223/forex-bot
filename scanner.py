@@ -140,10 +140,10 @@ _news_was_blocked: bool = False
 _news_resume_sent: bool = False
 
 
-def _cache_signal(signal_text: str) -> str:
+def _cache_signal(signal_text: str, score: int = None) -> str:
     """Store a signal and return its short cache key."""
     key = _uuid.uuid4().hex[:12]
-    AUTO_SIGNAL_CACHE[key] = {"signal": signal_text, "timestamp": datetime.now(timezone.utc)}
+    AUTO_SIGNAL_CACHE[key] = {"signal": signal_text, "score": score, "timestamp": datetime.now(timezone.utc)}
     # Keep cache bounded
     if len(AUTO_SIGNAL_CACHE) > MAX_CACHE_SIZE:
         oldest = next(iter(AUTO_SIGNAL_CACHE))
@@ -161,6 +161,14 @@ def get_cached_signal(key: str) -> str | None:
         del AUTO_SIGNAL_CACHE[key]
         return None
     return entry["signal"]
+
+
+def get_cached_score(key: str) -> int | None:
+    """Retrieve the scanner score stored alongside a cached signal."""
+    entry = AUTO_SIGNAL_CACHE.get(key)
+    if entry is None:
+        return None
+    return entry.get("score")
 
 BASE_URL = "https://api.twelvedata.com"
 
@@ -1297,7 +1305,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             symbol, direction, _build_cp,
             ob, fvg, structure, score_data, htf_bias or {}
         )
-        signal_key = _cache_signal(auto_signal)
+        signal_key = _cache_signal(auto_signal, score=score_data.get('score'))
 
         # Verify RR >= 1.5 from the actual built signal prices
         import re as _re_sig

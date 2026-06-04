@@ -607,8 +607,9 @@ async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # Get signal key from callback data
     signal_key = query.data.replace("autograde_", "")
-    from scanner import get_cached_signal
+    from scanner import get_cached_signal, get_cached_score
     signal_text = get_cached_signal(signal_key)
+    cached_score = get_cached_score(signal_key)
 
     if not signal_text:
         await query.edit_message_reply_markup(reply_markup=None)
@@ -655,6 +656,7 @@ async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "account_size": profile.account_size if profile else 10000.0,
             "risk_percent": 1.0,
             "max_contracts": profile.max_contracts if profile else None,
+            "score": cached_score,
         }
 
         analysis = analyze_signal(signal_text, state_dict)
