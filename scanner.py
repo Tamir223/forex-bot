@@ -985,8 +985,18 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
         lines.append(f"\n{ob_label}: {ob['low']} — {ob['high']} (mid: {ob['mid']})")
 
     if fvg:
-        fvg_label = "🟢 Bullish FVG" if fvg["type"] == "bullish_fvg" else "🔴 Bearish FVG"
-        lines.append(f"{fvg_label}: {fvg['bottom']} — {fvg['top']}")
+        _fvg_mid = (fvg["bottom"] + fvg["top"]) / 2
+        _entry_ref = ob["mid"] if ob else (float(current_price) if isinstance(current_price, (int, float)) else _fvg_mid)
+        if direction == "BUY":
+            _fvg_emoji = "🟢"
+            _fvg_desc = "Bullish FVG target" if _fvg_mid > _entry_ref else "FVG support"
+        elif direction == "SELL":
+            _fvg_emoji = "🔴"
+            _fvg_desc = "Bearish FVG target" if _fvg_mid < _entry_ref else "FVG resistance"
+        else:
+            _fvg_emoji = "🟢" if fvg["type"] == "bullish_fvg" else "🔴"
+            _fvg_desc = "Bullish FVG" if fvg["type"] == "bullish_fvg" else "Bearish FVG"
+        lines.append(f"{_fvg_emoji} {_fvg_desc}: {fvg['bottom']} — {fvg['top']}")
 
     lines += [
         "",
