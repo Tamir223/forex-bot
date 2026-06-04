@@ -50,7 +50,6 @@ HIGH_IMPACT_NEWS = [
     # Only include times that are nearly always high-impact regardless of the calendar.
     (8, 30, "US Core PCE / GDP / NFP / CPI"),
     (13, 30, "US economic data"),
-    (14, 0, "US economic data — 10AM EDT"),
     (7, 0, "BOE / UK data"),
     (9, 0, "ECB / EUR data"),
 ]
