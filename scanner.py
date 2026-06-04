@@ -233,46 +233,23 @@ def get_candles(symbol: str, interval: str = "15min", outputsize: int = 200) -> 
             return None
     from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
 
-    if not TWELVE_DATA_API_KEY:
-        if symbol.upper() in _YF_FOREX_MAP:
-            return _get_candles_yfinance_forex(symbol, outputsize)
-        return None
-    td_symbol = normalize_symbol(symbol)
-    if not td_symbol:
-        return None
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/time_series",
-            params={
-                "symbol": td_symbol,
-                "interval": interval,
-                "outputsize": outputsize,
-                "apikey": TWELVE_DATA_API_KEY,
-            },
-            timeout=8
-        )
-        data = resp.json()
-        if data.get("status") == "error" or "values" not in data:
-            logger.warning(f"Candle fetch failed for {symbol}: {data.get('message', 'unknown')}")
-            if symbol.upper() in _YF_FOREX_MAP:
-                logger.info(f"[scanner] Falling back to yFinance candles for {symbol}")
-                return _get_candles_yfinance_forex(symbol, outputsize)
-            return None
-        candles = data["values"]
-        result = []
-        for c in candles:
-            result.append({
-                "datetime": c["datetime"],
-                "open": float(c["open"]),
-                "high": float(c["high"]),
-                "low": float(c["low"]),
-                "close": float(c["close"]),
-                "volume": float(c.get("volume", 0)),
-            })
-        return result
-    except Exception as e:
-        logger.error(f"Candle fetch error for {symbol}: {e}")
-        return None
+    # Forex — use yFinance directly
+    if symbol.upper() in _YF_FOREX_MAP:
+        return _get_candles_yfinance_forex(symbol, outputsize)
+    return None
+    # (Twelve Data removed — rate-limited on free tier)
+    # if not TWELVE_DATA_API_KEY:
+    #     if symbol.upper() in _YF_FOREX_MAP:
+    #         return _get_candles_yfinance_forex(symbol, outputsize)
+    #     return None
+    # td_symbol = normalize_symbol(symbol)
+    # try:
+    #     resp = requests.get(f"{BASE_URL}/time_series",
+    #         params={"symbol": td_symbol, "interval": interval,
+    #                 "outputsize": outputsize, "apikey": TWELVE_DATA_API_KEY}, timeout=8)
+    #     ...
+    # except Exception as e:
+    #     logger.error(f"Candle fetch error for {symbol}: {e}")
 
 
 def detect_structure(candles: list) -> dict:
@@ -430,30 +407,24 @@ def get_htf_bias(symbol: str) -> dict:
             h4_trend = "bullish" if h4["Close"].iloc[-1] > h4["Close"].iloc[0] else "bearish"
             d1_trend = "bullish" if d1["Close"].iloc[-1] > d1["Close"].iloc[0] else "bearish"
         else:
-            if not TWELVE_DATA_API_KEY:
+            from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
+            _yf_sym = ("GC=F" if upper == "XAUUSD"
+                       else _YF_FOREX_MAP.get(upper))
+            if not _yf_sym:
                 return result
-            td_symbol = normalize_symbol(symbol)
-            if not td_symbol:
+            h1 = yf.Ticker(_yf_sym).history(period="14d", interval="1h")
+            h4 = yf.Ticker(_yf_sym).history(period="30d", interval="4h")
+            d1 = yf.Ticker(_yf_sym).history(period="30d", interval="1d")
+            if h1.empty or h4.empty or d1.empty:
                 return result
-            def fetch_td(interval, outputsize=30):
-                try:
-                    resp = requests.get(f"{BASE_URL}/time_series",
-                        params={"symbol": td_symbol, "interval": interval,
-                                "outputsize": outputsize, "apikey": TWELVE_DATA_API_KEY}, timeout=8)
-                    data = resp.json()
-                    if "values" not in data:
-                        return []
-                    return [{"close": float(c["close"])} for c in data["values"]]
-                except Exception:
-                    return []
-            h1_raw = fetch_td("1h", 100)
-            h4_raw = fetch_td("4h", 60)
-            d1_raw = fetch_td("1day", 60)
-            if not h1_raw or not h4_raw or not d1_raw:
-                return result
-            h1_trend = "bullish" if h1_raw[0]["close"] > h1_raw[-1]["close"] else "bearish"
-            h4_trend = "bullish" if h4_raw[0]["close"] > h4_raw[-1]["close"] else "bearish"
-            d1_trend = "bullish" if d1_raw[0]["close"] > d1_raw[-1]["close"] else "bearish"
+            h1_trend = "bullish" if h1["Close"].iloc[-1] > h1["Close"].iloc[0] else "bearish"
+            h4_trend = "bullish" if h4["Close"].iloc[-1] > h4["Close"].iloc[0] else "bearish"
+            d1_trend = "bullish" if d1["Close"].iloc[-1] > d1["Close"].iloc[0] else "bearish"
+            # (Twelve Data removed — rate-limited on free tier)
+            # if not TWELVE_DATA_API_KEY:
+            #     return result
+            # td_symbol = normalize_symbol(symbol)
+            # def fetch_td(interval, outputsize=30): ...
 
         result["h1_trend"] = h1_trend
         result["h4_trend"] = h4_trend
@@ -1143,6 +1114,8 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 _price_data = get_live_price(_symbol)
                 _live_price = float(_price_data["price"]) if _price_data else None
                 _tolerance = 0.08 if "JPY" in _symbol.upper() else 0.0008
+            if _live_price is not None:
+                logger.info(f"[grade] direction={_direction} live={_live_price} entry={_entry_price} diff={abs(_live_price - _entry_price)}")
             if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
                 _score = result.get("score", 0)
                 if _score == 10:

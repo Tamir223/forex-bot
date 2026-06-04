@@ -804,28 +804,34 @@ def _fetch_htf_candles(symbol: str, interval_yf: str, period_yf: str,
             return None
     else:
         try:
-            from config import TWELVE_DATA_API_KEY
-            from market import normalize_symbol
-            td_symbol = normalize_symbol(symbol)
-            if not td_symbol or not TWELVE_DATA_API_KEY:
+            import yfinance as yf
+            _MTF_FOREX_MAP = {
+                'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
+                'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X', 'NZDUSD': 'NZDUSD=X',
+                'USDCHF': 'USDCHF=X', 'EURGBP': 'EURGBP=X', 'EURJPY': 'EURJPY=X',
+                'GBPJPY': 'GBPJPY=X', 'XAUUSD': 'GC=F',
+            }
+            yf_ticker = _MTF_FOREX_MAP.get(sym)
+            if not yf_ticker:
                 return None
-            resp = requests.get(
-                "https://api.twelvedata.com/time_series",
-                params={"symbol": td_symbol, "interval": interval_td,
-                        "outputsize": outputsize, "apikey": TWELVE_DATA_API_KEY},
-                timeout=8,
-            )
-            data = resp.json()
-            if "values" not in data:
+            hist = yf.Ticker(yf_ticker).history(period=period_yf, interval=interval_yf)
+            if hist.empty:
                 return None
-            return [
-                {"open": float(c["open"]), "high": float(c["high"]),
-                 "low": float(c["low"]), "close": float(c["close"])}
-                for c in data["values"]
-            ]
+            result = []
+            for _, row in hist.iloc[::-1].iterrows():
+                result.append({
+                    "open": float(row["Open"]), "high": float(row["High"]),
+                    "low": float(row["Low"]), "close": float(row["Close"]),
+                })
+            return result[:outputsize]
         except Exception as e:
-            logger.debug(f"MTF Twelve Data fetch error {symbol} {interval_td}: {e}")
+            logger.debug(f"MTF yFinance forex fetch error {symbol} {interval_yf}: {e}")
             return None
+        # (Twelve Data removed — rate-limited on free tier)
+        # try:
+        #     from config import TWELVE_DATA_API_KEY
+        #     td_symbol = normalize_symbol(symbol)
+        #     resp = requests.get("https://api.twelvedata.com/time_series", ...)
 
 
 def _detect_ob_htf(candles: list, trend: str) -> dict | None:
@@ -970,44 +976,27 @@ def get_daily_bias(symbol: str) -> dict:
                     "low": float(row["Low"]),  "close": float(row["Close"]),
                 })
         else:
-            td_success = False
+            yf_ticker = _FOREX_YFINANCE_MAP.get(sym)
+            if not yf_ticker:
+                return _default
             try:
-                from config import TWELVE_DATA_API_KEY
-                from market import normalize_symbol
-                td_sym = normalize_symbol(sym)
-                if td_sym and TWELVE_DATA_API_KEY:
-                    resp = requests.get(
-                        "https://api.twelvedata.com/time_series",
-                        params={"symbol": td_sym, "interval": "1day",
-                                "outputsize": 20, "apikey": TWELVE_DATA_API_KEY},
-                        timeout=8,
-                    )
-                    data = resp.json()
-                    if "values" in data:
-                        for c in reversed(data["values"]):
-                            candles.append({
-                                "open": float(c["open"]), "high": float(c["high"]),
-                                "low":  float(c["low"]),  "close": float(c["close"]),
-                            })
-                        td_success = True
+                import yfinance as yf
+                hist = yf.Ticker(yf_ticker).history(period="30d", interval="1d")
+                if hist.empty or len(hist) < 3:
+                    return _default
+                for _, row in hist.iloc[-20:].iterrows():
+                    candles.append({
+                        "open": float(row["Open"]), "high": float(row["High"]),
+                        "low":  float(row["Low"]),  "close": float(row["Close"]),
+                    })
             except Exception:
-                pass
-            if not td_success:
-                yf_ticker = _FOREX_YFINANCE_MAP.get(sym)
-                if not yf_ticker:
-                    return _default
-                try:
-                    import yfinance as yf
-                    hist = yf.Ticker(yf_ticker).history(period="30d", interval="1d")
-                    if hist.empty or len(hist) < 3:
-                        return _default
-                    for _, row in hist.iloc[-20:].iterrows():
-                        candles.append({
-                            "open": float(row["Open"]), "high": float(row["High"]),
-                            "low":  float(row["Low"]),  "close": float(row["Close"]),
-                        })
-                except Exception:
-                    return _default
+                return _default
+            # (Twelve Data removed — rate-limited on free tier)
+            # td_success = False
+            # try:
+            #     from config import TWELVE_DATA_API_KEY
+            #     td_sym = normalize_symbol(sym)
+            #     resp = requests.get("https://api.twelvedata.com/time_series", ...)
 
         if len(candles) < 3:
             return _default

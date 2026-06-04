@@ -122,25 +122,20 @@ def get_live_price(pair: str) -> dict:
             logger.error(f"yFinance price error for {pair}: {e}")
         return None
 
-    # Forex — try Twelve Data, fall back to yFinance
-    td_result = None
-    if TWELVE_DATA_API_KEY:
-        symbol = normalize_symbol(pair)
-        if symbol:
-            try:
-                resp = requests.get(
-                    f"{BASE_URL}/price",
-                    params={"symbol": symbol, "apikey": TWELVE_DATA_API_KEY},
-                    timeout=5
-                )
-                data = resp.json()
-                if data.get("status") != "error" and "price" in data:
-                    return {"price": float(data["price"]), "symbol": symbol}
-                logger.warning(f"Price fetch failed for {symbol}: {data.get('message', 'unknown error')}")
-            except Exception as e:
-                logger.error(f"Live price error for {pair}: {e}")
-
-    # Twelve Data unavailable or rate-limited — fall back to yFinance
+    # Forex — use yFinance directly
+    # (Twelve Data removed — rate-limited on free tier)
+    # if TWELVE_DATA_API_KEY:
+    #     symbol = normalize_symbol(pair)
+    #     if symbol:
+    #         try:
+    #             resp = requests.get(f"{BASE_URL}/price",
+    #                 params={"symbol": symbol, "apikey": TWELVE_DATA_API_KEY}, timeout=5)
+    #             data = resp.json()
+    #             if data.get("status") != "error" and "price" in data:
+    #                 return {"price": float(data["price"]), "symbol": symbol}
+    #             logger.warning(f"Price fetch failed for {symbol}: {data.get('message', 'unknown error')}")
+    #         except Exception as e:
+    #             logger.error(f"Live price error for {pair}: {e}")
     return _get_live_price_yfinance(pair)
 
 
@@ -189,74 +184,22 @@ def get_atr(pair: str, interval: str = "1h", period: int = 14) -> dict:
     if upper in YFINANCE_FUTURES_MAP:
         return _get_atr_yfinance(pair, YFINANCE_FUTURES_MAP[upper], interval, period)
 
-    if not TWELVE_DATA_API_KEY:
-        # No API key — go straight to yFinance fallback for forex
-        if upper in YFINANCE_FOREX_MAP:
-            return _get_atr_yfinance(pair, YFINANCE_FOREX_MAP[upper], interval, period)
-        return None
-
-    symbol = normalize_symbol(pair)
-    if not symbol:
-        return None
-
-    # Minimum ATR thresholds per pair (in price units)
-    # Below these = low volatility session, not worth trading
-    ATR_MINIMUMS = {
-        "XAU/USD": 3.0,
-        "GBP/USD": 0.0008,
-        "EUR/USD": 0.0007,
-        "USD/JPY": 0.05,   # 5 pips in JPY terms — JPY pairs have 2dp not 4dp
-        "GBP/JPY": 0.05,
-        "EUR/JPY": 0.05,
-        "USD/CAD": 0.0008,
-        "AUD/USD": 0.0006,
-        "DJI":     80.0,
-        "NDX":     120.0,
-        "BTC/USD": 400.0,
-    }
-
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/atr",
-            params={
-                "symbol": symbol,
-                "interval": interval,
-                "time_period": period,
-                "apikey": TWELVE_DATA_API_KEY,
-                "outputsize": 1
-            },
-            timeout=5
-        )
-        data = resp.json()
-        if data.get("status") == "error" or "values" not in data:
-            logger.warning(f"ATR fetch failed for {symbol}: {data.get('message', 'unknown')}")
-            if upper in YFINANCE_FOREX_MAP:
-                logger.info(f"[market] Falling back to yFinance ATR for {pair}")
-                return _get_atr_yfinance(pair, YFINANCE_FOREX_MAP[upper], interval, period)
-            return None
-
-        atr_value = float(data["values"][0]["atr"])
-        # Prefer PIP_SPECS min_atr (keyed by bare symbol e.g. "EURUSD") over
-        # the slash-format ATR_MINIMUMS dict — covers JPY pairs correctly
-        try:
-            from scanner_improvements import PIP_SPECS as _PIP_SPECS
-            minimum = _PIP_SPECS.get(pair.upper(), {}).get("min_atr") or ATR_MINIMUMS.get(symbol, 0)
-        except Exception:
-            minimum = ATR_MINIMUMS.get(symbol, 0)
-        is_low = atr_value < minimum
-
-        return {
-            "atr": atr_value,
-            "is_low_volatility": is_low,
-            "minimum": minimum,
-            "symbol": symbol,
-        }
-    except Exception as e:
-        logger.error(f"ATR error for {pair}: {e}")
-        if upper in YFINANCE_FOREX_MAP:
-            logger.info(f"[market] Falling back to yFinance ATR for {pair} after exception")
-            return _get_atr_yfinance(pair, YFINANCE_FOREX_MAP[upper], interval, period)
-        return None
+    # Forex — use yFinance directly
+    if upper in YFINANCE_FOREX_MAP:
+        return _get_atr_yfinance(pair, YFINANCE_FOREX_MAP[upper], interval, period)
+    return None
+    # (Twelve Data removed — rate-limited on free tier)
+    # if not TWELVE_DATA_API_KEY:
+    #     if upper in YFINANCE_FOREX_MAP:
+    #         return _get_atr_yfinance(pair, YFINANCE_FOREX_MAP[upper], interval, period)
+    #     return None
+    # symbol = normalize_symbol(pair)
+    # ATR_MINIMUMS = { "XAU/USD": 3.0, "GBP/USD": 0.0008, ... }
+    # try:
+    #     resp = requests.get(f"{BASE_URL}/atr", params={...}, timeout=5)
+    #     ...
+    # except Exception as e:
+    #     logger.error(f"ATR error for {pair}: {e}")
 
 
 def check_entry_validity(pair: str, entry_zone: str, stop_loss: str, direction: str) -> dict:
