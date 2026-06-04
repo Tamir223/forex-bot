@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/ubuntu/apfee/venv/bin/python3
 """
 math_check.py — TNL Trader Mathematical Verification
 Imports and tests real calculation functions. Not static assertions.
