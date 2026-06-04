@@ -1231,7 +1231,15 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             entry_check = fvg.get("mid", current_price)
         else:
             entry_check = current_price
-        entry_valid, deviation = validate_entry(symbol, entry_check, float(current_price))
+
+        # OB/FVG levels are in futures domain; current_price from fetch_all_timeframes is spot.
+        # Convert current_price back to futures domain so validate_entry compares like-for-like.
+        _spot_offset = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+        if _spot_offset != 0:
+            price_for_ob_check = float(current_price) - _spot_offset
+        else:
+            price_for_ob_check = float(current_price)
+        entry_valid, deviation = validate_entry(symbol, entry_check, price_for_ob_check)
 
         # TIER 4: Entry missed — block unless score >= 9
         if not entry_valid:
@@ -1349,7 +1357,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 _tolerance = 0.10 if "JPY" in _symbol.upper() else 0.0005
             if _live_price is not None:
                 logger.info(f"[entry_check] {_symbol} live={_live_price} entry={_entry_price} diff={abs(_live_price - _entry_price):.5f} tolerance={_tolerance}")
-                logger.info(f"[domain_check] symbol={_symbol} entry_parsed={_entry_price} live={_live_price} diff={abs(_live_price - _entry_price):.5f}")
+                logger.info(f"[entry_validation] {_symbol} live_spot={_live_price} entry_spot={_entry_price} diff={abs(_live_price - _entry_price)}")
             if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
                 _score = int(result.get("score", 0))
                 logger.info(f"[grade_block] score={_score} type={type(_score)} direction={_direction} live={_live_price} entry={_entry_price}")
