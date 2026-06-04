@@ -322,8 +322,8 @@ def _build_message(account_state, market_ctx, signal_text):
 
 def _get_historical_win_rate(pair: str, direction: str) -> dict:
     try:
-        from database import get_db_connection
-        conn = get_db_connection()
+        from database import get_conn
+        conn = get_conn()
         cur = conn.cursor()
         cur.execute(
             """
@@ -352,8 +352,8 @@ def _check_correlated_pairs(pair: str, direction: str, user_id: int) -> bool:
     if not pair or direction != "BUY" or pair not in CORRELATED_USD_LONGS:
         return False
     try:
-        from database import get_db_connection
-        conn = get_db_connection()
+        from database import get_conn
+        conn = get_conn()
         cur = conn.cursor()
         other = list(CORRELATED_USD_LONGS - {pair})
         cur.execute(
