@@ -101,7 +101,7 @@ def get_cached_signal(key: str) -> str | None:
     if entry is None:
         return None
     age = datetime.now(timezone.utc) - entry["timestamp"]
-    if age.total_seconds() > 300:
+    if age.total_seconds() > 180:
         del AUTO_SIGNAL_CACHE[key]
         return None
     return entry["signal"]
@@ -1099,7 +1099,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             if _symbol.upper() in YFINANCE_FUTURES_MAP:
                 _candles = get_candles_yfinance(_symbol, outputsize=5)
                 _live_price = float(_candles[0]["close"]) if _candles else None
-                _tolerance = 12.0
+                _tolerance = 5.0
             elif _symbol.upper() == "XAUUSD":
                 # Use 1m GC=F candle, then subtract futures basis to match spot entry levels
                 try:
@@ -1109,11 +1109,11 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                         _live_price = round(_live_price + FUTURES_SPOT_OFFSET.get("XAUUSD", 0), 2)
                 except Exception:
                     _live_price = None
-                _tolerance = 8.0
+                _tolerance = 5.0
             else:
                 _price_data = get_live_price(_symbol)
                 _live_price = float(_price_data["price"]) if _price_data else None
-                _tolerance = 0.08 if "JPY" in _symbol.upper() else 0.0008
+                _tolerance = 0.05 if "JPY" in _symbol.upper() else 0.0005
             if _live_price is not None:
                 logger.info(f"[grade] direction={_direction} live={_live_price} entry={_entry_price} diff={abs(_live_price - _entry_price)}")
             if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:

@@ -16,17 +16,16 @@ def confluence_bar(score):
 
 
 _RISK_TIER_LABELS = {
-    10: "Premium — full confluence",
-    9:  "Standard",
-    8:  "Conservative",
+    0.75: "Premium — full confluence",
+    0.50: "Standard",
+    0.35: "Conservative",
 }
 
 
 def _risk_line(analysis: dict) -> str:
-    conf = int(analysis.get('confidence') or 9)
-    label = _RISK_TIER_LABELS.get(conf, "")
     raw = analysis.get('risk_percent')
     pct = f"{float(raw):.2f}" if raw is not None else "--"
+    label = _RISK_TIER_LABELS.get(round(float(raw), 2), "") if raw is not None else ""
     suffix = f" ({label})" if label else ""
     return f"Risk %:       {pct}%{suffix}\n"
 
