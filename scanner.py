@@ -980,13 +980,21 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
     for f in factors:
         lines.append(f"  • {f}")
 
+    _disp_offset = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+
     if ob:
         ob_label = "🟢 Bullish OB" if ob["type"] == "bullish_ob" else "🔴 Bearish OB"
-        lines.append(f"\n{ob_label}: {ob['low']} — {ob['high']} (mid: {ob['mid']})")
+        _ob_low  = round(ob["low"]  + _disp_offset, 3)
+        _ob_high = round(ob["high"] + _disp_offset, 3)
+        _ob_mid  = round(ob["mid"]  + _disp_offset, 3)
+        lines.append(f"\n{ob_label}: {_ob_low} — {_ob_high} (mid: {_ob_mid})")
 
     if fvg:
-        _fvg_mid = (fvg["bottom"] + fvg["top"]) / 2
-        _entry_ref = ob["mid"] if ob else (float(current_price) if isinstance(current_price, (int, float)) else _fvg_mid)
+        _fvg_bottom = round(fvg["bottom"] + _disp_offset, 3)
+        _fvg_top    = round(fvg["top"]    + _disp_offset, 3)
+        _fvg_mid = (_fvg_bottom + _fvg_top) / 2
+        _entry_ref = (round(ob["mid"] + _disp_offset, 3) if ob
+                      else (float(current_price) if isinstance(current_price, (int, float)) else _fvg_mid))
         if direction == "BUY":
             _fvg_emoji = "🟢"
             _fvg_desc = "Bullish FVG target" if _fvg_mid > _entry_ref else "FVG support"
@@ -996,7 +1004,7 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
         else:
             _fvg_emoji = "🟢" if fvg["type"] == "bullish_fvg" else "🔴"
             _fvg_desc = "Bullish FVG" if fvg["type"] == "bullish_fvg" else "Bearish FVG"
-        lines.append(f"{_fvg_emoji} {_fvg_desc}: {fvg['bottom']} — {fvg['top']}")
+        lines.append(f"{_fvg_emoji} {_fvg_desc}: {_fvg_bottom} — {_fvg_top}")
 
     lines += [
         "",
