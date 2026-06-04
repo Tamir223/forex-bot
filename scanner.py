@@ -9,7 +9,7 @@ Sends proactive alerts to subscribed users via Telegram.
 
 import logging
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from market import get_live_price, get_atr, normalize_symbol
 from config import TWELVE_DATA_API_KEY
 from scanner_improvements import (
@@ -344,7 +344,7 @@ def detect_structure(candles: list) -> dict:
     }
 
 
-def detect_order_block(candles: list, trend: str, max_candles_back: int = 50) -> dict | None:
+def detect_order_block(candles: list, trend: str, max_candles_back: int = None) -> dict | None:
     """
     Detect the most recent order block within max_candles_back candles.
     Bullish OB: last bearish candle before a strong bullish move.
@@ -352,6 +352,15 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = 50) ->
     """
     if not candles or len(candles) < 5:
         return None
+
+    if max_candles_back is None:
+        # Dynamic lookback: 15M candles since today's Forex session open (21:00 UTC)
+        _now = datetime.utcnow()
+        _session_open = _now.replace(hour=21, minute=0, second=0, microsecond=0)
+        if _now.hour < 21:
+            _session_open -= timedelta(days=1)
+        _candles_since_open = int((_now - _session_open).total_seconds() / 60 / 15)
+        max_candles_back = min(max(_candles_since_open, 5), 96)
 
     try:
         if trend == "bullish":
