@@ -1301,7 +1301,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
 
     logger.info(
         f"[scanner] Cycle {_scan_rotation_index} — scanning {len(pairs_this_cycle)} symbols "
-        f"(yFinance: {yfinance_pairs}, TD group: {td_group})"
+        f"(yFinance: {yfinance_pairs + td_group})"
     )
 
     alerts_sent = 0
