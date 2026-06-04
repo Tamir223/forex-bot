@@ -1279,6 +1279,10 @@ def detect_equal_highs_lows(candles: list, direction: str, symbol: str = "") -> 
     else:
         tol = 0.0003    # forex: 3 pips
 
+    # Offset futures prices to spot domain for display (avoids circular import from scanner)
+    _SPOT_DISPLAY_OFFSETS = {"XAUUSD": -30, "XAGUSD": -0.30}
+    _disp_off = _SPOT_DISPLAY_OFFSETS.get(symbol.upper(), 0) if symbol else 0
+
     if direction.upper() == "SELL":
         swing_highs = []
         for i in range(2, n - 2):
@@ -1292,13 +1296,9 @@ def detect_equal_highs_lows(candles: list, direction: str, symbol: str = "") -> 
                 if abs(swing_highs[k] - swing_highs[j]) <= tol:
                     cluster.append(swing_highs[k])
             if len(cluster) >= 2:
-                level = round(sum(cluster) / len(cluster), 5)
-                if symbol:
-                    from scanner import FUTURES_SPOT_OFFSET as _FSO
-                    _off = _FSO.get(symbol.upper(), 0)
-                    if _off:
-                        level = round(level + _off, 3)
-                return True, f"Equal highs liquidity pool at {level} — banks will sweep this"
+                level = sum(cluster) / len(cluster)
+                display_level = round(level + _disp_off, 3)
+                return True, f"Equal highs liquidity pool at {display_level} — banks will sweep this"
     else:  # BUY
         swing_lows = []
         for i in range(2, n - 2):
@@ -1312,13 +1312,9 @@ def detect_equal_highs_lows(candles: list, direction: str, symbol: str = "") -> 
                 if abs(swing_lows[k] - swing_lows[j]) <= tol:
                     cluster.append(swing_lows[k])
             if len(cluster) >= 2:
-                level = round(sum(cluster) / len(cluster), 5)
-                if symbol:
-                    from scanner import FUTURES_SPOT_OFFSET as _FSO
-                    _off = _FSO.get(symbol.upper(), 0)
-                    if _off:
-                        level = round(level + _off, 3)
-                return True, f"Equal lows liquidity pool at {level} — banks will sweep this"
+                level = sum(cluster) / len(cluster)
+                display_level = round(level + _disp_off, 3)
+                return True, f"Equal lows liquidity pool at {display_level} — banks will sweep this"
 
     return False, ""
 
