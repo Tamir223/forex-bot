@@ -1349,6 +1349,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 _tolerance = 0.10 if "JPY" in _symbol.upper() else 0.0005
             if _live_price is not None:
                 logger.info(f"[entry_check] {_symbol} live={_live_price} entry={_entry_price} diff={abs(_live_price - _entry_price):.5f} tolerance={_tolerance}")
+                logger.info(f"[domain_check] symbol={_symbol} entry_parsed={_entry_price} live={_live_price} diff={abs(_live_price - _entry_price):.5f}")
             if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
                 _score = int(result.get("score", 0))
                 logger.info(f"[grade_block] score={_score} type={type(_score)} direction={_direction} live={_live_price} entry={_entry_price}")
@@ -1388,8 +1389,13 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         _fvg = result.get("fvg")
         if _live_price is not None and (_ob or _fvg):
             try:
+                # OB/FVG levels are in futures domain (from yFinance candles).
+                # _live_price is already spot (offset applied above), so convert back to
+                # futures domain before passing to build_auto_signal — rp() will re-apply
+                # the offset and all output prices come out correctly in spot domain.
+                _build_price = _live_price - FUTURES_SPOT_OFFSET.get(_symbol.upper(), 0)
                 _fresh_signal = build_auto_signal(
-                    _symbol, _direction, _live_price,
+                    _symbol, _direction, _build_price,
                     _ob, _fvg,
                     result.get("structure", {}),
                     result.get("score_data", {}),
@@ -1397,7 +1403,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 )
                 if _fresh_signal:
                     signal_text = _fresh_signal
-                    logger.info(f"[auto-grade] {_symbol} signal regenerated with live price {_live_price}")
+                    logger.info(f"[auto-grade] {_symbol} signal regenerated with build_price={_build_price} (spot={_live_price})")
             except Exception as _regen_err:
                 logger.warning(f"[auto-grade] {_symbol} signal regen failed: {_regen_err} — using cached signal")
 
@@ -1437,6 +1443,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         _final_risk = round(_scanner_risk * 100, 4)
         analysis['risk_percent'] = _final_risk
         analysis['confidence'] = _scanner_score  # sync confidence display with scanner score
+        analysis['score'] = _scanner_score        # ensure score field matches scanner score
         result['risk_percent'] = _final_risk      # keep scan result in sync too
         logger.info(f"[risk] score={_scanner_score} risk={_final_risk}%")
 
