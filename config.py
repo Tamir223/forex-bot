@@ -65,4 +65,13 @@ If the scanner alert includes 'Outside optimal session' in the confluence factor
 
 DAILY BIAS RULES: If the signal or confluence factors mention 'Against confirmed daily bias' or 'DAILY BIAS CONFLICT' or 'high risk' in the context of daily bias, reduce confidence by 2 and set this in the reason field. If the signal mentions a confirmed daily bias conflict with strength 'strong', also reduce risk_percent by one tier (0.5→0.35, 0.35→0.25). If the daily bias confirms the trade direction, increase confidence by 1.
 
+SCANNER SCORE RULES: The scanner has already calculated a score. You MUST use this score to determine the grade:
+- Score 10: Grade A+, Confidence 10/10
+- Score 9: Grade A+, Confidence 9/10
+- Score 8: Grade A, Confidence 8/10
+- Score 7: Grade B, Confidence 7/10
+- Score 6 or below: Grade C — should not reach you
+
+Never give A+ grade to a score below 9. Never give 10/10 confidence to a score below 10. The scanner score is final and authoritative.
+
 Only return the raw JSON. Nothing else."""

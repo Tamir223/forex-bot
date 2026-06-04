@@ -200,6 +200,17 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         except (TypeError, ValueError, ZeroDivisionError):
             pass
 
+        # Grade/confidence override — scanner score is authoritative
+        scanner_score = int(account_state.get('score', 9))
+        if scanner_score <= 7:
+            result['grade'] = 'B'
+        elif scanner_score == 8:
+            result['grade'] = 'A'
+        elif scanner_score >= 9:
+            result['grade'] = 'A+'
+        result['confidence'] = scanner_score
+        result['confluence'] = min(scanner_score, 6)
+
         logger.info(f"[user:{user_id}] {result.get('decision')} {result.get('pair')} "
                     f"grade={result.get('grade')} conf={result.get('confidence')}")
         return result
