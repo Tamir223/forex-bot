@@ -286,10 +286,10 @@ if IMPORTS_OK:
         import re
         ttl_match = re.search(r'age\.total_seconds\(\)\s*>\s*(\d+)', src_scanner)
         ttl = int(ttl_match.group(1)) if ttl_match else None
-        if ttl == 300:
+        if ttl == 120:
             ok(f"Signal cache TTL: {ttl} seconds")
         else:
-            fail("Signal cache TTL", f"expected 300, got {ttl}")
+            fail("Signal cache TTL", f"expected 120, got {ttl}")
     except Exception as e:
         fail("Signal cache TTL", str(e))
 

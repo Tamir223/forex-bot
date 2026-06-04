@@ -194,14 +194,14 @@ assert NEWS_BLOCK_MINUTES_AFTER == 30
 " 2>/dev/null
 check $? "Config: NEWS_BLOCK_MINUTES_BEFORE=45, AFTER=30"
 
-# 26. Signal cache TTL = 300 seconds
+# 26. Signal cache TTL = 120 seconds
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 import re
 src = open('scanner.py').read()
 m = re.search(r'age\.total_seconds\(\)\s*>\s*(\d+)', src)
-assert m and int(m.group(1)) == 300, f'Cache TTL not 300: {m}'
+assert m and int(m.group(1)) == 120, f'Cache TTL not 120: {m}'
 " 2>/dev/null
-check $? "Config: signal cache TTL = 300 seconds"
+check $? "Config: signal cache TTL = 120 seconds"
 
 # 27. FUTURES_SPOT_OFFSET XAUUSD = -30
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
