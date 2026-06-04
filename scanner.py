@@ -1258,7 +1258,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         from database import get_user_firm, load_challenge_state
         from prop_firm_profiles import get_profile
         from drawdown_tracker import state_from_json, check_signal_allowed
-        from database import get_state, log_trade_opened, log_trade
+        from database import get_state, log_trade
         from database import Trade
 
         firm_code = get_user_firm(user.id)
@@ -1553,11 +1553,34 @@ async def start_scanner(bot, get_active_users_fn):
     """
     logger.info("[scanner] Scanner started")
     _bias_sent_date = None  # track last date bias report was sent
+    _last_cleanup_time: float = 0.0  # epoch — track hourly PENDING cleanup
 
     while True:
         try:
             interval = get_session_interval()
             await asyncio.sleep(interval)
+
+            # Hourly cleanup — expire stale PENDING trades and zero out exposure
+            if _time.time() - _last_cleanup_time >= 3600:
+                try:
+                    from database import get_conn
+                    with get_conn() as _conn:
+                        with _conn.cursor() as _cur:
+                            _cur.execute(
+                                "UPDATE trades SET result='EXPIRED' "
+                                "WHERE result='PENDING' AND created_at < NOW() - INTERVAL '2 hours'"
+                            )
+                            _cur.execute(
+                                "UPDATE user_state SET live_exposure=0.0, open_trades=0 "
+                                "WHERE user_id IN ("
+                                "  SELECT DISTINCT user_id FROM trades WHERE result='EXPIRED'"
+                                ")"
+                            )
+                        _conn.commit()
+                    _last_cleanup_time = _time.time()
+                    logger.info("[scanner] Hourly PENDING cleanup complete")
+                except Exception as _ce:
+                    logger.error(f"[scanner] PENDING cleanup error: {_ce}")
 
             if not is_scan_window():
                 continue

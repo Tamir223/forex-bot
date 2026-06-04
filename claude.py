@@ -175,6 +175,8 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         result['risk_percent'] = round(risk_val * 100, 4)
         logger.info(f"[risk] score={scanner_score} risk={result['risk_percent']}%")
         risk_percent = result['risk_percent']
+        if not risk_percent or risk_percent <= 0:
+            risk_percent = 0.005
         # Always recalculate lot size with tiered risk
         if result.get('stop_loss') and result.get('entry_zone'):
             sl_pts_tiered = _compute_sl_pts(str(result['entry_zone']), str(result['stop_loss']), pair)
