@@ -1015,6 +1015,19 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(f"[scanner] {symbol} score {final_score}/10 — below threshold")
             return None
 
+        # OB proximity check — only fire if price is at or near the OB zone
+        if ob:
+            _cur = float(price_data.get("price", 0) if price_data else (candles[0]["close"] if candles else 0))
+            _ob_tol = 8.0 if (symbol.upper() == "XAUUSD" or symbol.upper() in YFINANCE_FUTURES_MAP) else 0.0008
+            _ob_mid = ob["mid"]
+            if direction == "BUY":
+                _too_far = _cur < ob["low"] - _ob_tol or _cur > ob["high"] + (ob["high"] - ob["low"]) * 2
+            else:
+                _too_far = _cur > ob["high"] + _ob_tol or _cur < ob["low"] - (ob["high"] - ob["low"]) * 2
+            if _too_far:
+                logger.info(f"[scanner] {symbol} OB at {_ob_mid} but price at {_cur} — too far from OB zone, skipping")
+                return None
+
         alert_text = format_scan_alert(symbol, structure, ob, fvg, score_data, price_data, htf_bias, candles=candles)
 
         current_price = price_data.get("price", 0) if price_data else 0
