@@ -201,8 +201,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         except (TypeError, ValueError, ZeroDivisionError):
             pass
 
-        # Grade/confidence override — scanner score is authoritative
-        scanner_score = int(account_state.get('score', 9))
+        # Grade/confidence override — reuse scanner_score already parsed by risk block above
         logger.info(f"[grade_override] raw_score={account_state.get('score')} parsed={scanner_score}")
         if scanner_score <= 7:
             result['grade'] = 'B'
