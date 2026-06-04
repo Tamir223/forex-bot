@@ -426,7 +426,7 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None) 
     return None
 
 
-def detect_fvg(candles: list) -> dict | None:
+def detect_fvg(candles: list, symbol: str = "") -> dict | None:
     """
     Detect Fair Value Gap (imbalance between candle 1 high and candle 3 low).
     Bullish FVG: candle[2].high < candle[0].low
@@ -436,6 +436,7 @@ def detect_fvg(candles: list) -> dict | None:
         return None
 
     try:
+        _disp_off = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0) if symbol else 0
         for i in range(len(candles) - 2):
             c1 = candles[i+2]   # oldest of three
             c2 = candles[i+1]   # middle
@@ -444,11 +445,15 @@ def detect_fvg(candles: list) -> dict | None:
             # Bullish FVG
             if c1["high"] < c3["low"]:
                 gap_size = c3["low"] - c1["high"]
+                _top = round(c3["low"], 5)
+                _bot = round(c1["high"], 5)
                 return {
                     "type": "bullish_fvg",
-                    "top": round(c3["low"], 5),
-                    "bottom": round(c1["high"], 5),
-                    "mid": round((c3["low"] + c1["high"]) / 2, 5),
+                    "top": _top,
+                    "bottom": _bot,
+                    "display_top": round(_top + _disp_off, 3),
+                    "display_bottom": round(_bot + _disp_off, 3),
+                    "mid": round((_top + _bot) / 2, 5),
                     "size": round(gap_size, 5),
                     "datetime": c2["datetime"],
                 }
@@ -456,11 +461,15 @@ def detect_fvg(candles: list) -> dict | None:
             # Bearish FVG
             if c1["low"] > c3["high"]:
                 gap_size = c1["low"] - c3["high"]
+                _top = round(c1["low"], 5)
+                _bot = round(c3["high"], 5)
                 return {
                     "type": "bearish_fvg",
-                    "top": round(c1["low"], 5),
-                    "bottom": round(c3["high"], 5),
-                    "mid": round((c1["low"] + c3["high"]) / 2, 5),
+                    "top": _top,
+                    "bottom": _bot,
+                    "display_top": round(_top + _disp_off, 3),
+                    "display_bottom": round(_bot + _disp_off, 3),
+                    "mid": round((_top + _bot) / 2, 5),
                     "size": round(gap_size, 5),
                     "datetime": c2["datetime"],
                 }
@@ -687,7 +696,9 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
     if fvg:
         score += 2
         fvg_type = "Bullish" if fvg["type"] == "bullish_fvg" else "Bearish"
-        factors.append(f"{fvg_type} FVG {fvg['bottom']} - {fvg['top']}")
+        _fvg_disp_bot = fvg.get("display_bottom", fvg["bottom"])
+        _fvg_disp_top = fvg.get("display_top", fvg["top"])
+        factors.append(f"{fvg_type} FVG {_fvg_disp_bot} - {_fvg_disp_top}")
 
     if atr_data and not atr_data.get("is_low_volatility"):
         score += 1
@@ -789,16 +800,9 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
             factors.append(mom_desc)
 
         # Equal highs/lows — liquidity pools at institutional levels
-        eq_ok, eq_desc = detect_equal_highs_lows(candles, direction_str)
+        eq_ok, eq_desc = detect_equal_highs_lows(candles, direction_str, symbol or "")
         if eq_ok:
             score += 2
-            if _factor_offset and eq_desc:
-                import re as _re_eq
-                eq_desc = _re_eq.sub(
-                    r'at ([\d.]+)',
-                    lambda m: f'at {round(float(m.group(1)) + _factor_offset, 3)}',
-                    eq_desc
-                )
             factors.append(eq_desc)
 
         # Market structure shift — full reversal confirmation
@@ -1139,7 +1143,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             return None
 
         ob = detect_order_block(candles, trend)
-        fvg = detect_fvg(candles)
+        fvg = detect_fvg(candles, symbol)
 
         # Single daily_bias fetch — reused for direction fallback, TIER 3.5 block, and score_setup
         from scanner_improvements import get_daily_bias as _get_daily_bias

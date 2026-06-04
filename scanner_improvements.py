@@ -1256,7 +1256,7 @@ def check_daily_bias_alignment(symbol: str, direction: str, _prefetched: dict = 
 
 # ─── 17. EQUAL HIGHS/LOWS DETECTION ──────────────────────────────────────────
 
-def detect_equal_highs_lows(candles: list, direction: str) -> tuple[bool, str]:
+def detect_equal_highs_lows(candles: list, direction: str, symbol: str = "") -> tuple[bool, str]:
     """
     Detect equal highs (SELL) or equal lows (BUY) liquidity pools in last 20 candles.
     Swing high/low: candle is higher/lower than 2 candles on each side.
@@ -1293,6 +1293,11 @@ def detect_equal_highs_lows(candles: list, direction: str) -> tuple[bool, str]:
                     cluster.append(swing_highs[k])
             if len(cluster) >= 2:
                 level = round(sum(cluster) / len(cluster), 5)
+                if symbol:
+                    from scanner import FUTURES_SPOT_OFFSET as _FSO
+                    _off = _FSO.get(symbol.upper(), 0)
+                    if _off:
+                        level = round(level + _off, 3)
                 return True, f"Equal highs liquidity pool at {level} — banks will sweep this"
     else:  # BUY
         swing_lows = []
@@ -1308,6 +1313,11 @@ def detect_equal_highs_lows(candles: list, direction: str) -> tuple[bool, str]:
                     cluster.append(swing_lows[k])
             if len(cluster) >= 2:
                 level = round(sum(cluster) / len(cluster), 5)
+                if symbol:
+                    from scanner import FUTURES_SPOT_OFFSET as _FSO
+                    _off = _FSO.get(symbol.upper(), 0)
+                    if _off:
+                        level = round(level + _off, 3)
                 return True, f"Equal lows liquidity pool at {level} — banks will sweep this"
 
     return False, ""
