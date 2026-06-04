@@ -1184,6 +1184,13 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         if not analysis:
             return False
 
+        # Override risk tier from scanner score — Claude's confidence field can mismatch
+        # (e.g. returns "10/10" string for a 9/10 signal), so source of truth is the scanner score
+        from claude import RISK_TIERS as _RISK_TIERS
+        _scanner_score = result.get('score', 9)
+        _scanner_risk = _RISK_TIERS.get(_scanner_score, 0.005)
+        analysis['risk_percent'] = round(_scanner_risk * 100, 4)
+
         # Apply firm risk cap
         if profile:
             max_daily_pct = profile.max_daily_loss_pct * 100
