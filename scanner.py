@@ -880,6 +880,43 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
     return "\n".join(lines)
 
 
+def check_signal_contradictions(direction: str, factors: list) -> tuple[int, list]:
+    contradictions = 0
+    warnings = []
+
+    factor_text = ' '.join(factors).lower()
+
+    if direction == 'BUY':
+        if 'bearish fvg' in factor_text:
+            contradictions += 1
+            warnings.append('⚠️ Bearish FVG against BUY direction')
+        if 'bearish engulfing' in factor_text or 'shooting star' in factor_text:
+            contradictions += 1
+            warnings.append('⚠️ Bearish rejection candle against BUY direction')
+        if 'consecutive bearish' in factor_text:
+            contradictions += 1
+            warnings.append('⚠️ Bearish momentum against BUY direction')
+        if 'selling at premium' in factor_text:
+            contradictions += 1
+            warnings.append('⚠️ Selling in premium zone against BUY')
+
+    if direction == 'SELL':
+        if 'bullish fvg' in factor_text:
+            contradictions += 1
+            warnings.append('⚠️ Bullish FVG against SELL direction')
+        if 'bullish engulfing' in factor_text or 'hammer' in factor_text:
+            contradictions += 1
+            warnings.append('⚠️ Bullish rejection candle against SELL direction')
+        if 'consecutive bullish' in factor_text:
+            contradictions += 1
+            warnings.append('⚠️ Bullish momentum against SELL direction')
+        if 'buying in discount' in factor_text:
+            contradictions += 1
+            warnings.append('⚠️ Buying in discount zone against SELL')
+
+    return contradictions, warnings
+
+
 async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
     """
     Run full scan on one symbol. Returns alert dict if setup found, None otherwise.
@@ -1042,6 +1079,36 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         except Exception:
             pass
 
+        # ── TIER 3.7: CONTRADICTION CHECK ────────────────────────────────────
+        # FIX 3: Strip contradictory factors before checking
+        if direction == 'BUY':
+            score_data["factors"] = [
+                f for f in score_data.get("factors", [])
+                if 'bearish' not in f.lower() and 'selling' not in f.lower()
+            ]
+        elif direction == 'SELL':
+            score_data["factors"] = [
+                f for f in score_data.get("factors", [])
+                if 'bullish' not in f.lower() and 'buying' not in f.lower()
+            ]
+
+        _contradictions, _contra_warnings = check_signal_contradictions(
+            direction, score_data.get("factors", [])
+        )
+        if _contradictions >= 3:
+            logger.info(
+                f"[scanner] {symbol} signal blocked — too many contradicting factors ({_contradictions})"
+            )
+            return None
+        if _contradictions > 0:
+            score_data["score"] = max(0, score_data["score"] - _contradictions)
+            final_score = score_data["score"]
+            score_data["recommendation"] = (
+                "STRONG" if final_score >= 8 else
+                "MODERATE" if final_score >= 5 else "WEAK"
+            )
+            score_data["factors"] = score_data.get("factors", []) + _contra_warnings
+
         # ── TIER 4: POST-SCORE BLOCKS ─────────────────────────────────────────
         # Score threshold — 9+ guarantee overrides range/session penalties
         if final_score < 7:
@@ -1117,7 +1184,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         _rr_valid, _actual_rr = validate_risk_reward(float(entry_check), _sl_rr, _tp1_rr)
         if not _rr_valid:
-            logger.info(f"[scanner] {symbol} RR {_actual_rr:.1f} below minimum 1.5 — skipping")
+            logger.info(f"[scanner] {symbol} blocked — TP1 RR {_actual_rr:.2f} below minimum 1.5")
             return None
 
         # TIER 4: Correlation duplicate hard block
