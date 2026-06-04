@@ -18,9 +18,10 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 CORRELATED_USD_LONGS = {"GBPUSD", "EURUSD", "AUDUSD", "NZDUSD"}
 
 RISK_TIERS = {
-    10: 0.0075,  # 10/10 — 0.75% — Premium full confluence
-    9:  0.0050,  # 9/10  — 0.50% — Standard strong setup
-    8:  0.0035,  # 8/10  — 0.35% — Conservative
+    10: 0.0075,  # 0.75% — Premium
+    9:  0.0050,  # 0.50% — Standard
+    8:  0.0035,  # 0.35% — Conservative — below minimum, skip
+    7:  0.0025,  # 0.25% — Minimal — always skip
 }
 
 _PIP_SIZE = {
@@ -202,6 +203,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
 
         # Grade/confidence override — scanner score is authoritative
         scanner_score = int(account_state.get('score', 9))
+        logger.info(f"[grade_override] raw_score={account_state.get('score')} parsed={scanner_score}")
         if scanner_score <= 7:
             result['grade'] = 'B'
         elif scanner_score == 8:
