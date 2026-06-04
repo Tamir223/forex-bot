@@ -185,6 +185,21 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
             else:
                 result["win_rate_context"] = None
 
+        # Recompute TP RR labels from actual prices — overrides Claude's often-wrong values.
+        # Formula: rr = abs(tp - entry) / abs(sl - entry), direction-agnostic.
+        try:
+            _rr_entry = float(result.get("entry_zone") or 0)
+            _rr_sl    = float(result.get("stop_loss")   or 0)
+            _rr_sl_dist = abs(_rr_entry - _rr_sl)
+            if _rr_sl_dist > 0:
+                for _tp_key, _rr_key in (("tp1", "tp1_rr"), ("tp2", "tp2_rr"), ("tp3", "tp3_rr")):
+                    _tp_val = result.get(_tp_key)
+                    if _tp_val is not None:
+                        _rr = round(abs(float(_tp_val) - _rr_entry) / _rr_sl_dist, 2)
+                        result[_rr_key] = f"{_rr:.2f}R"
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+
         logger.info(f"[user:{user_id}] {result.get('decision')} {result.get('pair')} "
                     f"grade={result.get('grade')} conf={result.get('confidence')}")
         return result
