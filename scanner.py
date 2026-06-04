@@ -127,7 +127,7 @@ def get_cached_signal(key: str) -> str | None:
     if entry is None:
         return None
     age = datetime.now(timezone.utc) - entry["timestamp"]
-    if age.total_seconds() > 300:
+    if age.total_seconds() > 120:
         del AUTO_SIGNAL_CACHE[key]
         return None
     return entry["signal"]
@@ -431,22 +431,15 @@ def detect_fvg(candles: list) -> dict | None:
     return None
 
 
-# ─── UNIFIED DATA CACHE ───────────────────────────────────────────────────────
-_symbol_data_cache: dict = {}  # {symbol: {"data": bundle, "fetched_at": epoch_seconds}}
-
-
 def fetch_all_timeframes(symbol: str) -> dict:
     """
-    Fetch all timeframes once via yFinance and return a unified bundle.
-    Cached per symbol for 4 minutes — every component reads from this single source.
+    Fetch all timeframes via yFinance and return a unified bundle.
+    Always fetches fresh data — no caching.
 
     Returns dict with keys: symbol, price, candles_15m, candles_1h, candles_4h,
     candles_daily (all newest-first), atr (dict), timestamp.
     """
     sym = symbol.upper()
-    cached = _symbol_data_cache.get(sym)
-    if cached and (_time.time() - cached["fetched_at"]) < 240:
-        return cached["data"]
 
     from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
     from scanner_improvements import get_pip_spec as _get_pip_spec
@@ -523,7 +516,6 @@ def fetch_all_timeframes(symbol: str) -> dict:
         "atr": atr_data,
         "timestamp": datetime.utcnow(),
     }
-    _symbol_data_cache[sym] = {"data": bundle, "fetched_at": _time.time()}
     return bundle
 
 
