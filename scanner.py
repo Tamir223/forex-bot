@@ -94,6 +94,20 @@ MIN_SL_DISTANCE = {
     "futures":       8.0,
 }
 
+MAX_SL_DISTANCE = {
+    "XAUUSD":        20.0,   # max 20 points
+    "GBPUSD":        0.0020, # max 20 pips
+    "EURUSD":        0.0020, # max 20 pips
+    "USDJPY":        0.20,   # max 20 pips JPY
+    "USDCAD":        0.0020, # max 20 pips
+    "AUDUSD":        0.0018, # max 18 pips
+    "NZDUSD":        0.0018, # max 18 pips
+    "USDCHF":        0.0018, # max 18 pips
+    "default_forex": 0.0020,
+    "jpy_forex":     0.20,
+    "futures":       20.0,
+}
+
 
 def _min_sl_dist(symbol: str) -> float:
     """Return the minimum acceptable SL distance for a symbol (in price units)."""
@@ -105,6 +119,18 @@ def _min_sl_dist(symbol: str) -> float:
     if "JPY" in sym:
         return MIN_SL_DISTANCE["jpy_forex"]
     return MIN_SL_DISTANCE["default_forex"]
+
+
+def _max_sl_dist(symbol: str) -> float:
+    """Return the maximum acceptable SL distance for a symbol (in price units)."""
+    sym = symbol.upper()
+    if sym in MAX_SL_DISTANCE:
+        return MAX_SL_DISTANCE[sym]
+    if sym in YFINANCE_FUTURES_MAP:
+        return MAX_SL_DISTANCE["futures"]
+    if "JPY" in sym:
+        return MAX_SL_DISTANCE["jpy_forex"]
+    return MAX_SL_DISTANCE["default_forex"]
 
 # Tracks last known bias per symbol for shift detection
 _last_bias: dict = {}
@@ -861,13 +887,14 @@ def build_auto_signal(symbol: str, direction: str, price: float,
             sl = round(price * 0.998, 5) if not spec else round(price - spec["typical_sl_pts"], 3)
 
         sl_dist = abs(entry - sl)
-        sl_dist = max(sl_dist, _min_sl_dist(symbol))
+        sl_dist = max(sl_dist, _min_sl_dist(symbol))  # floor — never too tight
+        sl_dist = min(sl_dist, _max_sl_dist(symbol))  # ceiling — never too wide
         _use_3dp = spec or symbol.upper() in ("XAUUSD", "US30", "NAS100")
         sl = round(entry - sl_dist, 3) if _use_3dp else round(entry - sl_dist, 5)
         tp1 = round(entry + sl_dist * 1.5, 3 if _use_3dp else 5)
         tp2 = round(entry + sl_dist * 2.5, 3 if _use_3dp else 5)
         tp3 = round(entry + sl_dist * 4.0, 3 if _use_3dp else 5)
-        logger.info(f"[build_signal] {symbol} BUY sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
+        logger.info(f"[build_signal] {symbol} BUY sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} max={_max_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     else:  # SELL
         # Entry: if price is inside OB/FVG zone use current price, else use zone mid (limit order)
@@ -882,13 +909,14 @@ def build_auto_signal(symbol: str, direction: str, price: float,
             sl = round(price * 1.002, 5) if not spec else round(price + spec["typical_sl_pts"], 3)
 
         sl_dist = abs(sl - entry)
-        sl_dist = max(sl_dist, _min_sl_dist(symbol))
+        sl_dist = max(sl_dist, _min_sl_dist(symbol))  # floor — never too tight
+        sl_dist = min(sl_dist, _max_sl_dist(symbol))  # ceiling — never too wide
         _use_3dp = spec or symbol.upper() in ("XAUUSD", "US30", "NAS100")
         sl = round(entry + sl_dist, 3) if _use_3dp else round(entry + sl_dist, 5)
         tp1 = round(entry - sl_dist * 1.5, 3 if _use_3dp else 5)
         tp2 = round(entry - sl_dist * 2.5, 3 if _use_3dp else 5)
         tp3 = round(entry - sl_dist * 4.0, 3 if _use_3dp else 5)
-        logger.info(f"[build_signal] {symbol} SELL sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
+        logger.info(f"[build_signal] {symbol} SELL sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} max={_max_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     # Build setup description
     setup_parts = []
@@ -1266,6 +1294,20 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             ob, fvg, structure, score_data, htf_bias or {}
         )
         signal_key = _cache_signal(auto_signal)
+
+        # Verify RR >= 1.5 from the actual built signal prices
+        import re as _re_sig
+        _sig_entry_m = _re_sig.search(r"Entry Zone:\s*([\d.]+)", auto_signal)
+        _sig_sl_m    = _re_sig.search(r"Stop Loss:\s*([\d.]+)", auto_signal)
+        _sig_tp1_m   = _re_sig.search(r"TP1:\s*([\d.]+)", auto_signal)
+        if _sig_entry_m and _sig_sl_m and _sig_tp1_m:
+            _sig_entry = float(_sig_entry_m.group(1))
+            _sig_sl    = float(_sig_sl_m.group(1))
+            _sig_tp1   = float(_sig_tp1_m.group(1))
+            _sig_rr_valid, _sig_actual_rr = validate_risk_reward(_sig_entry, _sig_sl, _sig_tp1)
+            if not _sig_rr_valid:
+                logger.info(f"[scanner] {symbol} blocked — TP1 RR {_sig_actual_rr:.2f} below minimum 1.5")
+                return None
 
         # Entry zone
         if ob:
