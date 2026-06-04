@@ -233,23 +233,33 @@ def get_candles(symbol: str, interval: str = "15min", outputsize: int = 200) -> 
             return None
     from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
 
-    # Forex — use yFinance directly
+    # Forex — TD primary, yFinance fallback
+    if TWELVE_DATA_API_KEY:
+        td_symbol = normalize_symbol(symbol)
+        try:
+            resp = requests.get(f"{BASE_URL}/time_series",
+                params={"symbol": td_symbol, "interval": interval,
+                        "outputsize": outputsize, "apikey": TWELVE_DATA_API_KEY}, timeout=8)
+            data = resp.json()
+            if data.get("status") != "error" and "values" in data:
+                candles = []
+                for v in data["values"]:
+                    candles.append({
+                        "datetime": v["datetime"],
+                        "open": float(v["open"]),
+                        "high": float(v["high"]),
+                        "low": float(v["low"]),
+                        "close": float(v["close"]),
+                        "volume": float(v.get("volume", 0)),
+                    })
+                return candles
+            logger.warning(f"[candles] TD failed for {symbol}: {data.get('message', 'unknown')} — falling back to yFinance")
+        except Exception as e:
+            logger.warning(f"[candles] TD exception for {symbol}: {e} — falling back to yFinance")
+
     if symbol.upper() in _YF_FOREX_MAP:
         return _get_candles_yfinance_forex(symbol, outputsize)
     return None
-    # (Twelve Data removed — rate-limited on free tier)
-    # if not TWELVE_DATA_API_KEY:
-    #     if symbol.upper() in _YF_FOREX_MAP:
-    #         return _get_candles_yfinance_forex(symbol, outputsize)
-    #     return None
-    # td_symbol = normalize_symbol(symbol)
-    # try:
-    #     resp = requests.get(f"{BASE_URL}/time_series",
-    #         params={"symbol": td_symbol, "interval": interval,
-    #                 "outputsize": outputsize, "apikey": TWELVE_DATA_API_KEY}, timeout=8)
-    #     ...
-    # except Exception as e:
-    #     logger.error(f"Candle fetch error for {symbol}: {e}")
 
 
 def detect_structure(candles: list) -> dict:
@@ -410,21 +420,44 @@ def get_htf_bias(symbol: str) -> dict:
             from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
             _yf_sym = ("GC=F" if symbol.upper() == "XAUUSD"
                        else _YF_FOREX_MAP.get(symbol.upper()))
-            if not _yf_sym:
-                return result
-            h1 = yf.Ticker(_yf_sym).history(period="14d", interval="1h")
-            h4 = yf.Ticker(_yf_sym).history(period="30d", interval="4h")
-            d1 = yf.Ticker(_yf_sym).history(period="30d", interval="1d")
-            if h1.empty or h4.empty or d1.empty:
-                return result
-            h1_trend = "bullish" if h1["Close"].iloc[-1] > h1["Close"].iloc[0] else "bearish"
-            h4_trend = "bullish" if h4["Close"].iloc[-1] > h4["Close"].iloc[0] else "bearish"
-            d1_trend = "bullish" if d1["Close"].iloc[-1] > d1["Close"].iloc[0] else "bearish"
-            # (Twelve Data removed — rate-limited on free tier)
-            # if not TWELVE_DATA_API_KEY:
-            #     return result
-            # td_symbol = normalize_symbol(symbol)
-            # def fetch_td(interval, outputsize=30): ...
+
+            h1_trend = h4_trend = d1_trend = None
+
+            # TD primary for forex HTF candles (not XAUUSD — uses yFinance GC=F)
+            if TWELVE_DATA_API_KEY and symbol.upper() != "XAUUSD":
+                try:
+                    td_symbol = normalize_symbol(symbol)
+                    def _fetch_td_htf(interval, outputsize=30):
+                        resp = requests.get(f"{BASE_URL}/time_series",
+                            params={"symbol": td_symbol, "interval": interval,
+                                    "outputsize": outputsize, "apikey": TWELVE_DATA_API_KEY}, timeout=8)
+                        data = resp.json()
+                        if data.get("status") != "error" and "values" in data:
+                            return [float(v["close"]) for v in data["values"]]
+                        return None
+                    _h1 = _fetch_td_htf("1h", 30)
+                    _h4 = _fetch_td_htf("4h", 30)
+                    _d1 = _fetch_td_htf("1day", 30)
+                    if _h1 and _h4 and _d1:
+                        # TD values are newest-first; [0]=newest, [-1]=oldest
+                        h1_trend = "bullish" if _h1[0] > _h1[-1] else "bearish"
+                        h4_trend = "bullish" if _h4[0] > _h4[-1] else "bearish"
+                        d1_trend = "bullish" if _d1[0] > _d1[-1] else "bearish"
+                except Exception as _e:
+                    logger.warning(f"[htf_bias] TD failed for {symbol}: {_e} — falling back to yFinance")
+
+            # yFinance fallback (also primary for XAUUSD)
+            if None in (h1_trend, h4_trend, d1_trend):
+                if not _yf_sym:
+                    return result
+                h1 = yf.Ticker(_yf_sym).history(period="14d", interval="1h")
+                h4 = yf.Ticker(_yf_sym).history(period="30d", interval="4h")
+                d1 = yf.Ticker(_yf_sym).history(period="30d", interval="1d")
+                if h1.empty or h4.empty or d1.empty:
+                    return result
+                h1_trend = "bullish" if h1["Close"].iloc[-1] > h1["Close"].iloc[0] else "bearish"
+                h4_trend = "bullish" if h4["Close"].iloc[-1] > h4["Close"].iloc[0] else "bearish"
+                d1_trend = "bullish" if d1["Close"].iloc[-1] > d1["Close"].iloc[0] else "bearish"
 
         result["h1_trend"] = h1_trend
         result["h4_trend"] = h4_trend
