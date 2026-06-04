@@ -158,22 +158,23 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
             market_ctx['lot_size_suggestion'] = _calculate_lot_size(float(risk_pct2), sl_pts_final, pair, account_size2, max_contracts2) if sl_pts_final else None
         result['lot_size_suggestion'] = market_ctx.get('lot_size_suggestion')
 
-        # Tiered risk sizing based on confidence score
-        raw = result.get("confidence", 9)
-        if isinstance(raw, str):
-            confidence_score = int(raw.split("/")[0].strip())
+        # Tiered risk sizing — prefer scanner score injected via account_state (reliable),
+        # fall back to Claude's confidence field (may be a string like "9/10")
+        _raw_conf = result.get("confidence", 9)
+        if isinstance(_raw_conf, str):
+            try:
+                confidence_score = int(_raw_conf.split("/")[0].strip())
+            except (ValueError, AttributeError):
+                confidence_score = 9
         else:
-            confidence_score = int(raw or 9)
-        risk_percent = RISK_TIERS.get(confidence_score, 0.005)
-        if not risk_percent or risk_percent <= 0:
-            risk_percent = 0.005
-        logger.info(f"[risk] raw={result.get('confidence')} parsed={confidence_score} tier={risk_percent}")
-        result['risk_percent'] = round(risk_percent * 100, 4)  # Store as percentage (0.75)
+            confidence_score = int(_raw_conf or 9)
+        scanner_score = int(account_state.get('score', confidence_score))
+        risk_val = RISK_TIERS.get(scanner_score, 0.005)
+        if not risk_val or risk_val <= 0:
+            risk_val = 0.005
+        result['risk_percent'] = round(risk_val * 100, 4)
+        logger.info(f"[risk] score={scanner_score} risk={result['risk_percent']}%")
         risk_percent = result['risk_percent']
-        if not result.get('risk_percent') or result.get('risk_percent') <= 0:
-            result['risk_percent'] = 0.50
-            risk_percent = result['risk_percent']
-            logger.warning("[risk] risk_percent was 0 — forced to 0.50%")
         # Always recalculate lot size with tiered risk
         if result.get('stop_loss') and result.get('entry_zone'):
             sl_pts_tiered = _compute_sl_pts(str(result['entry_zone']), str(result['stop_loss']), pair)
@@ -399,6 +400,7 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
         pip_val = PIP_VALUES.get(pair, PIP_VALUES["default"])
         lot = round(risk_dollar / (sl_pts * pip_val), 2)
         acct_k = int(account_size / 1000)
+        logger.info(f"[lots] pair={pair} risk=${risk_dollar:.2f} sl={sl_pts} pip_val={pip_val} lots={lot}")
         return f"{lot} lots on ${acct_k}k account"
     except Exception:
         return None

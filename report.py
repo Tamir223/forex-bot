@@ -16,9 +16,9 @@ def confluence_bar(score):
 
 
 _RISK_TIER_LABELS = {
-    0.75: "Premium — full confluence",
-    0.50: "Standard",
-    0.35: "Conservative",
+    0.75: "Premium — full confluence (10/10)",
+    0.50: "Standard (9/10)",
+    0.35: "Conservative (8/10)",
 }
 
 

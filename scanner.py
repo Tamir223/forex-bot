@@ -101,7 +101,7 @@ def get_cached_signal(key: str) -> str | None:
     if entry is None:
         return None
     age = datetime.now(timezone.utc) - entry["timestamp"]
-    if age.total_seconds() > 180:
+    if age.total_seconds() > 300:
         del AUTO_SIGNAL_CACHE[key]
         return None
     return entry["signal"]
@@ -779,6 +779,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     tp1 = rp(tp1)
     tp2 = rp(tp2)
     tp3 = rp(tp3)
+    logger.info(f"[build_signal] {symbol} {direction} entry={entry} sl={sl} tp1={tp1} domain=spot")
 
     signal = (
         f"{symbol} {direction} SIGNAL\n"
@@ -1015,17 +1016,23 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(f"[scanner] {symbol} score {final_score}/10 — below threshold")
             return None
 
-        # OB proximity check — only fire if price is at or near the OB zone
+        # OB proximity check — only fire if price is at or near the OB zone.
+        # XAUUSD: price_data["price"] is already spot (GC=F + offset).
+        # OB levels come from GC=F candles (futures domain) — convert to spot for apples-to-apples.
         if ob:
-            _cur = float(price_data.get("price", 0) if price_data else (candles[0]["close"] if candles else 0))
+            _ob_domain_offset = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+            _ob_low_cmp  = ob["low"]  + _ob_domain_offset
+            _ob_high_cmp = ob["high"] + _ob_domain_offset
+            _ob_mid_cmp  = ob["mid"]  + _ob_domain_offset
+            _fallback_price = (candles[0]["close"] + _ob_domain_offset) if candles else 0
+            _cur = float(price_data.get("price", 0) if price_data else _fallback_price)
             _ob_tol = 8.0 if (symbol.upper() == "XAUUSD" or symbol.upper() in YFINANCE_FUTURES_MAP) else 0.0008
-            _ob_mid = ob["mid"]
             if direction == "BUY":
-                _too_far = _cur < ob["low"] - _ob_tol or _cur > ob["high"] + (ob["high"] - ob["low"]) * 2
+                _too_far = _cur < _ob_low_cmp - _ob_tol or _cur > _ob_high_cmp + (_ob_high_cmp - _ob_low_cmp) * 2
             else:
-                _too_far = _cur > ob["high"] + _ob_tol or _cur < ob["low"] - (ob["high"] - ob["low"]) * 2
+                _too_far = _cur > _ob_high_cmp + _ob_tol or _cur < _ob_low_cmp - (_ob_high_cmp - _ob_low_cmp) * 2
             if _too_far:
-                logger.info(f"[scanner] {symbol} OB at {_ob_mid} but price at {_cur} — too far from OB zone, skipping")
+                logger.info(f"[scanner] {symbol} OB at {_ob_mid_cmp:.2f} (spot) but price {_cur} — too far from OB zone, skipping")
                 return None
 
         alert_text = format_scan_alert(symbol, structure, ob, fvg, score_data, price_data, htf_bias, candles=candles)
@@ -1155,13 +1162,13 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                         _live_price = round(_live_price + FUTURES_SPOT_OFFSET.get("XAUUSD", 0), 2)
                 except Exception:
                     _live_price = None
-                _tolerance = 5.0
+                _tolerance = 8.0  # gold volatility needs wider window than other instruments
             else:
                 _price_data = get_live_price(_symbol)
                 _live_price = float(_price_data["price"]) if _price_data else None
-                _tolerance = 0.05 if "JPY" in _symbol.upper() else 0.0005
+                _tolerance = 0.10 if "JPY" in _symbol.upper() else 0.0005
             if _live_price is not None:
-                logger.info(f"[grade] direction={_direction} live={_live_price} entry={_entry_price} diff={abs(_live_price - _entry_price)}")
+                logger.info(f"[entry_check] {_symbol} live={_live_price} entry={_entry_price} diff={abs(_live_price - _entry_price):.5f} tolerance={_tolerance}")
             if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
                 _score = int(result.get("score", 0))
                 logger.info(f"[grade_block] score={_score} type={type(_score)} direction={_direction} live={_live_price} entry={_entry_price}")
@@ -1226,6 +1233,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         profile = get_profile(firm_code)
         state = get_state(user.id)
 
+        _scanner_score = int(result.get('score', 9))
         state_dict = {
             "trades_today": state.trades_today,
             "open_trades": state.open_trades,
@@ -1236,19 +1244,21 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             "account_size": profile.account_size if profile else 10000.0,
             "risk_percent": 1.0,
             "max_contracts": profile.max_contracts if profile else None,
+            "score": _scanner_score,  # inject scanner score so analyze_signal uses it for risk tier
         }
 
         analysis = analyze_signal(signal_text, state_dict)
         if not analysis:
             return False
 
-        # Override risk tier from scanner score — Claude's confidence field can mismatch
-        # (e.g. returns "10/10" string for a 9/10 signal), so source of truth is the scanner score
+        # Override risk tier and confidence from scanner score — single source of truth
         from claude import RISK_TIERS as _RISK_TIERS
-        _scanner_score = int(result.get('score', 9))
         _scanner_risk = _RISK_TIERS.get(_scanner_score, 0.005)
-        analysis['risk_percent'] = round(_scanner_risk * 100, 4)
-        logger.info(f"[risk_override] scanner_score={_scanner_score} risk={_scanner_risk} analysis_risk={analysis.get('risk_percent')}")
+        _final_risk = round(_scanner_risk * 100, 4)
+        analysis['risk_percent'] = _final_risk
+        analysis['confidence'] = _scanner_score  # sync confidence display with scanner score
+        result['risk_percent'] = _final_risk      # keep scan result in sync too
+        logger.info(f"[risk] score={_scanner_score} risk={_final_risk}%")
 
         # Apply firm risk cap
         if profile:
