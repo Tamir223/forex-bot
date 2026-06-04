@@ -494,7 +494,7 @@ def fetch_all_timeframes(symbol: str) -> dict:
                         price = float(_1m["Close"].iloc[-1])
                 except Exception:
                     pass
-                price = round(price + FUTURES_SPOT_OFFSET.get(sym, 0), 2)
+                price = round(price + FUTURES_SPOT_OFFSET.get(sym, 0), 3)
 
             if len(candles_15m) >= 14:
                 ranges = [c["high"] - c["low"] for c in candles_15m[:14]]
@@ -839,15 +839,15 @@ def build_auto_signal(symbol: str, direction: str, price: float,
             sl = round(fvg["bottom"] - (fvg["top"] - fvg["bottom"]) * 0.5, 5)
         else:
             entry = price
-            sl = round(price * 0.998, 5) if not spec else round(price - spec["typical_sl_pts"], 2)
+            sl = round(price * 0.998, 5) if not spec else round(price - spec["typical_sl_pts"], 3)
 
         sl_dist = abs(entry - sl)
         sl_dist = max(sl_dist, _min_sl_dist(symbol))
-        _use_2dp = spec or symbol.upper() in ("XAUUSD", "US30", "NAS100")
-        sl = round(entry - sl_dist, 2) if _use_2dp else round(entry - sl_dist, 5)
-        tp1 = round(entry + sl_dist * 1.5, 2 if _use_2dp else 5)
-        tp2 = round(entry + sl_dist * 2.5, 2 if _use_2dp else 5)
-        tp3 = round(entry + sl_dist * 4.0, 2 if _use_2dp else 5)
+        _use_3dp = spec or symbol.upper() in ("XAUUSD", "US30", "NAS100")
+        sl = round(entry - sl_dist, 3) if _use_3dp else round(entry - sl_dist, 5)
+        tp1 = round(entry + sl_dist * 1.5, 3 if _use_3dp else 5)
+        tp2 = round(entry + sl_dist * 2.5, 3 if _use_3dp else 5)
+        tp3 = round(entry + sl_dist * 4.0, 3 if _use_3dp else 5)
         logger.info(f"[build_signal] {symbol} BUY sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     else:  # SELL
@@ -860,15 +860,15 @@ def build_auto_signal(symbol: str, direction: str, price: float,
             sl = round(fvg["top"] + (fvg["top"] - fvg["bottom"]) * 0.5, 5)
         else:
             entry = price
-            sl = round(price * 1.002, 5) if not spec else round(price + spec["typical_sl_pts"], 2)
+            sl = round(price * 1.002, 5) if not spec else round(price + spec["typical_sl_pts"], 3)
 
         sl_dist = abs(sl - entry)
         sl_dist = max(sl_dist, _min_sl_dist(symbol))
-        _use_2dp = spec or symbol.upper() in ("XAUUSD", "US30", "NAS100")
-        sl = round(entry + sl_dist, 2) if _use_2dp else round(entry + sl_dist, 5)
-        tp1 = round(entry - sl_dist * 1.5, 2 if _use_2dp else 5)
-        tp2 = round(entry - sl_dist * 2.5, 2 if _use_2dp else 5)
-        tp3 = round(entry - sl_dist * 4.0, 2 if _use_2dp else 5)
+        _use_3dp = spec or symbol.upper() in ("XAUUSD", "US30", "NAS100")
+        sl = round(entry + sl_dist, 3) if _use_3dp else round(entry + sl_dist, 5)
+        tp1 = round(entry - sl_dist * 1.5, 3 if _use_3dp else 5)
+        tp2 = round(entry - sl_dist * 2.5, 3 if _use_3dp else 5)
+        tp3 = round(entry - sl_dist * 4.0, 3 if _use_3dp else 5)
         logger.info(f"[build_signal] {symbol} SELL sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     # Build setup description
@@ -897,10 +897,10 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     # Enforce minimum 1.5:1 TP1 floor before offset is applied
     _tp1_min_dist = sl_dist * 1.5
     if direction == "BUY" and (tp1 - entry) < _tp1_min_dist - 0.0001:
-        tp1 = round(entry + _tp1_min_dist, 2 if _use_2dp else 5)
+        tp1 = round(entry + _tp1_min_dist, 3 if _use_3dp else 5)
         logger.warning(f"[build_signal] {symbol} BUY TP1 corrected to 1.5R: tp1={tp1}")
     elif direction == "SELL" and (entry - tp1) < _tp1_min_dist - 0.0001:
-        tp1 = round(entry - _tp1_min_dist, 2 if _use_2dp else 5)
+        tp1 = round(entry - _tp1_min_dist, 3 if _use_3dp else 5)
         logger.warning(f"[build_signal] {symbol} SELL TP1 corrected to 1.5R: tp1={tp1}")
 
     # Round prices cleanly and apply spot offset for instruments where yFinance
@@ -909,9 +909,9 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     def rp(v):
         adjusted = float(v) + _spot_offset
         if spec:
-            return round(adjusted, 2)  # futures
+            return round(adjusted, 3)  # futures
         elif symbol.upper() in ("XAUUSD", "US30", "NAS100"):
-            return round(adjusted, 2)  # gold and indices use 2dp
+            return round(adjusted, 3)  # gold and indices use 3dp
         else:
             return round(adjusted, 5)  # forex pairs use 5dp
     entry = rp(entry)
@@ -950,7 +950,7 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
     if isinstance(current_price, float):
         # Gold and indices: 2dp; forex: 5dp
         if symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP:
-            current_price = round(current_price, 2)
+            current_price = round(current_price, 3)
         else:
             current_price = round(current_price, 5)
 
@@ -1339,7 +1339,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                     _gc_hist = yf.Ticker("GC=F").history(period="1d", interval="1m")
                     _live_price = float(_gc_hist["Close"].iloc[-1]) if not _gc_hist.empty else None
                     if _live_price is not None:
-                        _live_price = round(_live_price + FUTURES_SPOT_OFFSET.get("XAUUSD", 0), 2)
+                        _live_price = round(_live_price + FUTURES_SPOT_OFFSET.get("XAUUSD", 0), 3)
                 except Exception:
                     _live_price = None
                 _tolerance = 8.0  # gold volatility needs wider window than other instruments
