@@ -344,7 +344,7 @@ def detect_structure(candles: list) -> dict:
     }
 
 
-def detect_order_block(candles: list, trend: str, max_candles_back: int = 20) -> dict | None:
+def detect_order_block(candles: list, trend: str, max_candles_back: int = 50) -> dict | None:
     """
     Detect the most recent order block within max_candles_back candles.
     Bullish OB: last bearish candle before a strong bullish move.
