@@ -43,159 +43,263 @@ def get_pip_spec(symbol: str) -> dict:
 
 # ─── 1. NEWS FILTER ───────────────────────────────────────────────────────────
 
-# High impact news times UTC — updated weekly
-# Format: (hour, minute, description)
-HIGH_IMPACT_NEWS = [
-    # Last-resort fallback only — ForexFactory live feed is the primary source.
-    # Only include times that are nearly always high-impact regardless of the calendar.
-    (8, 30, "US Core PCE / GDP / NFP / CPI"),
-    (13, 30, "US economic data"),
-    (7, 0, "BOE / UK data"),
-    (9, 0, "ECB / EUR data"),
+NEWS_BLOCK_MINUTES_BEFORE = 45
+NEWS_BLOCK_MINUTES_AFTER  = 30
+
+# Minimal fallback — only used when ALL live feeds fail
+FALLBACK_NEWS = [
+    (8,  30, "US NFP/CPI/PCE"),
+    (13, 30, "US Fed/FOMC"),
 ]
 
-NEWS_BLOCK_MINUTES_BEFORE = 45
-NEWS_BLOCK_MINUTES_AFTER = 30
+# 60-minute cache for today's event list
+_FF_CACHE: dict = {"events": None, "fetched_at": 0.0}
+_FF_CACHE_TTL = 3600
+
+
+def _et_to_utc_minutes(hour: int, minute: int) -> int:
+    """Convert Eastern Time (EDT=UTC-4, EST=UTC-5) to UTC minutes-since-midnight."""
+    month = datetime.now(timezone.utc).month
+    offset = 4 if 3 <= month <= 11 else 5   # EDT Mar-Nov, EST Dec-Feb
+    utc = hour * 60 + minute + offset * 60
+    return utc % (24 * 60)
+
+
+def fetch_forexfactory_today() -> list:
+    """
+    Fetch today's high-impact events. Caches result for 60 minutes.
+    Returns list of dicts: {time_utc, currency, event, impact}.
+    Three-strategy fallback: FF HTML → FF JSON feed → hardcoded minimal list.
+    """
+    import time as _t
+    now = datetime.now(timezone.utc)
+
+    if _FF_CACHE["events"] is not None and (_t.time() - _FF_CACHE["fetched_at"]) < _FF_CACHE_TTL:
+        return _FF_CACHE["events"]
+
+    events: list = []
+
+    # ── Strategy 1: ForexFactory HTML calendar ───────────────────────────────
+    try:
+        from bs4 import BeautifulSoup
+        resp = requests.get(
+            "https://www.forexfactory.com/calendar.php?day=today",
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            table = soup.find("table", class_="calendar__table")
+            if table:
+                today_date = now.date()
+                logger.info(f"[news] Today is: {today_date}")
+                logger.info(f"[news] Filtering for: {today_date}")
+
+                in_today = False      # only collect rows under today's date header
+                current_time_str = ""
+
+                for row in table.find_all("tr"):
+                    row_classes = row.get("class", [])
+
+                    # New-day header row — update which date section we're in
+                    if "calendar__row--new-day" in row_classes:
+                        date_td = row.find("td", class_="calendar__date")
+                        if date_td:
+                            raw = date_td.get_text(strip=True).replace("\xa0", "")
+                            try:
+                                row_date = datetime.strptime(
+                                    f"{raw} {today_date.year}", "%a%b %d %Y"
+                                ).date()
+                                in_today = (row_date == today_date)
+                                current_time_str = ""  # reset time on each new day
+                            except Exception:
+                                in_today = False
+                        # Also read the time from this first row of the day
+                        time_td = row.find("td", class_="calendar__time")
+                        if time_td and in_today:
+                            t_text = time_td.get_text(strip=True).replace("\xa0", "").strip()
+                            if t_text and t_text not in ("Tentative", "All Day", ""):
+                                current_time_str = t_text
+
+                    if not in_today:
+                        continue
+
+                    if "calendar__row" not in row_classes:
+                        continue
+
+                    # Only red-folder (high-impact) rows
+                    impact_td = row.find("td", class_="calendar__impact")
+                    if not impact_td:
+                        continue
+                    if not impact_td.find(class_=lambda c: c and "red" in str(c).lower()):
+                        continue
+
+                    # Time cell (may be blank — carry forward from previous row)
+                    time_td = row.find("td", class_="calendar__time")
+                    if time_td:
+                        t_text = time_td.get_text(strip=True).replace("\xa0", "").strip()
+                        if t_text and t_text not in ("Tentative", "All Day", ""):
+                            current_time_str = t_text
+
+                    if not current_time_str or current_time_str in ("Tentative", "All Day"):
+                        continue
+
+                    cur_td = row.find("td", class_="calendar__currency")
+                    currency = cur_td.get_text(strip=True) if cur_td else ""
+
+                    ev_td = row.find("td", class_="calendar__event")
+                    event_title = ""
+                    if ev_td:
+                        title_el = ev_td.find(class_="calendar__event-title")
+                        event_title = (title_el or ev_td).get_text(strip=True)
+
+                    try:
+                        t = datetime.strptime(current_time_str.upper(), "%I:%M%p")
+                        utc_min = _et_to_utc_minutes(t.hour, t.minute)
+                        utc_h, utc_m = divmod(utc_min, 60)
+                        events.append({
+                            "time_utc": now.replace(hour=utc_h, minute=utc_m, second=0, microsecond=0),
+                            "currency": currency,
+                            "event": event_title,
+                            "impact": "high",
+                        })
+                    except Exception:
+                        continue
+
+        if events:
+            logger.info(f"[news] ForexFactory HTML: {len(events)} high-impact events today")
+            for e in events:
+                logger.info(f"[news]  {e['time_utc'].strftime('%H:%M UTC')}  {e['currency']}  {e['event']}")
+            _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
+            return events
+
+    except Exception as _e:
+        logger.debug(f"[news] FF HTML fetch failed: {_e}")
+
+    # ── Strategy 2: nfs.faireconomy.media JSON feed ──────────────────────────
+    try:
+        resp = requests.get(
+            "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+            timeout=6,
+        )
+        if resp.status_code == 200:
+            today_str = now.strftime("%Y-%m-%d")
+            for item in resp.json():
+                if item.get("impact") != "High":
+                    continue
+                if today_str not in item.get("date", ""):
+                    continue
+                ev_time = item.get("time", "")
+                if not ev_time or ev_time == "Tentative":
+                    continue
+                try:
+                    t = datetime.strptime(ev_time.upper(), "%I:%M%p")
+                    utc_min = _et_to_utc_minutes(t.hour, t.minute)
+                    utc_h, utc_m = divmod(utc_min, 60)
+                    events.append({
+                        "time_utc": now.replace(hour=utc_h, minute=utc_m, second=0, microsecond=0),
+                        "currency": item.get("country", ""),
+                        "event": item.get("title", "?"),
+                        "impact": "high",
+                    })
+                except Exception:
+                    continue
+
+        if events:
+            logger.info(f"[news] FF JSON feed: {len(events)} high-impact events today")
+            for e in events:
+                logger.info(f"[news]  {e['time_utc'].strftime('%H:%M UTC')}  {e['currency']}  {e['event']}")
+            _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
+            return events
+
+    except Exception as _e:
+        logger.debug(f"[news] FF JSON feed failed: {_e}")
+
+    # ── Strategy 3: Minimal hardcoded fallback ───────────────────────────────
+    logger.warning("[news] All FF feeds failed — using hardcoded fallback")
+    for hour, minute, desc in FALLBACK_NEWS:
+        utc_min = hour * 60 + minute
+        utc_h, utc_m = divmod(utc_min, 60)
+        events.append({
+            "time_utc": now.replace(hour=utc_h, minute=utc_m, second=0, microsecond=0),
+            "currency": "USD",
+            "event": desc,
+            "impact": "high",
+        })
+    _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
+    return events
+
 
 def is_news_window() -> tuple[bool, str]:
     """
     Check if current time is within a news window.
     Returns (is_blocked, reason).
-    Uses ForexFactory RSS if available, falls back to hardcoded times.
     """
     now = datetime.now(timezone.utc)
-    current_minutes = now.hour * 60 + now.minute
-
-    # Try ForexFactory RSS feed first
+    cur = now.hour * 60 + now.minute
     try:
-        resp = requests.get(
-            "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-            timeout=5
-        )
-        if resp.status_code == 200:
-            events = resp.json()
-            today = now.strftime("%Y-%m-%d")
-            high_today = []
-            for event in events:
-                if event.get("impact") != "High":
-                    continue
-                event_date = event.get("date", "")
-                if today not in event_date:
-                    continue
-                event_time = event.get("time", "")
-                if not event_time or event_time == "Tentative":
-                    continue
-                try:
-                    from datetime import datetime as dt
-                    t = dt.strptime(event_time.upper(), "%I:%M%p")
-                    event_minutes = t.hour * 60 + t.minute
-                    # Convert ET to UTC (+4 EDT)
-                    event_minutes_utc = event_minutes + 4 * 60
-                    if event_minutes_utc > 24 * 60:
-                        event_minutes_utc -= 24 * 60
-                    utc_h, utc_m = divmod(event_minutes_utc, 60)
-                    high_today.append((utc_h, utc_m, event.get("title", "?"), event_time))
-
-                    diff = current_minutes - event_minutes_utc
-                    if -NEWS_BLOCK_MINUTES_BEFORE <= diff <= NEWS_BLOCK_MINUTES_AFTER:
-                        logging.debug(
-                            "[NEWS] FF today high-impact events: %s",
-                            [(h, m, d, et) for h, m, d, et in high_today]
-                        )
-                        return True, f"High impact news: {event.get('title', 'USD event')}"
-                except Exception:
-                    continue
-            logging.debug(
-                "[NEWS] FF today high-impact events (no block): %s",
-                [(h, m, d, et) for h, m, d, et in high_today]
-            )
+        for e in fetch_forexfactory_today():
+            ev = e["time_utc"].hour * 60 + e["time_utc"].minute
+            if -NEWS_BLOCK_MINUTES_BEFORE <= (cur - ev) <= NEWS_BLOCK_MINUTES_AFTER:
+                return True, (
+                    f"High impact news: {e['currency']} {e['event']} "
+                    f"at {e['time_utc'].strftime('%H:%M')} UTC"
+                )
     except Exception:
         pass
-
-    # Fall back to hardcoded news times
-    for hour, minute, desc in HIGH_IMPACT_NEWS:
-        event_minutes = hour * 60 + minute
-        diff = current_minutes - event_minutes
-        if -NEWS_BLOCK_MINUTES_BEFORE <= diff <= NEWS_BLOCK_MINUTES_AFTER:
-            return True, f"News window: {desc} at {hour:02d}:{minute:02d} UTC"
-
     return False, ""
 
 
 def get_next_news_event() -> str:
-    """Return description of next news event today."""
+    """Return description of next high-impact event today."""
     now = datetime.now(timezone.utc)
-    current_minutes = now.hour * 60 + now.minute
-
-    for hour, minute, desc in sorted(HIGH_IMPACT_NEWS, key=lambda x: x[0] * 60 + x[1]):
-        event_minutes = hour * 60 + minute
-        if event_minutes > current_minutes:
-            mins_until = event_minutes - current_minutes
-            return f"{desc} in {mins_until} minutes ({hour:02d}:{minute:02d} UTC)"
-
-    return "No more events today"
+    cur = now.hour * 60 + now.minute
+    try:
+        upcoming = sorted(
+            (e for e in fetch_forexfactory_today()
+             if e["time_utc"].hour * 60 + e["time_utc"].minute > cur),
+            key=lambda e: e["time_utc"].hour * 60 + e["time_utc"].minute,
+        )
+        if upcoming:
+            e = upcoming[0]
+            ev_min = e["time_utc"].hour * 60 + e["time_utc"].minute
+            return (
+                f"{e['currency']} {e['event']} in {ev_min - cur} minutes "
+                f"({e['time_utc'].strftime('%H:%M')} UTC)"
+            )
+    except Exception:
+        pass
+    return "No more high-impact events today"
 
 
 def check_upcoming_news(lookahead_minutes: int = 45) -> tuple[bool, str, int]:
     """
     Check if high-impact news is within lookahead_minutes in the future.
     Returns (news_approaching, reason, minutes_until).
-    Only looks at future events — does not fire for events already passed.
     """
     now = datetime.now(timezone.utc)
-    current_minutes = now.hour * 60 + now.minute
-
-    # Try ForexFactory RSS feed first
+    cur = now.hour * 60 + now.minute
     try:
-        resp = requests.get(
-            "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-            timeout=5
-        )
-        if resp.status_code == 200:
-            events = resp.json()
-            today = now.strftime("%Y-%m-%d")
-            high_today = []
-            for event in events:
-                if event.get("impact") != "High":
-                    continue
-                event_date = event.get("date", "")
-                if today not in event_date:
-                    continue
-                event_time = event.get("time", "")
-                if not event_time or event_time == "Tentative":
-                    continue
-                try:
-                    from datetime import datetime as dt
-                    t = dt.strptime(event_time.upper(), "%I:%M%p")
-                    event_minutes = t.hour * 60 + t.minute
-                    event_minutes_utc = event_minutes + 4 * 60
-                    if event_minutes_utc > 24 * 60:
-                        event_minutes_utc -= 24 * 60
-                    utc_h, utc_m = divmod(event_minutes_utc, 60)
-                    minutes_until = event_minutes_utc - current_minutes
-                    high_today.append((utc_h, utc_m, event.get("title", "?"), event_time, minutes_until))
-                    if 0 < minutes_until <= lookahead_minutes:
-                        logging.debug(
-                            "[NEWS upcoming] FF today high-impact events: %s",
-                            [(h, m, d, et, mu) for h, m, d, et, mu in high_today]
-                        )
-                        return True, f"High impact news: {event.get('title', 'USD event')}", minutes_until
-                except Exception:
-                    continue
-            logging.debug(
-                "[NEWS upcoming] FF today high-impact events (none blocking): %s",
-                [(h, m, d, et, mu) for h, m, d, et, mu in high_today]
-            )
+        for e in fetch_forexfactory_today():
+            ev = e["time_utc"].hour * 60 + e["time_utc"].minute
+            mins_until = ev - cur
+            if 0 < mins_until <= lookahead_minutes:
+                return (
+                    True,
+                    f"High impact news: {e['currency']} {e['event']} "
+                    f"at {e['time_utc'].strftime('%H:%M')} UTC",
+                    mins_until,
+                )
     except Exception:
         pass
-
-    # Fall back to hardcoded news times
-    for hour, minute, desc in HIGH_IMPACT_NEWS:
-        event_minutes = hour * 60 + minute
-        minutes_until = event_minutes - current_minutes
-        if 0 < minutes_until <= lookahead_minutes:
-            return True, f"News window: {desc} at {hour:02d}:{minute:02d} UTC", minutes_until
-
     return False, "", 0
 
 
