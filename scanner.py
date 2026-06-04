@@ -1025,9 +1025,12 @@ def check_signal_contradictions(direction: str, factors: list) -> tuple[int, lis
         if 'bearish fvg' in factor_text:
             contradictions += 1
             warnings.append('⚠️ Bearish FVG against BUY direction')
-        if 'bearish engulfing' in factor_text or 'shooting star' in factor_text:
+        if 'bearish engulfing' in factor_text:
             contradictions += 1
-            warnings.append('⚠️ Bearish rejection candle against BUY direction')
+            warnings.append('⚠️ Bearish engulfing candle against BUY direction')
+        if 'shooting star' in factor_text:
+            contradictions += 1
+            warnings.append('⚠️ Shooting star against BUY direction')
         if 'consecutive bearish' in factor_text:
             contradictions += 1
             warnings.append('⚠️ Bearish momentum against BUY direction')
@@ -1245,8 +1248,11 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         alert_text = format_scan_alert(symbol, structure, ob, fvg, score_data, price_data, htf_bias, candles=candles)
 
         current_price = price_data.get("price", 0) if price_data else 0
+        # OB/FVG levels are in futures domain; convert spot price back to futures
+        # domain so build_auto_signal's zone comparisons and rp() offset are consistent.
+        _build_cp = float(current_price) - FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
         auto_signal = build_auto_signal(
-            symbol, direction, float(current_price),
+            symbol, direction, _build_cp,
             ob, fvg, structure, score_data, htf_bias or {}
         )
         signal_key = _cache_signal(auto_signal)
