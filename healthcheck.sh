@@ -497,6 +497,16 @@ grep -A5 'detect_market_structure_shift' /home/ubuntu/apfee/scanner.py | grep -q
 check $? "Pattern: MSS score +2/-2"
 
 echo ""
+echo "Running mathematical verification..."
+MATH_OUTPUT=$(/home/ubuntu/apfee/venv/bin/python3 /home/ubuntu/apfee/math_check.py 2>/dev/null)
+MATH_RESULT=$(echo "$MATH_OUTPUT" | grep "RESULTS")
+echo "$MATH_RESULT"
+MATH_PASS=$(echo "$MATH_RESULT" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+')
+MATH_FAIL=$(echo "$MATH_RESULT" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+')
+PASS=$((PASS + ${MATH_PASS:-0}))
+FAIL=$((FAIL + ${MATH_FAIL:-0}))
+
+echo ""
 echo "======================================"
 echo "RESULTS: $PASS passed, $FAIL failed"
 echo "======================================"
