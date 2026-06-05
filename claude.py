@@ -38,7 +38,7 @@ PIP_VALUES = {
     "USDCAD": 7.50,
     "NZDUSD": 10.0,
     "USDCHF": 10.50,
-    "XAUUSD": 10.0,  # 100oz contract, $10/pt per lot
+    "XAUUSD": 100.0,  # OANDA: $100/pt per lot
     "US30":   1.0,
     "NAS100": 1.0,
     "default": 10.0,
