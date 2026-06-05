@@ -1477,13 +1477,13 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 _score = int(result.get("score", 0))
                 logger.info(f"[grade_block] score={_score} type={type(_score)} direction={_direction} live={_live_price} entry={_entry_price}")
                 if _score == 10:
-                    if _direction == "BUY" and _live_price < _entry_price:
+                    if _direction == "BUY" and _live_price > _entry_price:
                         _limit_note = (
                             f"⚠️ Entry zone passed — price already moved in your direction.\n"
                             f"📌 LIMIT ORDER SUGGESTION: Set a Buy Limit at {_entry_price} if price retraces back to the OB zone.\n"
                             f"Cancel limit order before 8:00 AM EDT if unfilled."
                         )
-                    elif _direction == "SELL" and _live_price > _entry_price:
+                    elif _direction == "SELL" and _live_price < _entry_price:
                         _limit_note = (
                             f"⚠️ Entry zone passed — price already moved in your direction.\n"
                             f"📌 LIMIT ORDER SUGGESTION: Set a Sell Limit at {_entry_price} if price retraces back to the OB zone.\n"
@@ -1570,6 +1570,13 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         result['risk_percent'] = _final_risk      # keep scan result in sync too
         logger.info(f"[risk] score={_scanner_score} risk={_final_risk}%")
 
+        if _scanner_score == 10:
+            block_risk = "0.75%"
+        elif _scanner_score == 9:
+            block_risk = "0.50%"
+        else:
+            block_risk = "0%"
+
         # Apply firm risk cap
         if profile:
             max_daily_pct = profile.max_daily_loss_pct * 100
@@ -1584,8 +1591,13 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         grade = analysis.get("grade", "")
 
         if decision == "BLOCK" or grade in ["C", "D", "F"]:
-            # Send block message silently — no need to alert for blocked auto-grades
             logger.info(f"[auto-grade] {result['symbol']} blocked — {grade}")
+            if "Entry missed" in analysis.get("reason", ""):
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⛔ {result['symbol']} {_direction} — BLOCKED — Entry missed\n📊 Risk if valid: {block_risk}"
+                )
+                return True
             return False
 
         report_text = priority_header + execute_report(analysis)
