@@ -1649,9 +1649,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
     Scan symbols in watchlist and send alerts to users.
     force=True bypasses the scan window check (for manual /scan command).
 
-    Rate limiting strategy: yFinance pairs (XAUUSD, futures) scan every cycle.
-    Twelve Data (forex) pairs rotate in groups of 2 across cycles — stays within
-    the 8 credits/minute free tier limit.
+    Scans all pairs every cycle: XAUUSD first, then remaining in preferred order.
     """
     global _scan_rotation_index
 
@@ -1672,24 +1670,17 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
     if not _user_symbol_union:
         _user_symbol_union = {s.upper() for s in watchlist}
 
-    # yFinance pairs have no rate limit — always scan every cycle
-    yfinance_pairs = [s for s in _user_symbol_union if s in YFINANCE_FUTURES_MAP or s == "XAUUSD"]
-    # Twelve Data pairs rotate through in groups of 2
-    td_pairs = [s for s in _user_symbol_union if s not in YFINANCE_FUTURES_MAP and s != "XAUUSD"]
-
-    group_size = 2
-    if len(td_pairs) <= group_size:
-        td_group = td_pairs
-    else:
-        start = (_scan_rotation_index * group_size) % len(td_pairs)
-        td_group = [td_pairs[(start + j) % len(td_pairs)] for j in range(group_size)]
+    # Scan all pairs every cycle — XAUUSD always first, then remaining in preferred order
+    _preferred_order = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF"]
+    pairs_this_cycle = [s for s in _preferred_order if s in _user_symbol_union]
+    pairs_this_cycle += [s for s in _user_symbol_union if s not in _preferred_order]
 
     _scan_rotation_index += 1
-    pairs_this_cycle = yfinance_pairs + td_group
+    cycle_num = _scan_rotation_index
+    cycle_start = _time.time()
 
     logger.info(
-        f"[scanner] Cycle {_scan_rotation_index} — scanning {len(pairs_this_cycle)} symbols "
-        f"(yFinance: {yfinance_pairs + td_group})"
+        f"[scanner] Cycle {cycle_num} — scanning all {len(pairs_this_cycle)} symbols: {pairs_this_cycle}"
     )
 
     alerts_sent = 0
@@ -1763,7 +1754,8 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
         except Exception as e:
             logger.error(f"[scanner] Symbol scan failed for {symbol}: {e}")
 
-    logger.info(f"[scanner] Scan complete — {alerts_sent} alerts sent")
+    cycle_time = _time.time() - cycle_start
+    logger.info(f"[scanner] Cycle {cycle_num} completed in {cycle_time:.1f}s — {alerts_sent} alerts sent")
     return alerts_sent
 
 
