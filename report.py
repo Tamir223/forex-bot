@@ -16,21 +16,34 @@ def confluence_bar(score):
 
 
 def _sl_dist_display(analysis: dict) -> str:
+    pair = (analysis.get('pair') or "").upper()
+    futures = {'ES', 'MES', 'NQ', 'MNQ', 'CL', 'MCL', 'GC', 'MGC', 'RTY', 'YM', 'NG'}
+
+    def _format(raw_dist):
+        if pair in futures or pair == 'XAUUSD':
+            return f"{round(raw_dist, 1)} pts"
+        elif 'JPY' in pair:
+            return f"{round(raw_dist * 100, 1)} pips"
+        else:
+            return f"{round(raw_dist * 10000, 1)} pips"
+
+    # Compute from actual entry/SL prices — always raw price distance (e.g. 0.0012 for EURUSD)
+    try:
+        entry = float(analysis.get('entry_zone') or 0)
+        sl = float(analysis.get('stop_loss') or 0)
+        if entry and sl:
+            return _format(abs(entry - sl))
+    except (TypeError, ValueError):
+        pass
+
+    # Fallback: AI-provided stop_loss_pts (treat as raw price distance)
     raw = analysis.get('stop_loss_pts')
     if raw is None or str(raw).lower() in ("", "null", "--"):
         return "--"
     try:
-        val = float(raw)
-    except (ValueError, TypeError):
+        return _format(float(raw))
+    except (TypeError, ValueError):
         return fmt(raw)
-    pair = (analysis.get('pair') or "").upper()
-    futures = {'ES', 'MES', 'NQ', 'MNQ', 'CL', 'MCL', 'GC', 'MGC', 'RTY', 'YM', 'NG'}
-    if pair in futures or pair == 'XAUUSD':
-        return f"{val:.1f} pts"
-    elif 'JPY' in pair:
-        return f"{round(val * 100, 1)} pips"
-    else:
-        return f"{round(val * 10000, 1)} pips"
 
 
 def _risk_line(analysis: dict) -> str:
