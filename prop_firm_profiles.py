@@ -147,18 +147,18 @@ _register(PropFirmProfile(
 ))
 
 _register(PropFirmProfile(
-    name="The5%ers $25k", short_code="5ers25k",
-    account_size=25000, profit_target=2000, profit_target_pct=0.08,
-    max_total_loss=1500, max_total_loss_pct=0.06,
+    name="5ers New High Stakes 25k", short_code="5ers25k",
+    account_size=25000, profit_target=2500, profit_target_pct=0.10,
+    max_total_loss=2500, max_total_loss_pct=0.10,
     max_daily_loss=1250, max_daily_loss_pct=0.05,
-    drawdown_type=DrawdownType.BALANCE_BASED, min_trading_days=0,
+    drawdown_type=DrawdownType.BALANCE_BASED, min_trading_days=3,
     max_lot_size=None, max_contracts=None,
     instruments=[InstrumentType.FOREX, InstrumentType.CRYPTO],
     allow_overnight=True, allow_weekend=True, news_trading_allowed=False,
-    consistency_rule=True, consistency_pct=0.50, two_percent_rule=False,
+    consistency_rule=False, consistency_pct=0.0, two_percent_rule=False,
     trail_from_high_watermark=False,
-    website="the5ers.com", phase_name="5ers Growth",
-    notes="Standard 5ers rules. No news. No day > 50% of total profit."
+    website="the5ers.com", phase_name="High Stakes Phase 1",
+    notes="New High Stakes plan. 80/20 profit split. EAs allowed. No news. No time limit."
 ))
 
 _register(PropFirmProfile(
