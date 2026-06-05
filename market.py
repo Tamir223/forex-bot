@@ -82,16 +82,21 @@ def normalize_symbol(pair: str) -> str:
 
 
 def _get_live_price_yfinance(pair: str) -> dict | None:
-    """yFinance fallback for live forex price using 1m candles."""
-    ticker = YFINANCE_FOREX_MAP.get(pair.upper())
-    if not ticker:
+    """Real-time forex price via fast_info, with 1m-candle fallback."""
+    ticker_sym = YFINANCE_FOREX_MAP.get(pair.upper())
+    if not ticker_sym:
         return None
     try:
-        hist = yf.Ticker(ticker).history(period="1d", interval="1m")
-        if hist.empty:
-            return None
-        price = round(float(hist["Close"].iloc[-1]), 5)
-        logger.info(f"[market] yFinance fallback price for {pair}: {price}")
+        t = yf.Ticker(ticker_sym)
+        try:
+            price = float(t.fast_info['last_price'])
+        except Exception:
+            hist = t.history(period="1d", interval="1m")
+            if hist.empty:
+                return None
+            price = float(hist['Close'].iloc[-1])
+        price = round(price, 5)
+        logger.info(f"[market] yFinance price for {pair}: {price}")
         return {"price": price, "symbol": pair, "source": "yfinance"}
     except Exception as e:
         logger.error(f"yFinance live price error for {pair}: {e}")
@@ -113,11 +118,16 @@ def get_live_price(pair: str) -> dict:
     if upper == "XAUUSD" or upper in YFINANCE_FUTURES_MAP:
         yf_ticker = "GC=F" if upper == "XAUUSD" else YFINANCE_FUTURES_MAP[upper]
         try:
-            hist = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
-            if not hist.empty:
-                raw = round(float(hist["Close"].iloc[-1]), 2)
-                price = round(raw + _FUTURES_SPOT_OFFSET.get(upper, 0), 2)
-                return {"price": price, "symbol": pair}
+            t = yf.Ticker(yf_ticker)
+            try:
+                raw = float(t.fast_info['last_price'])
+            except Exception:
+                hist = t.history(period="1d", interval="1m")
+                if hist.empty:
+                    return None
+                raw = float(hist['Close'].iloc[-1])
+            price = round(raw + _FUTURES_SPOT_OFFSET.get(upper, 0), 2)
+            return {"price": price, "symbol": pair}
         except Exception as e:
             logger.error(f"yFinance price error for {pair}: {e}")
         return None

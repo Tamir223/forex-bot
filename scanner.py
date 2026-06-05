@@ -1326,10 +1326,10 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _spot_entry_for_dir = float(_sig_entry_m.group(1))
             _spot_price_for_dir = float(current_price)
             if direction == "SELL" and _spot_entry_for_dir <= _spot_price_for_dir:
-                logger.info(f"[scanner] {symbol} SELL entry {_spot_entry_for_dir} <= price {_spot_price_for_dir} — invalid Sell Limit, skipping")
+                logger.info(f"[scanner] {symbol} SELL entry {_spot_entry_for_dir} not above price {_spot_price_for_dir} — invalid Sell Limit")
                 return None
             if direction == "BUY" and _spot_entry_for_dir >= _spot_price_for_dir:
-                logger.info(f"[scanner] {symbol} BUY entry {_spot_entry_for_dir} >= price {_spot_price_for_dir} — invalid Buy Limit, skipping")
+                logger.info(f"[scanner] {symbol} BUY entry {_spot_entry_for_dir} not below price {_spot_price_for_dir} — invalid Buy Limit")
                 return None
 
         # Entry zone
@@ -1468,11 +1468,11 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 logger.info(f"[entry_validation] {_symbol} live_spot={_live_price} entry_spot={_entry_price} diff={abs(_live_price - _entry_price)}")
             # Direction validation — block structurally invalid limit orders
             if _live_price is not None:
-                if _direction == "BUY" and _entry_price >= _live_price:
-                    logger.info(f"[scanner] {_symbol} BUY entry {_entry_price} >= price {_live_price} — invalid for Buy Limit, blocking")
-                    return False
                 if _direction == "SELL" and _entry_price <= _live_price:
-                    logger.info(f"[scanner] {_symbol} SELL entry {_entry_price} <= price {_live_price} — invalid for Sell Limit, blocking")
+                    logger.info(f"[scanner] {_symbol} SELL entry {_entry_price} not above price {_live_price} — invalid Sell Limit")
+                    return False
+                if _direction == "BUY" and _entry_price >= _live_price:
+                    logger.info(f"[scanner] {_symbol} BUY entry {_entry_price} not below price {_live_price} — invalid Buy Limit")
                     return False
 
             if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
