@@ -81,17 +81,29 @@ if IMPORTS_OK:
     except Exception as e:
         fail("GBPUSD lot size calculation", str(e))
 
-    # XAUUSD: 0.5% of $10k = $50 risk, 12pt SL, $10/pt/lot → 50/(12×10) = 0.42
+    # XAUUSD: 0.5% of $10k = $50 risk, 12pt SL, $100/pt/lot → 50/(12×100) = 0.04
     try:
         result = _calculate_lot_size(0.5, 12, "XAUUSD", 10000.0)
         lot = float(result.split()[0]) if result else None
         dollar_risk = round(lot * 12 * PIP_VALUES["XAUUSD"], 2) if lot else 0
-        if lot is not None and abs(lot - 0.42) <= 0.01:
+        if lot is not None and abs(lot - 0.04) <= 0.01:
             ok(f"XAUUSD 0.5% 12pt: {lot} lots = ${dollar_risk:.2f} risk")
         else:
-            fail(f"XAUUSD 0.5% 12pt", f"expected 0.42, got {lot}")
+            fail(f"XAUUSD 0.5% 12pt", f"expected 0.04, got {lot}")
     except Exception as e:
         fail("XAUUSD lot size calculation", str(e))
+
+    # XAUUSD: 0.75% of $10k = $75 risk, 12pt SL, $100/pt/lot → 75/(12×100) = 0.06
+    try:
+        result = _calculate_lot_size(0.75, 12, "XAUUSD", 10000.0)
+        lot = float(result.split()[0]) if result else None
+        dollar_risk = round(lot * 12 * PIP_VALUES["XAUUSD"], 2) if lot else 0
+        if lot is not None and abs(lot - 0.06) <= 0.01:
+            ok(f"XAUUSD 0.75% 12pt: {lot} lots = ${dollar_risk:.2f} risk")
+        else:
+            fail(f"XAUUSD 0.75% 12pt", f"expected 0.06, got {lot}")
+    except Exception as e:
+        fail("XAUUSD 0.75% lot size calculation", str(e))
 
     # USDJPY: 0.5% of $10k = $50 risk, 12pip SL, $9.30/pip/lot → 50/(12×9.30) = 0.45
     try:
@@ -194,7 +206,7 @@ if IMPORTS_OK:
     pip_checks = {
         "EURUSD": 10.0,
         "GBPUSD": 10.0,
-        "XAUUSD": 10.0,
+        "XAUUSD": 100.0,
         "USDJPY": 9.30,
     }
     for pair, exp_val in pip_checks.items():

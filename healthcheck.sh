@@ -222,14 +222,23 @@ assert abs(lot - 0.33) <= 0.01, f'Expected 0.33, got {lot}'
 " 2>/dev/null
 check $? "Math: EURUSD 0.5% 15pip SL = 0.33 lots"
 
-# 29. Lot size — XAUUSD 0.5% $10k 12pt = 0.42 lots (tolerance ±0.01)
+# 29. Lot size — XAUUSD 0.5% $10k 12pt = 0.04 lots (tolerance ±0.01)
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 from claude import _calculate_lot_size
 r = _calculate_lot_size(0.5, 12, 'XAUUSD', 10000.0)
 lot = float(r.split()[0])
-assert abs(lot - 0.42) <= 0.01, f'Expected 0.42, got {lot}'
+assert abs(lot - 0.04) <= 0.01, f'Expected 0.04, got {lot}'
 " 2>/dev/null
-check $? "Math: XAUUSD 0.5% 12pt SL = 0.42 lots"
+check $? "Math: XAUUSD 0.5% 12pt SL = 0.04 lots"
+
+# 29b. Lot size — XAUUSD 0.75% $10k 12pt = 0.06 lots (tolerance ±0.01)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from claude import _calculate_lot_size
+r = _calculate_lot_size(0.75, 12, 'XAUUSD', 10000.0)
+lot = float(r.split()[0])
+assert abs(lot - 0.06) <= 0.01, f'Expected 0.06, got {lot}'
+" 2>/dev/null
+check $? "Math: XAUUSD 0.75% 12pt SL = 0.06 lots"
 
 # 30. Lot size — GBPUSD 0.75% $10k 15pip = 0.50 lots (tolerance ±0.01)
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
@@ -263,10 +272,10 @@ cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 from claude import PIP_VALUES
 assert PIP_VALUES['EURUSD'] == 10.0
 assert PIP_VALUES['GBPUSD'] == 10.0
-assert PIP_VALUES['XAUUSD'] == 10.0
+assert PIP_VALUES['XAUUSD'] == 100.0
 assert abs(PIP_VALUES['USDJPY'] - 9.30) < 0.01
 " 2>/dev/null
-check $? "Math: pip values correct (EURUSD/GBPUSD/XAUUSD=\$10, USDJPY=\$9.30)"
+check $? "Math: pip values correct (EURUSD/GBPUSD=\$10, XAUUSD=\$100, USDJPY=\$9.30)"
 
 # 34. Risk tiers correct
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
