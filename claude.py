@@ -44,6 +44,19 @@ PIP_VALUES = {
     "default": 10.0,
 }
 
+USER_PIP_VALUES = {
+    8647323622: {  # Tamir - OANDA
+        "EURUSD": 10.0, "GBPUSD": 10.0, "USDJPY": 9.3,
+        "USDCAD": 7.5, "AUDUSD": 10.0, "NZDUSD": 10.0,
+        "USDCHF": 10.5, "XAUUSD": 100.0,  # OANDA specific
+    },
+    5803919273: {  # Donald - 5ers standard
+        "EURUSD": 10.0, "GBPUSD": 10.0, "USDJPY": 9.3,
+        "USDCAD": 7.5, "AUDUSD": 10.0, "NZDUSD": 10.0,
+        "USDCHF": 10.5, "XAUUSD": 10.0,  # Standard
+    },
+}
+
 
 def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -> dict | None:
     try:
@@ -175,7 +188,8 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
                 max_c = account_state.get('max_contracts') if _is_fut(pair or "") else None
                 result['lot_size_suggestion'] = _calculate_lot_size(
                     risk_percent, sl_pts_tiered, pair,
-                    float(account_state.get('account_size', 10000)), max_c
+                    float(account_state.get('account_size', 10000)), max_c,
+                    user_id=user_id
                 )
 
         if "win_rate_context" not in result:
@@ -402,7 +416,8 @@ def _compute_sl_pts(entry_str, sl_str, pair) -> float | None:
 
 
 def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
-                        account_size: float = 10000.0, max_contracts: int = None) -> str | None:
+                        account_size: float = 10000.0, max_contracts: int = None,
+                        user_id: int = None) -> str | None:
     try:
         if sl_pts <= 0:
             return None
@@ -414,11 +429,12 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
             sizing = calculate_contracts(risk_dollar, sl_pts, pair, max_contracts)
             return format_sizing(sizing, account_size)
 
-        # Forex lot calculation
-        pip_val = PIP_VALUES.get(pair, PIP_VALUES["default"])
+        # Forex lot calculation — use user-specific pip values when available
+        _user_pips = USER_PIP_VALUES.get(user_id, {}) if user_id else {}
+        pip_val = _user_pips.get(pair) or PIP_VALUES.get(pair, PIP_VALUES["default"])
         lot = round(risk_dollar / (sl_pts * pip_val), 2)
         acct_k = int(account_size / 1000)
-        logger.info(f"[lots] pair={pair} risk=${risk_dollar:.2f} sl={sl_pts} pip_val={pip_val} lots={lot}")
+        logger.info(f"[lots] pair={pair} user={user_id} risk=${risk_dollar:.2f} sl={sl_pts} pip_val={pip_val} lots={lot}")
         return f"{lot} lots on ${acct_k}k account"
     except Exception:
         return None

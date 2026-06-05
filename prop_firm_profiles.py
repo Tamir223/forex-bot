@@ -147,6 +147,21 @@ _register(PropFirmProfile(
 ))
 
 _register(PropFirmProfile(
+    name="The5%ers $25k", short_code="5ers25k",
+    account_size=25000, profit_target=2000, profit_target_pct=0.08,
+    max_total_loss=1500, max_total_loss_pct=0.06,
+    max_daily_loss=1250, max_daily_loss_pct=0.05,
+    drawdown_type=DrawdownType.BALANCE_BASED, min_trading_days=0,
+    max_lot_size=None, max_contracts=None,
+    instruments=[InstrumentType.FOREX, InstrumentType.CRYPTO],
+    allow_overnight=True, allow_weekend=True, news_trading_allowed=False,
+    consistency_rule=True, consistency_pct=0.50, two_percent_rule=False,
+    trail_from_high_watermark=False,
+    website="the5ers.com", phase_name="5ers Growth",
+    notes="Standard 5ers rules. No news. No day > 50% of total profit."
+))
+
+_register(PropFirmProfile(
     name="The5%ers Hyper $10k", short_code="5ers10",
     account_size=10000, profit_target=800, profit_target_pct=0.08,
     max_total_loss=600, max_total_loss_pct=0.06,
@@ -275,7 +290,7 @@ _register(PropFirmProfile(
 def get_profile_menu() -> str:
     lines = ["🏢 *Select Your Prop Firm*\n", "Reply with the code for your firm:\n"]
     firms_grouped = {
-        "Forex": ["ftmo", "ftmo25", "5ers10", "5ers100"],
+        "Forex": ["ftmo", "ftmo25", "5ers25k", "5ers10", "5ers100"],
         "Futures": ["apex50", "apex150", "topstep50", "topstep150", "fundednext50", "fundednext150", "tradeify50", "tradeify150"],
     }
     for category, codes in firms_grouped.items():
