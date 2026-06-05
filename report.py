@@ -15,6 +15,24 @@ def confluence_bar(score):
     return f"{'█' * score}{'░' * (6 - score)} {score}/6"
 
 
+def _sl_dist_display(analysis: dict) -> str:
+    raw = analysis.get('stop_loss_pts')
+    if raw is None or str(raw).lower() in ("", "null", "--"):
+        return "--"
+    try:
+        val = float(raw)
+    except (ValueError, TypeError):
+        return fmt(raw)
+    pair = (analysis.get('pair') or "").upper()
+    futures = {'ES', 'MES', 'NQ', 'MNQ', 'CL', 'MCL', 'GC', 'MGC', 'RTY', 'YM', 'NG'}
+    if pair in futures or pair == 'XAUUSD':
+        return f"{val:.1f} pts"
+    elif 'JPY' in pair:
+        return f"{round(val * 100, 1)} pips"
+    else:
+        return f"{round(val * 10000, 1)} pips"
+
+
 def _risk_line(analysis: dict) -> str:
     raw = analysis.get('risk_percent')
     pct = f"{float(raw):.2f}" if raw is not None else "--"
@@ -53,7 +71,7 @@ def execute_report(analysis: dict) -> str:
         f"DECISION:   ✅ EXECUTE\n\n"
         f"📍 LEVELS\n"
         f"Entry:         {fmt(analysis.get('entry_zone'))}\n"
-        f"Stop Loss:     {fmt(analysis.get('stop_loss'))} ({fmt(analysis.get('stop_loss_pts'))} pts)\n"
+        f"Stop Loss:     {fmt(analysis.get('stop_loss'))} ({_sl_dist_display(analysis)})\n"
         f"Invalidation:  {fmt(analysis.get('invalidation_level'))}\n"
         f"TP1:           {fmt(analysis.get('tp1'))} ({fmt(analysis.get('tp1_rr'))})\n"
         f"TP2:           {fmt(analysis.get('tp2'))} ({fmt(analysis.get('tp2_rr'))})\n"
