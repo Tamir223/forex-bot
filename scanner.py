@@ -1455,20 +1455,29 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             if _live_price is not None:
                 logger.info(f"[entry_check] {_symbol} live={_live_price} entry={_entry_price} diff={abs(_live_price - _entry_price):.5f} tolerance={_tolerance}")
                 logger.info(f"[entry_validation] {_symbol} live_spot={_live_price} entry_spot={_entry_price} diff={abs(_live_price - _entry_price)}")
+            # Direction validation — block structurally invalid limit orders
+            if _live_price is not None:
+                if _direction == "BUY" and _entry_price >= _live_price:
+                    logger.info(f"[scanner] {_symbol} BUY entry {_entry_price} >= price {_live_price} — invalid for Buy Limit, blocking")
+                    return False
+                if _direction == "SELL" and _entry_price <= _live_price:
+                    logger.info(f"[scanner] {_symbol} SELL entry {_entry_price} <= price {_live_price} — invalid for Sell Limit, blocking")
+                    return False
+
             if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
                 _score = int(result.get("score", 0))
                 logger.info(f"[grade_block] score={_score} type={type(_score)} direction={_direction} live={_live_price} entry={_entry_price}")
                 if _score == 10:
-                    if _direction == "SELL" and _live_price < _entry_price:
-                        _limit_note = (
-                            f"⚠️ Entry zone passed — price already moved in your direction.\n"
-                            f"📌 LIMIT ORDER SUGGESTION: Set a Sell Limit at {_entry_price} if price retraces back to the OB zone.\n"
-                            f"Cancel limit order before 8:00 AM EDT if unfilled."
-                        )
-                    elif _direction == "BUY" and _live_price > _entry_price:
+                    if _direction == "BUY" and _live_price < _entry_price:
                         _limit_note = (
                             f"⚠️ Entry zone passed — price already moved in your direction.\n"
                             f"📌 LIMIT ORDER SUGGESTION: Set a Buy Limit at {_entry_price} if price retraces back to the OB zone.\n"
+                            f"Cancel limit order before 8:00 AM EDT if unfilled."
+                        )
+                    elif _direction == "SELL" and _live_price > _entry_price:
+                        _limit_note = (
+                            f"⚠️ Entry zone passed — price already moved in your direction.\n"
+                            f"📌 LIMIT ORDER SUGGESTION: Set a Sell Limit at {_entry_price} if price retraces back to the OB zone.\n"
                             f"Cancel limit order before 8:00 AM EDT if unfilled."
                         )
                 if _limit_note is None:
