@@ -1321,6 +1321,17 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} blocked — TP1 RR {_sig_actual_rr:.2f} below minimum 1.5")
                 return None
 
+        # Direction validation — block structurally invalid limit orders before sending
+        if _sig_entry_m and current_price:
+            _spot_entry_for_dir = float(_sig_entry_m.group(1))
+            _spot_price_for_dir = float(current_price)
+            if direction == "SELL" and _spot_entry_for_dir <= _spot_price_for_dir:
+                logger.info(f"[scanner] {symbol} SELL entry {_spot_entry_for_dir} <= price {_spot_price_for_dir} — invalid Sell Limit, skipping")
+                return None
+            if direction == "BUY" and _spot_entry_for_dir >= _spot_price_for_dir:
+                logger.info(f"[scanner] {symbol} BUY entry {_spot_entry_for_dir} >= price {_spot_price_for_dir} — invalid Buy Limit, skipping")
+                return None
+
         # Entry zone
         if ob:
             entry_check = ob["mid"]
