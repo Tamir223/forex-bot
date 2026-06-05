@@ -49,6 +49,39 @@ last_analysis = {}
 last_trade_id = {}
 signal_queue: asyncio.Queue = asyncio.Queue()
 
+
+async def _cancel_limit_not_filled(user_id: int, chat_id: str, bot):
+    """Cancel PENDING trade(s) from last 2 hours and reverse exposure tracking."""
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE trades SET result='CANCELLED'
+                       WHERE user_id=%s AND result='PENDING'
+                       AND created_at > NOW() - INTERVAL '2 hours'
+                       RETURNING risk_percent""",
+                    (user_id,)
+                )
+                rows = cur.fetchall()
+                if rows:
+                    total_risk = sum(float(r[0] or 0) for r in rows)
+                    cur.execute(
+                        """UPDATE user_state SET
+                           live_exposure = GREATEST(0, live_exposure - %s),
+                           open_trades = GREATEST(0, open_trades - %s)
+                           WHERE user_id = %s""",
+                        (total_risk, len(rows), user_id)
+                    )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"_cancel_limit_not_filled error: {e}")
+    trade_monitor.remove_trade(user_id)
+    await bot.send_message(
+        chat_id=int(chat_id),
+        text="✅ Limit order cancelled — no trade recorded. Buffer unchanged."
+    )
+
 # Deduplication cache — prevents same message being processed twice
 _seen_message_ids = set()
 MAX_SEEN_IDS = 500  # keep memory bounded
@@ -273,7 +306,15 @@ async def process_signal_queue():
                     report = execute_report(analysis)
                     if user.plan_tier == "elite":
                         report = priority_header + report
-                    await bot.send_message(chat_id=int(chat_id), text=report)
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    _grade_keyboard = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("✅ YES — Execute", callback_data="trade_yes"),
+                            InlineKeyboardButton("❌ NO — Skip", callback_data="trade_no"),
+                        ],
+                        [InlineKeyboardButton("❌ Limit Not Filled", callback_data="trade_limit_not_filled")],
+                    ])
+                    await bot.send_message(chat_id=int(chat_id), text=report, reply_markup=_grade_keyboard)
         except Exception as e:
             logger.error(f"Signal queue worker error: {e}")
         finally:
@@ -401,6 +442,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if trade_id:
                 update_trade_result(trade_id, "BREAKEVEN")
             await send(context, chat_id, "➖ Breakeven logged.")
+        elif reply in ("LIMIT NOT FILLED", "LIMIT_NOT_FILLED"):
+            await _cancel_limit_not_filled(user.id, chat_id, context.bot)
         return
     if not is_signal_message(text):
         return
@@ -533,10 +576,9 @@ async def callback_trade_button(update: Update, context: ContextTypes.DEFAULT_TY
     if not user:
         return
 
-    action = query.data  # trade_yes or trade_no
+    action = query.data
     analysis = last_analysis.get(chat_id, {})
     risk = analysis.get("risk_percent", 0.35)
-    provider = analysis.get("signal_source", "TNL Scanner")
     trade_id = last_trade_id.get(chat_id)
 
     await query.edit_message_reply_markup(reply_markup=None)
@@ -545,10 +587,15 @@ async def callback_trade_button(update: Update, context: ContextTypes.DEFAULT_TY
         if trade_id:
             update_trade_result(trade_id, "PENDING")
         log_trade_opened(user.id, risk)
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        cancel_keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("❌ Cancel Limit", callback_data="trade_cancel_limit"),
+        ]])
         await context.bot.send_message(
             chat_id=chat_id,
-            text=trade_executed() + "\n\nReply *WIN* or *LOSS* when you close the trade.",
-            parse_mode="Markdown"
+            text=trade_executed() + "\n\nReply *WIN* or *LOSS* when you close the trade.\nIf your limit order was never filled, tap Cancel Limit below.",
+            parse_mode="Markdown",
+            reply_markup=cancel_keyboard,
         )
         # Start trade monitoring
         try:
@@ -574,7 +621,7 @@ async def callback_trade_button(update: Update, context: ContextTypes.DEFAULT_TY
                     chat_id=chat_id,
                     text=f"⚠️ FRIDAY WARNING: {profile.name} does not allow weekend holding. Close before market close tonight."
                 )
-    else:
+    elif action == "trade_no":
         if trade_id:
             update_trade_result(trade_id, "SKIPPED")
         try:
@@ -589,6 +636,8 @@ async def callback_trade_button(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception as _e:
             logger.error(f"PENDING cleanup error on NO: {_e}")
         await context.bot.send_message(chat_id=chat_id, text=trade_skipped())
+    elif action in ("trade_limit_not_filled", "trade_cancel_limit"):
+        await _cancel_limit_not_filled(user.id, chat_id, context.bot)
 
 
 async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -709,12 +758,15 @@ async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE)
             if trade_id:
                 last_trade_id[chat_id] = trade_id
 
-            # Add YES/NO buttons
+            # Add YES/NO/LNF buttons
             from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-            execute_keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ YES — Execute", callback_data="trade_yes"),
-                InlineKeyboardButton("❌ NO — Skip", callback_data="trade_no"),
-            ]])
+            execute_keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ YES — Execute", callback_data="trade_yes"),
+                    InlineKeyboardButton("❌ NO — Skip", callback_data="trade_no"),
+                ],
+                [InlineKeyboardButton("❌ Limit Not Filled", callback_data="trade_limit_not_filled")],
+            ])
 
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -755,7 +807,7 @@ async def start_bot():
     app.add_handler(CommandHandler("besthours", cmd_best_hours))
     app.add_handler(CommandHandler("addaccount", cmd_addaccount))
     app.add_handler(CommandHandler("performance", cmd_performance))
-    app.add_handler(CallbackQueryHandler(callback_trade_button, pattern="^trade_(yes|no)$"))
+    app.add_handler(CallbackQueryHandler(callback_trade_button, pattern="^trade_(yes|no|limit_not_filled|cancel_limit)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("TNL Trader multi-user bot started")
     asyncio.create_task(process_signal_queue())

@@ -17,7 +17,7 @@ from futures_instruments import FUTURES_SYMBOLS
 
 FUTURES_SIGNAL_KEYWORDS = list(FUTURES_SYMBOLS)
 SIGNAL_KEYWORDS = ["BUY", "buy", "SELL", "sell", "ENTRY ZONE", "entry zone", "TYPE:"] + FUTURES_SIGNAL_KEYWORDS
-APPROVAL_KEYWORDS = ["YES", "NO", "WIN", "LOSS"]
+APPROVAL_KEYWORDS = ["YES", "NO", "WIN", "LOSS", "BREAKEVEN", "LIMIT NOT FILLED", "LIMIT_NOT_FILLED"]
 
 
 def is_signal_message(text: str) -> bool:
