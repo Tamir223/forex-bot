@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 # All functions that need pair-specific tolerances should call get_pip_spec().
 
 PIP_SPECS = {
-    "EURUSD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.0007},  # 12 pips
-    "GBPUSD": {"pip": 0.0001, "min_sl": 0.0015, "min_atr": 0.0008},  # 15 pips — most volatile forex
-    "AUDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0006},  # 10 pips
-    "NZDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0006},  # 10 pips
+    "EURUSD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.0005},  # 12 pips
+    "GBPUSD": {"pip": 0.0001, "min_sl": 0.0015, "min_atr": 0.0006},  # 15 pips — most volatile forex
+    "AUDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0005},  # 10 pips
+    "NZDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0005},  # 10 pips
     "USDCAD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.0007},  # 12 pips
     "USDCHF": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0007},  # 10 pips
     "USDJPY": {"pip": 0.01,   "min_sl": 0.12,   "min_atr": 0.05},    # 12 pips JPY
