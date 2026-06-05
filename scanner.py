@@ -132,8 +132,6 @@ def _max_sl_dist(symbol: str) -> float:
         return MAX_SL_DISTANCE["jpy_forex"]
     return MAX_SL_DISTANCE["default_forex"]
 
-# Tracks last known bias per symbol for shift detection
-_last_bias: dict = {}
 
 # News-resumption alert state — fires once when a news block clears
 _news_was_blocked: bool = False
@@ -1783,8 +1781,8 @@ async def check_bias_shifts(symbols: list, bot, user_chat_ids: list):
     Fires a Telegram alert only when the bias direction has changed AND
     intraday_override is True (strong intraday candle confirms the shift).
     """
-    global _last_bias
-    from scanner_improvements import get_daily_bias
+    import time
+    from scanner_improvements import get_daily_bias, _previous_bias, _last_bias_shift
 
     for symbol in symbols:
         try:
@@ -1793,12 +1791,15 @@ async def check_bias_shifts(symbols: list, bot, user_chat_ids: list):
             intraday_override = b.get("intraday_override", False)
             intraday_move_pct = b.get("intraday_move_pct", 0.0)
 
-            old_bias = _last_bias.get(symbol)
+            old_bias = _previous_bias.get(symbol)
 
             if (old_bias is not None
                     and old_bias != new_bias
                     and new_bias != "neutral"
                     and intraday_override):
+                if time.time() - _last_bias_shift.get(symbol, 0) < 1800:
+                    _previous_bias[symbol] = new_bias
+                    continue
                 msg = (
                     f"🔄 BIAS SHIFT — {symbol}\n"
                     f"{old_bias.upper()} → {new_bias.upper()}\n"
@@ -1810,9 +1811,10 @@ async def check_bias_shifts(symbols: list, bot, user_chat_ids: list):
                         await bot.send_message(chat_id=chat_id, text=msg)
                     except Exception as _se:
                         logger.error(f"[bias_shift] Send error to {chat_id}: {_se}")
+                _last_bias_shift[symbol] = time.time()
                 logger.info(f"[bias_shift] {symbol}: {old_bias} → {new_bias} (intraday {intraday_move_pct:.2f}%)")
 
-            _last_bias[symbol] = new_bias
+            _previous_bias[symbol] = new_bias
 
         except Exception as e:
             logger.error(f"[bias_shift] Error checking {symbol}: {e}")

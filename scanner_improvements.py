@@ -1076,6 +1076,9 @@ _FOREX_YFINANCE_MAP = {
     'USDCHF': 'USDCHF=X',
 }
 
+_previous_bias: dict = {}    # {symbol: bias_string} — last known bias per symbol
+_last_bias_shift: dict = {}  # {symbol: timestamp}   — last bias-shift alert per symbol
+
 
 def get_daily_bias(symbol: str, candles: list = None) -> dict:
     """
