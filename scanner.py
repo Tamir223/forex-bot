@@ -1209,6 +1209,23 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(f"[scanner] {symbol} no actionable direction — skipping")
             return None
 
+        # ── TIER 3.2: MOMENTUM CONFIRMATION ──────────────────────────────────
+        # candles are newest-first; last 3 = candles[0..2]
+        if len(candles) >= 3:
+            _c0, _c1, _c2 = candles[0], candles[1], candles[2]
+            _all_bullish = all(c["close"] > c["open"] for c in (_c0, _c1, _c2))
+            _all_bearish = all(c["close"] < c["open"] for c in (_c0, _c1, _c2))
+            if direction == "SELL" and _all_bullish:
+                logger.info(f"[scanner] {symbol} SELL signal but last 3 candles all bullish — -2 momentum penalty")
+                score_data["score"] = max(0, score_data["score"] - 2)
+                score_data["factors"] = score_data.get("factors", []) + ["⚠️ Counter-momentum: last 3 candles bullish vs SELL direction"]
+            elif direction == "BUY" and _all_bearish:
+                logger.info(f"[scanner] {symbol} BUY signal but last 3 candles all bearish — -2 momentum penalty")
+                score_data["score"] = max(0, score_data["score"] - 2)
+                score_data["factors"] = score_data.get("factors", []) + ["⚠️ Counter-momentum: last 3 candles bearish vs BUY direction"]
+            final_score = score_data["score"]
+            score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
+
         # ── TIER 3.5: HARD BIAS FILTER ────────────────────────────────────────
         # Reuses already-fetched daily_bias — no extra API call
         try:
