@@ -47,10 +47,7 @@ NEWS_BLOCK_MINUTES_BEFORE = 45
 NEWS_BLOCK_MINUTES_AFTER  = 30
 
 # Minimal fallback — only used when ALL live feeds fail
-FALLBACK_NEWS = [
-    (8,  30, "US NFP/CPI/PCE"),
-    (13, 30, "US Fed/FOMC"),
-]
+FALLBACK_NEWS = []
 
 # 60-minute cache for today's event list
 _FF_CACHE: dict = {"events": None, "fetched_at": 0.0}
