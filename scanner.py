@@ -194,13 +194,20 @@ def is_scan_window() -> bool:
 def get_session_interval() -> int:
     """
     Return scan interval in seconds based on current session.
-    Active session 07:00-21:00 UTC (London open + NY session) = every 30 seconds.
-    Off hours 21:00-07:00 UTC = every 15 minutes.
+    21:00-00:00 UTC — Asian open (AUDUSD, NZDUSD, USDJPY) = 1 minute
+    00:00-02:00 UTC — late Asian = 2 minutes
+    02:00-07:00 UTC — dead hours = 15 minutes
+    07:00-21:00 UTC — London + NY = 30 seconds
     """
     hour = datetime.now(timezone.utc).hour
     if 7 <= hour < 21:
-        return 30    # 30 seconds during active session
-    return 900       # 15 minutes off hours
+        return 30    # London + NY — fastest
+    elif hour < 2:
+        return 120   # late Asian — slower
+    elif hour < 7:
+        return 900   # dead hours — slowest
+    else:
+        return 60    # 21:00-00:00 Asian open — medium
 
 
 def get_current_session() -> str:
