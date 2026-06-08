@@ -8,7 +8,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timezone, date
-from database import reset_weekly_losses_all, get_all_active_users, get_state, get_conn
+from database import reset_weekly_losses_all, get_all_active_users, get_conn
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +18,8 @@ DAILY_LOSS_LIMIT_DOLLARS = 500.0
 async def send_eod_report(bot_token: str):
     """Send end-of-day challenge report to all active users"""
     from telegram import Bot
-    from database import load_challenge_state, get_user_firm
-    from drawdown_tracker import state_from_json
+    from database import load_challenge_state, save_challenge_state, get_user_firm
+    from drawdown_tracker import state_from_json, state_to_json, _rollover_day
     from prop_firm_profiles import get_profile
 
     bot = Bot(token=bot_token)
@@ -30,8 +30,6 @@ async def send_eod_report(bot_token: str):
         if not user.telegram_chat_id:
             continue
         try:
-            user_state = get_state(user.id)
-
             # Load challenge state — the only reliable source of P&L in dollars
             firm_code = get_user_firm(user.id)
             profile = get_profile(firm_code)
@@ -39,6 +37,11 @@ async def send_eod_report(bot_token: str):
 
             if challenge_json:
                 ch = state_from_json(challenge_json)
+                # Roll over daily stats if this is a new day
+                today_str = today.isoformat()
+                if ch.today_date != today_str:
+                    _rollover_day(ch, profile)
+                    save_challenge_state(user.id, firm_code, state_to_json(ch))
                 daily_pnl_dollars = ch.today_pnl
                 challenge_pnl_dollars = ch.total_pnl
                 account_size = ch.account_size or (profile.account_size if profile else 10000.0)
@@ -53,21 +56,27 @@ async def send_eod_report(bot_token: str):
                 profit_target_dollars = profile.profit_target if profile else 1000.0
                 target_balance = account_size + profit_target_dollars
 
-            # Blocked trades today
+            # Trades taken and blocked today — queried directly from DB filtered by CURRENT_DATE
+            trades_taken_today = 0
             blocked_today = 0
             try:
                 with get_conn() as conn:
                     with conn.cursor() as cur:
                         cur.execute(
-                            """SELECT COUNT(*) AS cnt FROM trades
-                               WHERE user_id = %s AND result = 'BLOCKED'
-                               AND created_at::date = %s""",
-                            (user.id, today)
+                            """SELECT
+                                 COUNT(*) FILTER (WHERE result != 'BLOCKED') AS taken,
+                                 COUNT(*) FILTER (WHERE result = 'BLOCKED')  AS blocked
+                               FROM trades
+                               WHERE user_id = %s
+                                 AND DATE(created_at AT TIME ZONE 'UTC') = CURRENT_DATE""",
+                            (user.id,)
                         )
                         row = cur.fetchone()
-                        blocked_today = row["cnt"] if row else 0
+                        if row:
+                            trades_taken_today = row["taken"] or 0
+                            blocked_today = row["blocked"] or 0
             except Exception as e:
-                logger.error(f"Blocked count query error for user {user.id}: {e}")
+                logger.error(f"Daily trade count query error for user {user.id}: {e}")
 
             daily_pnl_pct = (daily_pnl_dollars / account_size * 100) if account_size else 0.0
             challenge_pnl_pct = (challenge_pnl_dollars / account_size * 100) if account_size else 0.0
@@ -81,7 +90,7 @@ async def send_eod_report(bot_token: str):
             msg = (
                 f"📋 END OF DAY REPORT — {today.strftime('%Y-%m-%d')}\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"Trades taken:     {user_state.trades_today}\n"
+                f"Trades taken:     {trades_taken_today}\n"
                 f"Trades blocked:   {blocked_today}\n"
                 f"Daily P&L:        {daily_sign}${daily_pnl_dollars:,.2f} ({daily_sign}{daily_pnl_pct:.2f}%)\n"
                 f"Challenge P&L:    {ch_sign}${challenge_pnl_dollars:,.2f} ({ch_sign}{challenge_pnl_pct:.2f}%)\n"

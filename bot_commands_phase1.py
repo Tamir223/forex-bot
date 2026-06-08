@@ -8,8 +8,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from prop_firm_profiles import get_profile, get_profile_menu, get_profile_summary, PROFILES
-from drawdown_tracker import new_state, state_to_json, state_from_json, record_trade, get_status_report
-from database import get_user_by_chat_id, set_user_firm, get_user_firm, save_challenge_state, load_challenge_state, reset_challenge_state, get_recent_trades
+from datetime import date
+from drawdown_tracker import new_state, state_to_json, state_from_json, record_trade, get_status_report, _rollover_day
+from database import get_user_by_chat_id, set_user_firm, get_user_firm, save_challenge_state, load_challenge_state, reset_challenge_state, get_recent_trades, get_conn
 
 logger = logging.getLogger(__name__)
 
@@ -81,12 +82,35 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not profile:
         await update.message.reply_text("❌ Invalid firm profile. Use /challenge to restart.")
         return
+
+    # Roll over daily stats if this is a new day so today's values start at zero
+    if state.today_date != date.today().isoformat():
+        _rollover_day(state, profile)
+        save_challenge_state(user.id, state.firm_code, state_to_json(state))
+
+    # Trades taken today — queried directly from DB filtered by CURRENT_DATE
+    trades_today_count = 0
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT COUNT(*) AS cnt FROM trades
+                       WHERE user_id = %s
+                         AND result != 'BLOCKED'
+                         AND DATE(created_at AT TIME ZONE 'UTC') = CURRENT_DATE""",
+                    (user.id,)
+                )
+                row = cur.fetchone()
+                trades_today_count = row["cnt"] if row else 0
+    except Exception:
+        trades_today_count = state.trades_today
+
     from drawdown_tracker import DrawdownTracker
     dt = DrawdownTracker()
     losses_today = dt.get_losses_today(user.id)
     paused, pause_reason = dt.is_signals_paused(user.id)
     status_text = get_status_report(state, profile)
-    extra = [f"\n📊 Trades Today: {state.trades_today}"]
+    extra = [f"\n📊 Trades Today: {trades_today_count}"]
     if losses_today > 0:
         extra.append(f"❌ Losses Today: {losses_today}")
     if paused:
