@@ -76,110 +76,114 @@ def fetch_forexfactory_today() -> list:
 
     events: list = []
 
-    # ── Strategy 1: ForexFactory HTML calendar ───────────────────────────────
-    try:
-        from bs4 import BeautifulSoup
-        resp = requests.get(
-            "https://www.forexfactory.com/calendar.php?day=today",
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-            },
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, "html.parser")
-            table = soup.find("table", class_="calendar__table")
-            if table:
-                today_date = now.date()
-                logger.info(f"[news] Today is: {today_date}")
-                logger.info(f"[news] Filtering for: {today_date}")
+    # ── Strategy 1: ForexFactory HTML calendar (2 attempts, 5s apart) ──────────
+    for _attempt in range(2):
+        try:
+            from bs4 import BeautifulSoup
+            resp = requests.get(
+                "https://www.forexfactory.com/calendar.php?day=today",
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.5",
+                },
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                table = soup.find("table", class_="calendar__table")
+                if table:
+                    today_date = now.date()
+                    logger.info(f"[news] Today is: {today_date}")
+                    logger.info(f"[news] Filtering for: {today_date}")
 
-                in_today = False      # only collect rows under today's date header
-                current_time_str = ""
+                    in_today = False      # only collect rows under today's date header
+                    current_time_str = ""
 
-                for row in table.find_all("tr"):
-                    row_classes = row.get("class", [])
+                    for row in table.find_all("tr"):
+                        row_classes = row.get("class", [])
 
-                    # New-day header row — update which date section we're in
-                    if "calendar__row--new-day" in row_classes:
-                        date_td = row.find("td", class_="calendar__date")
-                        if date_td:
-                            raw = date_td.get_text(strip=True).replace("\xa0", "")
-                            try:
-                                row_date = datetime.strptime(
-                                    f"{raw} {today_date.year}", "%a%b %d %Y"
-                                ).date()
-                                in_today = (row_date == today_date)
-                                current_time_str = ""  # reset time on each new day
-                            except Exception:
-                                in_today = False
-                        # Also read the time from this first row of the day
+                        # New-day header row — update which date section we're in
+                        if "calendar__row--new-day" in row_classes:
+                            date_td = row.find("td", class_="calendar__date")
+                            if date_td:
+                                raw = date_td.get_text(strip=True).replace("\xa0", "")
+                                try:
+                                    row_date = datetime.strptime(
+                                        f"{raw} {today_date.year}", "%a%b %d %Y"
+                                    ).date()
+                                    in_today = (row_date == today_date)
+                                    current_time_str = ""  # reset time on each new day
+                                except Exception:
+                                    in_today = False
+                            # Also read the time from this first row of the day
+                            time_td = row.find("td", class_="calendar__time")
+                            if time_td and in_today:
+                                t_text = time_td.get_text(strip=True).replace("\xa0", "").strip()
+                                if t_text and t_text not in ("Tentative", "All Day", ""):
+                                    current_time_str = t_text
+
+                        if not in_today:
+                            continue
+
+                        if "calendar__row" not in row_classes:
+                            continue
+
+                        # Only red-folder (high-impact) rows
+                        impact_td = row.find("td", class_="calendar__impact")
+                        if not impact_td:
+                            continue
+                        if not impact_td.find(class_=lambda c: c and "red" in str(c).lower()):
+                            continue
+
+                        # Time cell (may be blank — carry forward from previous row)
                         time_td = row.find("td", class_="calendar__time")
-                        if time_td and in_today:
+                        if time_td:
                             t_text = time_td.get_text(strip=True).replace("\xa0", "").strip()
                             if t_text and t_text not in ("Tentative", "All Day", ""):
                                 current_time_str = t_text
 
-                    if not in_today:
-                        continue
+                        if not current_time_str or current_time_str in ("Tentative", "All Day"):
+                            continue
 
-                    if "calendar__row" not in row_classes:
-                        continue
+                        cur_td = row.find("td", class_="calendar__currency")
+                        currency = cur_td.get_text(strip=True) if cur_td else ""
 
-                    # Only red-folder (high-impact) rows
-                    impact_td = row.find("td", class_="calendar__impact")
-                    if not impact_td:
-                        continue
-                    if not impact_td.find(class_=lambda c: c and "red" in str(c).lower()):
-                        continue
+                        ev_td = row.find("td", class_="calendar__event")
+                        event_title = ""
+                        if ev_td:
+                            title_el = ev_td.find(class_="calendar__event-title")
+                            event_title = (title_el or ev_td).get_text(strip=True)
 
-                    # Time cell (may be blank — carry forward from previous row)
-                    time_td = row.find("td", class_="calendar__time")
-                    if time_td:
-                        t_text = time_td.get_text(strip=True).replace("\xa0", "").strip()
-                        if t_text and t_text not in ("Tentative", "All Day", ""):
-                            current_time_str = t_text
+                        try:
+                            t = datetime.strptime(current_time_str.upper(), "%I:%M%p")
+                            utc_min = _et_to_utc_minutes(t.hour, t.minute)
+                            utc_h, utc_m = divmod(utc_min, 60)
+                            events.append({
+                                "time_utc": now.replace(hour=utc_h, minute=utc_m, second=0, microsecond=0),
+                                "currency": currency,
+                                "event": event_title,
+                                "impact": "high",
+                            })
+                        except Exception:
+                            continue
 
-                    if not current_time_str or current_time_str in ("Tentative", "All Day"):
-                        continue
+            if events:
+                logger.info(f"[news] ForexFactory HTML: {len(events)} high-impact events today (attempt {_attempt + 1})")
+                for e in events:
+                    logger.info(f"[news]  {e['time_utc'].strftime('%H:%M UTC')}  {e['currency']}  {e['event']}")
+                _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
+                return events
+            break  # request succeeded but no events — fall through to Strategy 2
 
-                    cur_td = row.find("td", class_="calendar__currency")
-                    currency = cur_td.get_text(strip=True) if cur_td else ""
-
-                    ev_td = row.find("td", class_="calendar__event")
-                    event_title = ""
-                    if ev_td:
-                        title_el = ev_td.find(class_="calendar__event-title")
-                        event_title = (title_el or ev_td).get_text(strip=True)
-
-                    try:
-                        t = datetime.strptime(current_time_str.upper(), "%I:%M%p")
-                        utc_min = _et_to_utc_minutes(t.hour, t.minute)
-                        utc_h, utc_m = divmod(utc_min, 60)
-                        events.append({
-                            "time_utc": now.replace(hour=utc_h, minute=utc_m, second=0, microsecond=0),
-                            "currency": currency,
-                            "event": event_title,
-                            "impact": "high",
-                        })
-                    except Exception:
-                        continue
-
-        if events:
-            logger.info(f"[news] ForexFactory HTML: {len(events)} high-impact events today")
-            for e in events:
-                logger.info(f"[news]  {e['time_utc'].strftime('%H:%M UTC')}  {e['currency']}  {e['event']}")
-            _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
-            return events
-
-    except Exception as _e:
-        logger.debug(f"[news] FF HTML fetch failed: {_e}")
+        except Exception as _e:
+            logger.debug(f"[news] FF HTML fetch failed (attempt {_attempt + 1}): {_e}")
+            if _attempt == 0:
+                _t.sleep(5)
 
     # ── Strategy 2: nfs.faireconomy.media JSON feed ──────────────────────────
     try:
