@@ -658,12 +658,52 @@ def get_htf_bias(symbol: str, candles_1h: list = None, candles_4h: list = None, 
     return result
 
 
+def detect_trend_strength(candles: list) -> tuple:
+    """
+    Count consecutive same-direction candles from most recent (newest-first list).
+    Returns (count, direction) where direction is 'bullish' or 'bearish'.
+    """
+    if not candles:
+        return 0, ""
+    first = candles[0]
+    if first["close"] == first["open"]:
+        return 0, ""
+    streak_dir = "bullish" if first["close"] > first["open"] else "bearish"
+    count = 0
+    for c in candles:
+        if streak_dir == "bullish" and c["close"] > c["open"]:
+            count += 1
+        elif streak_dir == "bearish" and c["close"] < c["open"]:
+            count += 1
+        else:
+            break
+    return count, streak_dir
+
+
+def detect_breakout(candles: list, direction: str) -> bool:
+    """
+    Returns True when the most recent close breaks beyond the last 5 candles' extremes:
+    BUY  — close above the highest high of candles[1..5]
+    SELL — close below the lowest low of candles[1..5]
+    """
+    if not candles or len(candles) < 6:
+        return False
+    current_close = candles[0]["close"]
+    prev5 = candles[1:6]
+    if direction == "BUY":
+        return current_close > max(c["high"] for c in prev5)
+    if direction == "SELL":
+        return current_close < min(c["low"] for c in prev5)
+    return False
+
+
 def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None, candles: list = None, symbol: str = None, candles_1h: list = None, candles_4h: list = None, daily_bias: dict = None) -> dict:
     """
     Score the overall setup quality. Returns score 0-10 and recommendation.
     """
     score = 0
     factors = []
+    _trend_streak = 0
 
     trend = structure.get("trend", "unclear")
 
@@ -830,6 +870,21 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
                 score = max(0, score - 1)
             factors.append(pd_desc)
 
+        # Trend strength bonus — consecutive same-direction candles confirm momentum
+        _trend_streak, _ts_dir = detect_trend_strength(candles)
+        if _trend_streak >= 3 and (
+            (direction_str == "BUY" and _ts_dir == "bullish") or
+            (direction_str == "SELL" and _ts_dir == "bearish")
+        ):
+            _ts_bonus = 3 if _trend_streak >= 5 else 2 if _trend_streak == 4 else 1
+            score += _ts_bonus
+            factors.append(f"Trend strength: {_trend_streak} consecutive candles in signal direction (+{_ts_bonus})")
+
+        # Breakout detection — current close beyond last 5 candle extremes
+        if detect_breakout(candles, direction_str):
+            score += 2
+            factors.append("Breakout: price closes beyond last 5 candle extremes (+2)")
+
     # Kill zone timing bonus — peak institutional activity windows
     _kz_ok, _kz_desc = is_kill_zone(symbol or "")
     if _kz_ok:
@@ -866,6 +921,7 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         "factors": factors,
         "direction": "BUY" if trend == "bullish" else "SELL" if trend == "bearish" else None,
         "bias_unknown": _bias_unknown,
+        "trend_streak": _trend_streak,
     }
 
 
@@ -880,13 +936,18 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     score = score_data.get("score", 0)
     factors = score_data.get("factors", [])
 
+    # BREAKOUT ENTRY mode: 3+ consecutive candles in signal direction AND high-confidence score
+    breakout_mode = score_data.get("trend_streak", 0) >= 3 and score >= 9
+
     # Calculate entry, stop loss, and targets
     from futures_instruments import is_futures, get_spec
     spec = get_spec(symbol) if is_futures(symbol) else None
 
     if direction == "BUY":
-        # Entry: if price is inside OB/FVG zone use current price, else use zone mid (limit order)
-        if ob and ob["type"] == "bullish_ob":
+        if breakout_mode:
+            entry = price
+            sl = round(price * 0.998, 5) if not spec else round(price - spec["typical_sl_pts"], 3)
+        elif ob and ob["type"] == "bullish_ob":
             entry = price if ob["low"] <= price <= ob["high"] else ob["mid"]
             sl = round(ob["low"] - (ob["high"] - ob["low"]) * 0.1, 5)
         elif fvg and fvg["type"] == "bullish_fvg":
@@ -907,8 +968,10 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         logger.info(f"[build_signal] {symbol} BUY sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} max={_max_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     else:  # SELL
-        # Entry: if price is inside OB/FVG zone use current price, else use zone mid (limit order)
-        if ob and ob["type"] == "bearish_ob":
+        if breakout_mode:
+            entry = price
+            sl = round(price * 1.002, 5) if not spec else round(price + spec["typical_sl_pts"], 3)
+        elif ob and ob["type"] == "bearish_ob":
             entry = price if ob["low"] <= price <= ob["high"] else ob["mid"]
             sl = round(ob["high"] + (ob["high"] - ob["low"]) * 0.1, 5)
         elif fvg and fvg["type"] == "bearish_fvg":
@@ -930,6 +993,8 @@ def build_auto_signal(symbol: str, direction: str, price: float,
 
     # Build setup description
     setup_parts = []
+    if breakout_mode:
+        setup_parts.append("BREAKOUT ENTRY")
     if ob:
         setup_parts.append("Order Block Retest")
     if fvg:
@@ -978,6 +1043,10 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     tp3 = rp(tp3)
     logger.info(f"[build_signal] {symbol} {direction} entry={entry} sl={sl} tp1={tp1} domain=spot")
 
+    breakout_note = (
+        f"\nNote: Strong momentum — consider market order at current price"
+        if breakout_mode else ""
+    )
     signal = (
         f"{symbol} {direction} SIGNAL\n"
         f"Provider: TNL Scanner\n"
@@ -990,6 +1059,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         f"TP3: {tp3}\n"
         f"Trend: {trend_dir}\n"
         f"Confirmation: Yes — {score}/10 score, {htf_str}, {factor_str}"
+        f"{breakout_note}"
     )
     return signal
 
