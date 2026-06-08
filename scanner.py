@@ -376,11 +376,12 @@ def detect_structure(candles: list) -> dict:
     }
 
 
-def detect_order_block(candles: list, trend: str, max_candles_back: int = None) -> dict | None:
+def detect_order_block(candles: list, trend: str, max_candles_back: int = None, symbol: str = "") -> dict | None:
     """
     Detect the most recent order block within max_candles_back candles.
     Bullish OB: last bearish candle before a strong bullish move.
     Bearish OB: last bullish candle before a strong bearish move.
+    Also scores OB quality by measuring displacement from OB mid to the breakout candle.
     """
     if not candles or len(candles) < 5:
         return None
@@ -394,6 +395,19 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None) 
         _candles_since_open = int((_now - _session_open).total_seconds() / 60 / 15)
         max_candles_back = min(max(_candles_since_open, 5), 96)
 
+    # Displacement thresholds: XAUUSD/futures use points, forex uses price (pips)
+    _is_pts = symbol.upper() == "XAUUSD" or symbol.upper() in YFINANCE_FUTURES_MAP
+    _strong_disp = 30.0 if _is_pts else 0.003
+    _valid_disp  = 15.0 if _is_pts else 0.0015
+
+    def _ob_quality(ob_mid: float, breakout_close: float) -> tuple:
+        disp = abs(breakout_close - ob_mid)
+        if disp > _strong_disp:
+            return disp, "strong"
+        if disp >= _valid_disp:
+            return disp, "valid"
+        return disp, "weak"
+
     try:
         if trend == "bullish":
             # Find last bearish candle before current rally
@@ -402,13 +416,17 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None) 
                 if c["close"] < c["open"]:  # bearish candle
                     # Check if followed by bullish move
                     if candles[i-1]["close"] > c["high"]:
+                        _mid = round((c["high"] + c["low"]) / 2, 5)
+                        _disp, _quality = _ob_quality(_mid, candles[i-1]["close"])
                         return {
                             "type": "bullish_ob",
                             "high": round(c["high"], 5),
                             "low": round(c["low"], 5),
-                            "mid": round((c["high"] + c["low"]) / 2, 5),
+                            "mid": _mid,
                             "datetime": c["datetime"],
                             "strength": "strong" if (c["high"] - c["low"]) > (candles[0]["high"] - candles[0]["low"]) else "normal",
+                            "displacement": round(_disp, 5),
+                            "ob_quality": _quality,
                         }
 
         elif trend == "bearish":
@@ -418,13 +436,17 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None) 
                 if c["close"] > c["open"]:  # bullish candle
                     # Check if followed by bearish move
                     if candles[i-1]["close"] < c["low"]:
+                        _mid = round((c["high"] + c["low"]) / 2, 5)
+                        _disp, _quality = _ob_quality(_mid, candles[i-1]["close"])
                         return {
                             "type": "bearish_ob",
                             "high": round(c["high"], 5),
                             "low": round(c["low"], 5),
-                            "mid": round((c["high"] + c["low"]) / 2, 5),
+                            "mid": _mid,
                             "datetime": c["datetime"],
                             "strength": "strong" if (c["high"] - c["low"]) > (candles[0]["high"] - candles[0]["low"]) else "normal",
+                            "displacement": round(_disp, 5),
+                            "ob_quality": _quality,
                         }
     except Exception as e:
         logger.error(f"OB detection error: {e}")
@@ -738,6 +760,15 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
                 else:
                     score += 1
                 factors.append(_mtf_desc)
+
+        # OB displacement quality — institutional move away from the zone
+        _ob_q = ob.get("ob_quality")
+        if _ob_q == "strong":
+            score += 1
+            factors.append("Strong OB displacement — institutional confirmation (+1)")
+        elif _ob_q == "weak":
+            score = max(0, score - 1)
+            factors.append("⚠️ Weak OB displacement — low institutional conviction (-1)")
 
     if fvg:
         score += 2
@@ -1278,7 +1309,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         if trend == "unclear":
             return None
 
-        ob = detect_order_block(candles, trend)
+        ob = detect_order_block(candles, trend, symbol=symbol)
         fvg = detect_fvg(candles, symbol)
 
         # Single daily_bias fetch — reused for direction fallback, TIER 3.5 block, and score_setup
