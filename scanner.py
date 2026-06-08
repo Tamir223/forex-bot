@@ -1300,6 +1300,31 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             final_score = score_data["score"]
             score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
 
+        # ── TIER 3.3: 2-CANDLE MOMENTUM CHECK ────────────────────────────────
+        # Blocks signals where the 2 most recent closed candles directly contradict direction.
+        if len(candles) >= 2:
+            _m0, _m1 = candles[0], candles[1]
+            _two_bullish = _m0["close"] > _m0["open"] and _m1["close"] > _m1["open"]
+            _two_bearish = _m0["close"] < _m0["open"] and _m1["close"] < _m1["open"]
+            if direction == "SELL" and _two_bullish:
+                logger.info(f"[scanner] {symbol} SELL signal but last 2 candles bullish — -2 penalty")
+                score_data["score"] = max(0, score_data["score"] - 2)
+                score_data["factors"] = score_data.get("factors", []) + ["⚠️ Momentum against SELL — 2 consecutive bullish candles"]
+                final_score = score_data["score"]
+                score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
+                if final_score < 7:
+                    logger.info(f"[scanner] {symbol} blocked — score {final_score} after 2-candle momentum penalty")
+                    return None
+            elif direction == "BUY" and _two_bearish:
+                logger.info(f"[scanner] {symbol} BUY signal but last 2 candles bearish — -2 penalty")
+                score_data["score"] = max(0, score_data["score"] - 2)
+                score_data["factors"] = score_data.get("factors", []) + ["⚠️ Momentum against BUY — 2 consecutive bearish candles"]
+                final_score = score_data["score"]
+                score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
+                if final_score < 7:
+                    logger.info(f"[scanner] {symbol} blocked — score {final_score} after 2-candle momentum penalty")
+                    return None
+
         # ── TIER 3.4: PRICE ACTION VS BIAS ───────────────────────────────────
         _pa = check_price_action_vs_bias(candles, direction, daily_bias)
         if _pa["updated_bias"] is not daily_bias:
