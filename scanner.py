@@ -1469,32 +1469,36 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} blocked — score {final_score} after PA conflict penalty")
                 return None
 
-        # ── TIER 3.5: HARD BIAS FILTER ────────────────────────────────────────
-        # Reuses already-fetched daily_bias — no extra API call
+        # ── TIER 3.5: BIAS CONFLICT / CONFIRMATION ────────────────────────────
+        # Uses daily_bias only — htf_bias is for alignment bonuses, not conflict
         try:
-            _bias_dir       = daily_bias.get("bias", "neutral")
-            _bias_confirmed = daily_bias.get("confirmed", False)
-            _bias_strength  = daily_bias.get("strength", "weak")
-            _conflict = (
-                (direction == "BUY"  and _bias_dir == "bearish") or
-                (direction == "SELL" and _bias_dir == "bullish")
-            )
-            if _conflict and _bias_confirmed:
-                if _bias_strength in ("moderate", "strong"):
-                    logger.info(
-                        f"[scanner] {symbol} {direction} blocked — confirmed {_bias_dir} bias conflict"
-                    )
-                    return None
-                else:  # weak confirmed bias — penalty but allow if score >= 9
-                    score_data["score"] = max(0, score_data["score"] - 2)
-                    final_score = score_data["score"]
-                    score_data["recommendation"] = (
-                        "STRONG" if final_score >= 8 else
-                        "MODERATE" if final_score >= 5 else "WEAK"
-                    )
-                    score_data["factors"] = score_data.get("factors", []) + [
-                        "⚠️ Confirmed bias conflict (weak) — -2 penalty"
-                    ]
+            _bias_val = daily_bias.get("bias", "neutral")
+            if _bias_val == "neutral":
+                pass  # neutral — no penalty, no bonus
+            elif _bias_val == "bullish" and direction == "SELL":
+                score_data["score"] = max(0, score_data["score"] - 2)
+                score_data["factors"] = score_data.get("factors", []) + [
+                    "⚠️ Confirmed bias conflict — daily bias BULLISH vs SELL signal"
+                ]
+                logger.info(f"[scanner] {symbol} SELL — daily bias BULLISH conflict, -2")
+            elif _bias_val == "bearish" and direction == "BUY":
+                score_data["score"] = max(0, score_data["score"] - 2)
+                score_data["factors"] = score_data.get("factors", []) + [
+                    "⚠️ Confirmed bias conflict — daily bias BEARISH vs BUY signal"
+                ]
+                logger.info(f"[scanner] {symbol} BUY — daily bias BEARISH conflict, -2")
+            elif _bias_val == "bullish" and direction == "BUY":
+                score_data["score"] = min(10, score_data["score"] + 1)
+                score_data["factors"] = score_data.get("factors", []) + [
+                    "✅ Daily bias bullish confirms BUY direction"
+                ]
+            elif _bias_val == "bearish" and direction == "SELL":
+                score_data["score"] = min(10, score_data["score"] + 1)
+                score_data["factors"] = score_data.get("factors", []) + [
+                    "✅ Daily bias bearish confirms SELL direction"
+                ]
+            final_score = score_data["score"]
+            score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
         except Exception:
             pass
 
