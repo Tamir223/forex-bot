@@ -1650,6 +1650,9 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         if _paused:
             logger.info(f"[auto-grade] {user.id} signals paused — {_pause_reason}")
             return False
+        _loss_warning = _pause_reason if (not _paused and _pause_reason) else None
+        if _loss_warning:
+            logger.info(f"[auto-grade] {user.id} loss warning — {_loss_warning}")
 
         signal_text = result.get("auto_signal", "")
         if not signal_text:
@@ -1807,6 +1810,8 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             priority_header = f"⚡ AUTO-GRADED — {profile.name}\n🏆 Score {result['score']}/10 — {result['recommendation']}\n"
         else:
             priority_header = f"⚡ AUTO-GRADED — Score {result['score']}/10\n"
+        if _loss_warning:
+            priority_header = f"{_loss_warning}\n\n{priority_header}"
 
         decision = analysis.get("decision", "").upper()
         grade = analysis.get("grade", "")

@@ -49,11 +49,17 @@ class DrawdownTracker:
                 del _resume_overrides[user_id]
 
         losses_today = self.get_losses_today(user_id)
-        if losses_today >= 2:
-            return True, "2 losses today — signals paused. Type /resume to continue trading."
-
         from database import get_state
         state = get_state(user_id)
+
+        if losses_today >= 2:
+            if state.daily_pnl < 0:
+                return True, "2 losses today — signals paused. Type /resume to continue trading."
+            else:
+                # Net positive despite 2 losses — warn but allow signals through
+                pnl_str = f"+${state.daily_pnl:.2f}"
+                return False, f"⚠️ 2 losses today but still net positive ({pnl_str}). Trading carefully."
+
         today_loss = -state.daily_pnl if state.daily_pnl < 0 else 0
         if today_loss >= 200:
             return True, "Daily loss $200 reached — signals paused. Type /resume to continue."
