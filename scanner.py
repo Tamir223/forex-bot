@@ -184,11 +184,23 @@ SCANNER_END_HOUR = 21    # 9 PM UTC = NY close
 
 
 def is_scan_window() -> bool:
-    hour = datetime.now(timezone.utc).hour
-    day = datetime.now(timezone.utc).weekday()
-    if day >= 5:
+    now = datetime.now(timezone.utc)
+    day = now.weekday()
+    hour = now.hour
+
+    # Saturday — market closed all day
+    if day == 5:
         return False
-    return SCANNER_START_HOUR <= hour <= SCANNER_END_HOUR
+
+    # Sunday — only open after 21:00 UTC (Sydney open)
+    if day == 6:
+        return hour >= 21
+
+    # Monday-Friday — block only dead hours 02:00-07:00 UTC
+    if 2 <= hour < 7:
+        return False
+
+    return True
 
 
 def get_session_interval() -> int:
