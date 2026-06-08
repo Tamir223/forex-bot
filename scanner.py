@@ -21,7 +21,8 @@ from scanner_improvements import (
     check_pair_correlation, detect_mtf_ob_confluence, detect_momentum,
     check_daily_bias_alignment,
     detect_equal_highs_lows, detect_market_structure_shift,
-    check_premium_discount_zone, is_kill_zone
+    check_premium_discount_zone, is_kill_zone,
+    analyze_market_structure, get_trade_direction,
 )
 import requests
 import yfinance as yf
@@ -1287,52 +1288,6 @@ def check_price_action_vs_bias(candles: list, direction: str, daily_bias: dict) 
     return result
 
 
-def analyze_market_structure(candles: list) -> str:
-    """
-    Identify market structure using swing highs/lows on the last 20 candles.
-    Returns 'uptrend', 'downtrend', or 'ranging'.
-    """
-    if len(candles) < 20:
-        return "ranging"
-
-    swing_highs = []
-    swing_lows = []
-
-    # candles are newest first — reverse for chronological order
-    chron = list(reversed(candles[:20]))
-
-    for i in range(2, len(chron) - 2):
-        if (chron[i]['high'] > chron[i-1]['high'] and
-                chron[i]['high'] > chron[i-2]['high'] and
-                chron[i]['high'] > chron[i+1]['high'] and
-                chron[i]['high'] > chron[i+2]['high']):
-            swing_highs.append(chron[i]['high'])
-
-        if (chron[i]['low'] < chron[i-1]['low'] and
-                chron[i]['low'] < chron[i-2]['low'] and
-                chron[i]['low'] < chron[i+1]['low'] and
-                chron[i]['low'] < chron[i+2]['low']):
-            swing_lows.append(chron[i]['low'])
-
-    if len(swing_highs) < 2 or len(swing_lows) < 2:
-        return "ranging"
-
-    last_highs = swing_highs[-2:]
-    last_lows = swing_lows[-2:]
-
-    higher_highs = last_highs[1] > last_highs[0]
-    higher_lows = last_lows[1] > last_lows[0]
-    lower_highs = last_highs[1] < last_highs[0]
-    lower_lows = last_lows[1] < last_lows[0]
-
-    if higher_highs and higher_lows:
-        return "uptrend"
-    elif lower_highs and lower_lows:
-        return "downtrend"
-    else:
-        return "ranging"
-
-
 async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
     """
     Run full scan on one symbol. Returns alert dict if setup found, None otherwise.
@@ -1375,13 +1330,14 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # Flag ranging candles early — penalty applied after scoring, not a hard block
         is_ranging_candles = is_ranging_market(candles)
 
-        # ── MARKET STRUCTURE ANALYSIS — primary direction source ──────────────
-        market_structure = analyze_market_structure(candles)
-        if market_structure == "ranging":
-            logger.info(f"[scanner] {symbol} market structure ranging — blocking all signals")
+        # ── UNIFIED DIRECTION — bias + market structure (shared with /bias) ────
+        _gt_direction, _gt_strength = get_trade_direction(symbol, candles)
+        if _gt_direction is None:
+            logger.info(f"[scanner] {symbol} {_gt_strength} — no trade")
             return None
-        allowed_direction = "BUY" if market_structure == "uptrend" else "SELL"
-        logger.info(f"[scanner] {symbol} market structure: {market_structure} — {allowed_direction} only")
+        logger.info(f"[scanner] {symbol} direction {_gt_direction} ({_gt_strength})")
+        # market_structure derived from direction for downstream checks
+        market_structure = "uptrend" if _gt_direction == "BUY" else "downtrend"
 
         price_data = {"price": _data["price"]} if _data.get("price") else None
         atr_data   = _data.get("atr") or None
@@ -1454,21 +1410,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         final_score = score_data["score"]
         score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
 
-        # Resolve trade direction — market structure is primary source
-        direction = score_data.get("direction")
-        if direction is None:
-            direction = allowed_direction
-            score_data["direction"] = direction
-            logger.info(f"[scanner] {symbol} direction {direction} from market structure ({market_structure})")
-
-        if not direction:
-            logger.info(f"[scanner] {symbol} no actionable direction — skipping")
-            return None
-
-        # Block signals against market structure
-        if direction != allowed_direction:
-            logger.info(f"[scanner] {symbol} signal {direction} against market structure {market_structure} — blocking")
-            return None
+        # Direction from get_trade_direction — single source of truth
+        direction = _gt_direction
+        score_data["direction"] = direction
 
         # Direction lock — prevent opposite-direction signals within 30 min of a graded signal
         _lock = _direction_lock.get(symbol)
@@ -1477,13 +1421,20 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} direction locked {_lock['direction']} — blocking {direction} signal")
                 return None
 
-        # Market structure score bonus
-        if market_structure == "uptrend":
-            score_data["factors"] = score_data.get("factors", []) + ["📈 Market structure: Higher highs + Higher lows — confirmed uptrend"]
+        # Strength-based score adjustment
+        if _gt_strength == "strong":
+            _ms_text = "Higher highs + Higher lows" if direction == "BUY" else "Lower highs + Lower lows"
+            _ms_trend = "uptrend" if direction == "BUY" else "downtrend"
+            _ms_emoji = "📈" if direction == "BUY" else "📉"
+            score_data["factors"] = score_data.get("factors", []) + [
+                f"{_ms_emoji} Market structure: {_ms_text} — confirmed {_ms_trend}"
+            ]
             score_data["score"] = min(10, score_data["score"] + 1)
-        elif market_structure == "downtrend":
-            score_data["factors"] = score_data.get("factors", []) + ["📉 Market structure: Lower highs + Lower lows — confirmed downtrend"]
-            score_data["score"] = min(10, score_data["score"] + 1)
+        elif _gt_strength == "weak":
+            score_data["factors"] = score_data.get("factors", []) + [
+                "⚠️ Weak alignment — market structure only, no daily bias"
+            ]
+            score_data["score"] = max(0, score_data["score"] - 1)
         final_score = score_data["score"]
         score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
 

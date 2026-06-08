@@ -1488,3 +1488,88 @@ def is_kill_zone(symbol: str) -> tuple[bool, str]:
         return True, "Kill zone active — NY Lunch Kill Zone — peak institutional activity"
 
     return False, ""
+
+
+# ─── 21. MARKET STRUCTURE ANALYSIS ───────────────────────────────────────────
+
+def analyze_market_structure(candles: list) -> str:
+    """
+    Identify market structure using swing highs/lows on the last 20 candles.
+    Candles must be newest-first. Returns 'uptrend', 'downtrend', or 'ranging'.
+    """
+    if len(candles) < 20:
+        return "ranging"
+
+    swing_highs = []
+    swing_lows = []
+
+    chron = list(reversed(candles[:20]))
+
+    for i in range(2, len(chron) - 2):
+        if (chron[i]['high'] > chron[i-1]['high'] and
+                chron[i]['high'] > chron[i-2]['high'] and
+                chron[i]['high'] > chron[i+1]['high'] and
+                chron[i]['high'] > chron[i+2]['high']):
+            swing_highs.append(chron[i]['high'])
+
+        if (chron[i]['low'] < chron[i-1]['low'] and
+                chron[i]['low'] < chron[i-2]['low'] and
+                chron[i]['low'] < chron[i+1]['low'] and
+                chron[i]['low'] < chron[i+2]['low']):
+            swing_lows.append(chron[i]['low'])
+
+    if len(swing_highs) < 2 or len(swing_lows) < 2:
+        return "ranging"
+
+    last_highs = swing_highs[-2:]
+    last_lows = swing_lows[-2:]
+
+    higher_highs = last_highs[1] > last_highs[0]
+    higher_lows = last_lows[1] > last_lows[0]
+    lower_highs = last_highs[1] < last_highs[0]
+    lower_lows = last_lows[1] < last_lows[0]
+
+    if higher_highs and higher_lows:
+        return "uptrend"
+    elif lower_highs and lower_lows:
+        return "downtrend"
+    else:
+        return "ranging"
+
+
+# ─── 22. UNIFIED TRADE DIRECTION ─────────────────────────────────────────────
+
+def get_trade_direction(symbol: str, candles_15m: list) -> tuple:
+    """
+    Single source of truth for trade direction — used by scanner and /bias.
+    Combines daily bias with 15M market structure (swing high/low analysis).
+
+    Returns (direction, strength):
+      ('BUY',  'strong')  — bias bullish  + market structure uptrend
+      ('SELL', 'strong')  — bias bearish  + market structure downtrend
+      ('BUY',  'weak')    — bias neutral  + market structure uptrend
+      ('SELL', 'weak')    — bias neutral  + market structure downtrend
+      (None,   'ranging') — market structure ranging → skip
+      (None,   'conflict')— bias conflicts with market structure → skip
+    """
+    daily_bias = get_daily_bias(symbol)
+    market_structure = analyze_market_structure(candles_15m)
+
+    bias = daily_bias.get('bias', 'neutral')
+
+    if bias == 'bullish' and market_structure == 'uptrend':
+        return 'BUY', 'strong'
+    elif bias == 'bearish' and market_structure == 'downtrend':
+        return 'SELL', 'strong'
+    elif bias == 'neutral' and market_structure == 'uptrend':
+        return 'BUY', 'weak'
+    elif bias == 'neutral' and market_structure == 'downtrend':
+        return 'SELL', 'weak'
+    elif market_structure == 'ranging':
+        return None, 'ranging'
+    elif bias == 'bullish' and market_structure == 'downtrend':
+        return None, 'conflict'
+    elif bias == 'bearish' and market_structure == 'uptrend':
+        return None, 'conflict'
+    else:
+        return None, 'ranging'
