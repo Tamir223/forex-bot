@@ -1103,6 +1103,61 @@ def check_signal_contradictions(direction: str, factors: list) -> tuple[int, lis
     return contradictions, warnings
 
 
+def check_price_action_vs_bias(candles: list, direction: str, daily_bias: dict) -> dict:
+    """
+    Detect when intraday price action strongly conflicts with the signal direction.
+    Also overrides daily_bias when last 3 candles form a clear consecutive trend.
+
+    candles: newest-first 15M list.
+    Returns: {has_conflict, penalty, factor, updated_bias}
+    """
+    result = {"has_conflict": False, "penalty": 0, "factor": None, "updated_bias": daily_bias}
+
+    if not candles or len(candles) < 5:
+        return result
+
+    last5 = candles[:5]
+    bullish_count = sum(1 for c in last5 if c["close"] > c["open"])
+    bearish_count = sum(1 for c in last5 if c["close"] < c["open"])
+
+    # oldest of the 5 is candles[4] (newest-first list)
+    first_open = last5[4]["open"]
+    last_close = last5[0]["close"]
+    pct_move = (last_close - first_open) / first_open if first_open else 0.0
+
+    conflict = False
+    if direction == "SELL":
+        if bullish_count >= 4 or pct_move > 0.003:
+            conflict = True
+    elif direction == "BUY":
+        if bearish_count >= 4 or pct_move < -0.003:
+            conflict = True
+
+    if conflict:
+        result["has_conflict"] = True
+        result["penalty"] = 2
+        result["factor"] = "⚠️ Price action conflict — intraday momentum against signal direction"
+
+    # Bias override: last 3 candles consecutive + escalating closes
+    if len(candles) >= 3:
+        c0, c1, c2 = candles[0], candles[1], candles[2]
+        strongly_bullish = (
+            all(c["close"] > c["open"] for c in (c0, c1, c2)) and
+            c0["close"] > c1["close"] > c2["close"]
+        )
+        strongly_bearish = (
+            all(c["close"] < c["open"] for c in (c0, c1, c2)) and
+            c0["close"] < c1["close"] < c2["close"]
+        )
+        if strongly_bullish or strongly_bearish:
+            updated = dict(daily_bias) if daily_bias else {}
+            updated["bias"] = "bullish" if strongly_bullish else "bearish"
+            updated["intraday_override"] = True
+            result["updated_bias"] = updated
+
+    return result
+
+
 async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
     """
     Run full scan on one symbol. Returns alert dict if setup found, None otherwise.
@@ -1225,6 +1280,22 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 score_data["factors"] = score_data.get("factors", []) + ["⚠️ Counter-momentum: last 3 candles bearish vs BUY direction"]
             final_score = score_data["score"]
             score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
+
+        # ── TIER 3.4: PRICE ACTION VS BIAS ───────────────────────────────────
+        _pa = check_price_action_vs_bias(candles, direction, daily_bias)
+        if _pa["updated_bias"] is not daily_bias:
+            _ov_dir = _pa["updated_bias"].get("bias", "neutral")
+            logger.info(f"[scanner] {symbol} intraday candle override → bias now {_ov_dir}")
+            daily_bias = _pa["updated_bias"]
+        if _pa["has_conflict"]:
+            logger.info(f"[scanner] {symbol} PA conflict with {direction} — -{_pa['penalty']} penalty")
+            score_data["score"] = max(0, score_data["score"] - _pa["penalty"])
+            score_data["factors"] = score_data.get("factors", []) + [_pa["factor"]]
+            final_score = score_data["score"]
+            score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
+            if final_score < 7:
+                logger.info(f"[scanner] {symbol} blocked — score {final_score} after PA conflict penalty")
+                return None
 
         # ── TIER 3.5: HARD BIAS FILTER ────────────────────────────────────────
         # Reuses already-fetched daily_bias — no extra API call
