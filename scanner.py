@@ -1178,6 +1178,25 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         if not candles or len(candles) < 10:
             return None
 
+        # ── TIER 1: CANDLE CLOSE CONFIRMATION ────────────────────────────────
+        # Only fire on confirmed closed candles — skip if most recent candle just opened.
+        _dt_str = candles[0].get("datetime", "")
+        if _dt_str:
+            try:
+                _candle_dt = datetime.fromisoformat(_dt_str)
+                if _candle_dt.tzinfo is None:
+                    _candle_dt = _candle_dt.replace(tzinfo=timezone.utc)
+                else:
+                    _candle_dt = _candle_dt.astimezone(timezone.utc)
+                _candle_age = (datetime.now(timezone.utc) - _candle_dt).total_seconds()
+                if _candle_age < 60:
+                    logger.info(
+                        f"[scanner] {symbol} — candle just opened ({_candle_age:.0f}s ago) — waiting for close"
+                    )
+                    return None
+            except Exception:
+                pass  # unparseable datetime string — proceed normally
+
         # Flag ranging candles early — penalty applied after scoring, not a hard block
         is_ranging_candles = is_ranging_market(candles)
 
