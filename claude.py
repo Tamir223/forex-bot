@@ -6,6 +6,7 @@ Passes market context and per-user provider stats to Claude.
 import json
 import logging
 import re
+import time
 import anthropic
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS, SYSTEM_PROMPT
 from phase4_learning import get_confidence_modifier, get_session, log_trade_insight
@@ -126,12 +127,26 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         # Build full message
         full_message = _build_message(account_state, market_ctx, signal_text)
 
-        message = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=CLAUDE_MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": full_message}]
-        )
+        _api_retry_delay = 2
+        message = None
+        for _api_attempt in range(3):
+            try:
+                message = client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=CLAUDE_MAX_TOKENS,
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": full_message}]
+                )
+                break
+            except Exception as _api_err:
+                logger.error(f"[claude] API attempt {_api_attempt + 1} failed: {_api_err}")
+                if _api_attempt < 2:
+                    logger.info(f"[claude] Retrying in {_api_retry_delay}s...")
+                    time.sleep(_api_retry_delay)
+                    _api_retry_delay *= 2
+                else:
+                    logger.error(f"[claude] All 3 attempts failed")
+                    return None
 
         raw = message.content[0].text
         cleaned = re.sub(r"```json|```", "", raw).strip()

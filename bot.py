@@ -711,7 +711,11 @@ async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE)
         analysis = analyze_signal(signal_text, state_dict)
 
         if not analysis:
-            await context.bot.send_message(chat_id=chat_id, text="❌ Could not grade signal. Try again.")
+            await asyncio.sleep(5)
+            analysis = analyze_signal(signal_text, state_dict)
+
+        if not analysis:
+            await context.bot.send_message(chat_id=chat_id, text="⚠️ Grading temporarily unavailable. Tap the button again in 10 seconds.")
             return
 
         # Apply firm-aware risk cap
