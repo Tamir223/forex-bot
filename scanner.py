@@ -52,6 +52,7 @@ MAX_CACHE_SIZE = 200
 # until the next UTC midnight rather than hitting the API on every scan cycle.
 import time as _time
 _td_credits_exhausted_until: float = 0.0  # epoch seconds
+_direction_lock: dict = {}  # {symbol: {"direction": str, "locked_until": float}}
 
 
 def _td_available() -> bool:
@@ -1286,6 +1287,52 @@ def check_price_action_vs_bias(candles: list, direction: str, daily_bias: dict) 
     return result
 
 
+def analyze_market_structure(candles: list) -> str:
+    """
+    Identify market structure using swing highs/lows on the last 20 candles.
+    Returns 'uptrend', 'downtrend', or 'ranging'.
+    """
+    if len(candles) < 20:
+        return "ranging"
+
+    swing_highs = []
+    swing_lows = []
+
+    # candles are newest first — reverse for chronological order
+    chron = list(reversed(candles[:20]))
+
+    for i in range(2, len(chron) - 2):
+        if (chron[i]['high'] > chron[i-1]['high'] and
+                chron[i]['high'] > chron[i-2]['high'] and
+                chron[i]['high'] > chron[i+1]['high'] and
+                chron[i]['high'] > chron[i+2]['high']):
+            swing_highs.append(chron[i]['high'])
+
+        if (chron[i]['low'] < chron[i-1]['low'] and
+                chron[i]['low'] < chron[i-2]['low'] and
+                chron[i]['low'] < chron[i+1]['low'] and
+                chron[i]['low'] < chron[i+2]['low']):
+            swing_lows.append(chron[i]['low'])
+
+    if len(swing_highs) < 2 or len(swing_lows) < 2:
+        return "ranging"
+
+    last_highs = swing_highs[-2:]
+    last_lows = swing_lows[-2:]
+
+    higher_highs = last_highs[1] > last_highs[0]
+    higher_lows = last_lows[1] > last_lows[0]
+    lower_highs = last_highs[1] < last_highs[0]
+    lower_lows = last_lows[1] < last_lows[0]
+
+    if higher_highs and higher_lows:
+        return "uptrend"
+    elif lower_highs and lower_lows:
+        return "downtrend"
+    else:
+        return "ranging"
+
+
 async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
     """
     Run full scan on one symbol. Returns alert dict if setup found, None otherwise.
@@ -1327,6 +1374,14 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         # Flag ranging candles early — penalty applied after scoring, not a hard block
         is_ranging_candles = is_ranging_market(candles)
+
+        # ── MARKET STRUCTURE ANALYSIS — primary direction source ──────────────
+        market_structure = analyze_market_structure(candles)
+        if market_structure == "ranging":
+            logger.info(f"[scanner] {symbol} market structure ranging — blocking all signals")
+            return None
+        allowed_direction = "BUY" if market_structure == "uptrend" else "SELL"
+        logger.info(f"[scanner] {symbol} market structure: {market_structure} — {allowed_direction} only")
 
         price_data = {"price": _data["price"]} if _data.get("price") else None
         atr_data   = _data.get("atr") or None
@@ -1399,24 +1454,38 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         final_score = score_data["score"]
         score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
 
-        # Resolve trade direction — for ranging 15M fall back to daily bias
+        # Resolve trade direction — market structure is primary source
         direction = score_data.get("direction")
-        if direction is None and daily_bias:
-            _db = daily_bias.get("bias", "neutral")
-            if _db == "bullish":
-                direction = "BUY"
-                score_data["direction"] = "BUY"
-                score_data["factors"] = score_data.get("factors", []) + ["Direction from daily bias — bullish (15M ranging)"]
-                logger.info(f"[scanner] {symbol} 15M ranging — direction BUY from daily bias")
-            elif _db == "bearish":
-                direction = "SELL"
-                score_data["direction"] = "SELL"
-                score_data["factors"] = score_data.get("factors", []) + ["Direction from daily bias — bearish (15M ranging)"]
-                logger.info(f"[scanner] {symbol} 15M ranging — direction SELL from daily bias")
+        if direction is None:
+            direction = allowed_direction
+            score_data["direction"] = direction
+            logger.info(f"[scanner] {symbol} direction {direction} from market structure ({market_structure})")
 
         if not direction:
             logger.info(f"[scanner] {symbol} no actionable direction — skipping")
             return None
+
+        # Block signals against market structure
+        if direction != allowed_direction:
+            logger.info(f"[scanner] {symbol} signal {direction} against market structure {market_structure} — blocking")
+            return None
+
+        # Direction lock — prevent opposite-direction signals within 30 min of a graded signal
+        _lock = _direction_lock.get(symbol)
+        if _lock and _time.time() < _lock["locked_until"]:
+            if direction != _lock["direction"]:
+                logger.info(f"[scanner] {symbol} direction locked {_lock['direction']} — blocking {direction} signal")
+                return None
+
+        # Market structure score bonus
+        if market_structure == "uptrend":
+            score_data["factors"] = score_data.get("factors", []) + ["📈 Market structure: Higher highs + Higher lows — confirmed uptrend"]
+            score_data["score"] = min(10, score_data["score"] + 1)
+        elif market_structure == "downtrend":
+            score_data["factors"] = score_data.get("factors", []) + ["📉 Market structure: Lower highs + Lower lows — confirmed downtrend"]
+            score_data["score"] = min(10, score_data["score"] + 1)
+        final_score = score_data["score"]
+        score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
 
         # ── TIER 3.2: MOMENTUM CONFIRMATION ──────────────────────────────────
         # candles are newest-first; last 3 = candles[0..2]
@@ -1434,22 +1503,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 score_data["factors"] = score_data.get("factors", []) + ["⚠️ Counter-momentum: last 3 candles bearish vs BUY direction"]
             final_score = score_data["score"]
             score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
-
-        # ── TIER 3.4: PRICE ACTION VS BIAS ───────────────────────────────────
-        _pa = check_price_action_vs_bias(candles, direction, daily_bias)
-        if _pa["updated_bias"] is not daily_bias:
-            _ov_dir = _pa["updated_bias"].get("bias", "neutral")
-            logger.info(f"[scanner] {symbol} intraday candle override → bias now {_ov_dir}")
-            daily_bias = _pa["updated_bias"]
-        if _pa["has_conflict"]:
-            logger.info(f"[scanner] {symbol} PA conflict with {direction} — -{_pa['penalty']} penalty")
-            score_data["score"] = max(0, score_data["score"] - _pa["penalty"])
-            score_data["factors"] = score_data.get("factors", []) + [_pa["factor"]]
-            final_score = score_data["score"]
-            score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
-            if final_score < 7:
-                logger.info(f"[scanner] {symbol} blocked — score {final_score} after PA conflict penalty")
-                return None
 
         # ── TIER 3.5: BIAS CONFLICT / CONFIRMATION ────────────────────────────
         # Uses daily_bias only — htf_bias is for alignment bonuses, not conflict
@@ -1539,16 +1592,70 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} OB at {_ob_mid_cmp:.2f} (spot) but price {_cur} — too far from OB zone, skipping")
                 return None
 
+        # ── TREND CONTINUATION DETECTION ─────────────────────────────────────
+        _trend_streak = score_data.get("trend_streak", 0)
+        _is_trend_continuation = (
+            market_structure in ("uptrend", "downtrend") and
+            _trend_streak >= 3 and
+            final_score >= 9
+        )
+        if _is_trend_continuation:
+            score_data["factors"] = score_data.get("factors", []) + ["⚡ Strong trend continuation — market order entry"]
+
         alert_text = format_scan_alert(symbol, structure, ob, fvg, score_data, price_data, htf_bias, candles=candles)
 
         current_price = price_data.get("price", 0) if price_data else 0
         # OB/FVG levels are in futures domain; convert spot price back to futures
         # domain so build_auto_signal's zone comparisons and rp() offset are consistent.
         _build_cp = float(current_price) - FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
-        auto_signal = build_auto_signal(
-            symbol, direction, _build_cp,
-            ob, fvg, structure, score_data, htf_bias or {}
-        )
+
+        if _is_trend_continuation:
+            # Market order entry — SL based on 2×ATR clamped to pair limits
+            _atr_val = (atr_data.get("atr", 0) if atr_data else 0) or 0
+            _sl_dist_tc = min(2.0 * _atr_val, _max_sl_dist(symbol)) if _atr_val > 0 else _max_sl_dist(symbol)
+            _sl_dist_tc = max(_sl_dist_tc, _min_sl_dist(symbol))
+            from futures_instruments import is_futures as _is_fut_tc, get_spec as _get_spec_tc
+            _spec_tc = _get_spec_tc(symbol) if _is_fut_tc(symbol) else None
+            _dp_tc = 3 if (_spec_tc or symbol.upper() in ("XAUUSD", "US30", "NAS100")) else 5
+            _tc_entry = round(float(current_price), _dp_tc)
+            if direction == "BUY":
+                _tc_sl  = round(float(current_price) - _sl_dist_tc, _dp_tc)
+                _tc_tp1 = round(float(current_price) + 1.5 * _sl_dist_tc, _dp_tc)
+                _tc_tp2 = round(float(current_price) + 2.5 * _sl_dist_tc, _dp_tc)
+                _tc_tp3 = round(float(current_price) + 4.0 * _sl_dist_tc, _dp_tc)
+            else:
+                _tc_sl  = round(float(current_price) + _sl_dist_tc, _dp_tc)
+                _tc_tp1 = round(float(current_price) - 1.5 * _sl_dist_tc, _dp_tc)
+                _tc_tp2 = round(float(current_price) - 2.5 * _sl_dist_tc, _dp_tc)
+                _tc_tp3 = round(float(current_price) - 4.0 * _sl_dist_tc, _dp_tc)
+            _factors_str = "; ".join(score_data.get("factors", [])[:3])
+            _htf_str = "HTF aligned"
+            if htf_bias:
+                _d1_tc = htf_bias.get("d1_trend", "")
+                _h4_tc = htf_bias.get("h4_trend", "")
+                _h1_tc = htf_bias.get("h1_trend", "")
+                if _d1_tc and _h4_tc and _h1_tc:
+                    _htf_str = f"Daily {_d1_tc}, 4H {_h4_tc}, 1H {_h1_tc}"
+            auto_signal = (
+                f"{symbol} {direction} SIGNAL\n"
+                f"Provider: TNL Scanner\n"
+                f"Timeframe: 15M\n"
+                f"Setup: TREND CONTINUATION\n"
+                f"Entry Zone: {_tc_entry}\n"
+                f"Stop Loss: {_tc_sl}\n"
+                f"TP1: {_tc_tp1}\n"
+                f"TP2: {_tc_tp2}\n"
+                f"TP3: {_tc_tp3}\n"
+                f"Trend: {'Bullish' if direction == 'BUY' else 'Bearish'}\n"
+                f"Confirmation: Yes — {final_score}/10 score, {_htf_str}, {_factors_str}"
+            )
+            alert_text += "\n\n⚡ MARKET ORDER — Enter at current price NOW"
+        else:
+            auto_signal = build_auto_signal(
+                symbol, direction, _build_cp,
+                ob, fvg, structure, score_data, htf_bias or {}
+            )
+
         signal_key = _cache_signal(auto_signal, score=score_data.get('score'))
 
         # Verify RR >= 1.5 from the actual built signal prices
@@ -1991,6 +2098,11 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                                 )
                                 # Then immediately grade and send report
                                 graded = await auto_grade_and_send(result, bot, chat_id, user)
+                                if graded:
+                                    _direction_lock[symbol] = {
+                                        "direction": direction,
+                                        "locked_until": _time.time() + 1800
+                                    }
                                 if not graded:
                                     # If auto-grade failed send manual button as fallback
                                     grade_label = f"⚡ Grade This Signal ({symbol} {direction})"
