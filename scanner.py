@@ -936,18 +936,13 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     score = score_data.get("score", 0)
     factors = score_data.get("factors", [])
 
-    # BREAKOUT ENTRY mode: 3+ consecutive candles in signal direction AND high-confidence score
-    breakout_mode = score_data.get("trend_streak", 0) >= 3 and score >= 9
-
     # Calculate entry, stop loss, and targets
     from futures_instruments import is_futures, get_spec
     spec = get_spec(symbol) if is_futures(symbol) else None
 
     if direction == "BUY":
-        if breakout_mode:
-            entry = price
-            sl = round(price * 0.998, 5) if not spec else round(price - spec["typical_sl_pts"], 3)
-        elif ob and ob["type"] == "bullish_ob":
+        # Entry: if price is inside OB/FVG zone use current price, else use zone mid (limit order)
+        if ob and ob["type"] == "bullish_ob":
             entry = price if ob["low"] <= price <= ob["high"] else ob["mid"]
             sl = round(ob["low"] - (ob["high"] - ob["low"]) * 0.1, 5)
         elif fvg and fvg["type"] == "bullish_fvg":
@@ -968,10 +963,8 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         logger.info(f"[build_signal] {symbol} BUY sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} max={_max_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     else:  # SELL
-        if breakout_mode:
-            entry = price
-            sl = round(price * 1.002, 5) if not spec else round(price + spec["typical_sl_pts"], 3)
-        elif ob and ob["type"] == "bearish_ob":
+        # Entry: if price is inside OB/FVG zone use current price, else use zone mid (limit order)
+        if ob and ob["type"] == "bearish_ob":
             entry = price if ob["low"] <= price <= ob["high"] else ob["mid"]
             sl = round(ob["high"] + (ob["high"] - ob["low"]) * 0.1, 5)
         elif fvg and fvg["type"] == "bearish_fvg":
@@ -993,8 +986,6 @@ def build_auto_signal(symbol: str, direction: str, price: float,
 
     # Build setup description
     setup_parts = []
-    if breakout_mode:
-        setup_parts.append("BREAKOUT ENTRY")
     if ob:
         setup_parts.append("Order Block Retest")
     if fvg:
@@ -1043,10 +1034,6 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     tp3 = rp(tp3)
     logger.info(f"[build_signal] {symbol} {direction} entry={entry} sl={sl} tp1={tp1} domain=spot")
 
-    breakout_note = (
-        f"\nNote: Strong momentum — consider market order at current price"
-        if breakout_mode else ""
-    )
     signal = (
         f"{symbol} {direction} SIGNAL\n"
         f"Provider: TNL Scanner\n"
@@ -1059,7 +1046,6 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         f"TP3: {tp3}\n"
         f"Trend: {trend_dir}\n"
         f"Confirmation: Yes — {score}/10 score, {htf_str}, {factor_str}"
-        f"{breakout_note}"
     )
     return signal
 
