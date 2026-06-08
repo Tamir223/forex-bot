@@ -1388,6 +1388,13 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             score_data["score"] = max(0, score_data["score"] - 1)
             score_data["factors"] = score_data.get("factors", []) + [f"Outside optimal session — {optimal_reason}"]
 
+        # Hard cap — ranging market can never score above 7
+        if is_ranging_candles and is_ranging_structure:
+            if score_data["score"] > 7:
+                logger.info(f"[scanner] {symbol} ranging market — score capped at 7 (was {score_data['score']})")
+                score_data["score"] = 7
+                score_data["factors"] = score_data.get("factors", []) + ["⚠️ Score capped at 7 — ranging market"]
+
         # Recalculate recommendation after all penalties
         final_score = score_data["score"]
         score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
