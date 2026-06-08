@@ -423,46 +423,70 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None, 
             return disp, "valid"
         return disp, "weak"
 
+    def _build_ob(ob_type: str, c: dict, breakout_close: float) -> dict:
+        _mid = round((c["high"] + c["low"]) / 2, 5)
+        _disp, _quality = _ob_quality(_mid, breakout_close)
+        return {
+            "type": ob_type,
+            "high": round(c["high"], 5),
+            "low": round(c["low"], 5),
+            "mid": _mid,
+            "datetime": c["datetime"],
+            "strength": "strong" if (c["high"] - c["low"]) > (candles[0]["high"] - candles[0]["low"]) else "normal",
+            "displacement": round(_disp, 5),
+            "ob_quality": _quality,
+        }
+
+    # Proximity thresholds — OB must be within this distance of current price
+    _is_pts = _sym_upper == "XAUUSD" or _sym_upper in YFINANCE_FUTURES_MAP
+    _far_threshold   = 30.0  if _is_pts else 0.0030   # first OB beyond this → search for closer
+    _fresh_threshold = 15.0  if _is_pts else 0.0015   # fallback OB must be within this
+
+    current_price = candles[0]["close"]
+
     try:
         if trend == "bullish":
-            # Find last bearish candle before current rally
+            _first_ob = None
             for i in range(1, min(max_candles_back, len(candles))):
                 c = candles[i]
-                if c["close"] < c["open"]:  # bearish candle
-                    # Check if followed by bullish move
-                    if candles[i-1]["close"] > c["high"]:
-                        _mid = round((c["high"] + c["low"]) / 2, 5)
-                        _disp, _quality = _ob_quality(_mid, candles[i-1]["close"])
-                        return {
-                            "type": "bullish_ob",
-                            "high": round(c["high"], 5),
-                            "low": round(c["low"], 5),
-                            "mid": _mid,
-                            "datetime": c["datetime"],
-                            "strength": "strong" if (c["high"] - c["low"]) > (candles[0]["high"] - candles[0]["low"]) else "normal",
-                            "displacement": round(_disp, 5),
-                            "ob_quality": _quality,
-                        }
+                if c["close"] < c["open"] and candles[i-1]["close"] > c["high"]:
+                    ob = _build_ob("bullish_ob", c, candles[i-1]["close"])
+                    dist = abs(current_price - ob["mid"])
+                    if _first_ob is None:
+                        # First (most recent) OB found
+                        if dist <= _far_threshold:
+                            return ob  # close enough — use it
+                        logger.info(
+                            f"[scanner] {symbol} best OB at {ob['mid']} too far "
+                            f"({dist:.5f}) — looking for fresher OB"
+                        )
+                        _first_ob = ob
+                    else:
+                        # Scanning for a closer OB
+                        if dist <= _fresh_threshold:
+                            return ob
+            return None  # first OB too far, no fresh OB found
 
         elif trend == "bearish":
-            # Find last bullish candle before current drop
+            _first_ob = None
             for i in range(1, min(max_candles_back, len(candles))):
                 c = candles[i]
-                if c["close"] > c["open"]:  # bullish candle
-                    # Check if followed by bearish move
-                    if candles[i-1]["close"] < c["low"]:
-                        _mid = round((c["high"] + c["low"]) / 2, 5)
-                        _disp, _quality = _ob_quality(_mid, candles[i-1]["close"])
-                        return {
-                            "type": "bearish_ob",
-                            "high": round(c["high"], 5),
-                            "low": round(c["low"], 5),
-                            "mid": _mid,
-                            "datetime": c["datetime"],
-                            "strength": "strong" if (c["high"] - c["low"]) > (candles[0]["high"] - candles[0]["low"]) else "normal",
-                            "displacement": round(_disp, 5),
-                            "ob_quality": _quality,
-                        }
+                if c["close"] > c["open"] and candles[i-1]["close"] < c["low"]:
+                    ob = _build_ob("bearish_ob", c, candles[i-1]["close"])
+                    dist = abs(current_price - ob["mid"])
+                    if _first_ob is None:
+                        if dist <= _far_threshold:
+                            return ob
+                        logger.info(
+                            f"[scanner] {symbol} best OB at {ob['mid']} too far "
+                            f"({dist:.5f}) — looking for fresher OB"
+                        )
+                        _first_ob = ob
+                    else:
+                        if dist <= _fresh_threshold:
+                            return ob
+            return None
+
     except Exception as e:
         logger.error(f"OB detection error: {e}")
 
