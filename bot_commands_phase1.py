@@ -96,7 +96,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cur.execute(
                     """SELECT COUNT(*) AS cnt FROM trades
                        WHERE user_id = %s
-                         AND result != 'BLOCKED'
+                         AND result IN ('WIN', 'LOSS')
                          AND DATE(created_at AT TIME ZONE 'UTC') = CURRENT_DATE""",
                     (user.id,)
                 )

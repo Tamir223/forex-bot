@@ -1661,6 +1661,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
 
     Scans all pairs every cycle: XAUUSD first, then remaining in preferred order.
     """
+    logger.info("[scanner] run_scan called — starting cycle")
     global _scan_rotation_index
 
     if not force and not is_scan_window():
@@ -1843,7 +1844,9 @@ async def start_scanner(bot, get_active_users_fn):
 
     while True:
         try:
+            logger.info("[scanner] Loop iteration starting")
             interval = get_session_interval()
+            logger.info(f"[scanner] Sleeping {interval}s before next scan")
             await asyncio.sleep(interval)
 
             # Hourly cleanup — expire stale PENDING trades and zero out exposure
@@ -1953,5 +1956,5 @@ async def start_scanner(bot, get_active_users_fn):
                 logger.error(f"[scanner] trade_monitor check error: {_tm_err}")
 
         except Exception as e:
-            logger.error(f"[scanner] Loop error: {e}")
+            logger.error(f"[scanner] Loop error: {e}", exc_info=True)
             await asyncio.sleep(60)
