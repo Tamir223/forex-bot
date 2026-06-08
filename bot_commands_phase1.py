@@ -136,6 +136,7 @@ async def cmd_logtrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Result must be WIN, LOSS, or BREAKEVEN.")
         return
     pnl = 0.0
+    amount = 0.0
     pair = None
     # Parse amount and optional pair: /logtrade WIN 37.98 XAUUSD
     if len(context.args) >= 2:
@@ -151,6 +152,20 @@ async def cmd_logtrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile = get_profile(state.firm_code)
     state, warnings = record_trade(state, profile, pnl)
     save_challenge_state(user.id, state.firm_code, state_to_json(state))
+    # INSERT into trades table
+    if result in ("WIN", "LOSS"):
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO trades (user_id, result, pair, pnl, pnl_amount, created_at)
+                           VALUES (%s, %s, %s, %s, %s, NOW())""",
+                        (user.id, result, pair, pnl, amount)
+                    )
+                conn.commit()
+            logger.info(f"[logtrade] Saved {result} {pair} pnl=${amount} for user {user.id}")
+        except Exception as e:
+            logger.error(f"[logtrade] DB insert error: {e}")
     # Phase 4 — log with pair if provided
     if pair and result in ("WIN", "LOSS"):
         try:
