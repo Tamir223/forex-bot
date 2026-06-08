@@ -395,14 +395,29 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None, 
         _candles_since_open = int((_now - _session_open).total_seconds() / 60 / 15)
         max_candles_back = min(max(_candles_since_open, 5), 96)
 
-    # Displacement thresholds: XAUUSD/futures use points, forex uses price (pips)
-    _is_pts = symbol.upper() == "XAUUSD" or symbol.upper() in YFINANCE_FUTURES_MAP
-    _strong_disp = 30.0 if _is_pts else 0.003
-    _valid_disp  = 15.0 if _is_pts else 0.0015
+    # Per-pair displacement thresholds (raw price units — points for gold, price for forex)
+    _OB_THRESHOLDS = {
+        "XAUUSD": {"strong": 25.0,  "valid": 12.0},
+        "GBPUSD": {"strong": 0.0020, "valid": 0.0010},
+        "EURUSD": {"strong": 0.0015, "valid": 0.0008},
+        "USDJPY": {"strong": 0.15,   "valid": 0.08},
+        "USDCAD": {"strong": 0.0012, "valid": 0.0006},
+        "AUDUSD": {"strong": 0.0012, "valid": 0.0006},
+        "NZDUSD": {"strong": 0.0010, "valid": 0.0005},
+        "USDCHF": {"strong": 0.0010, "valid": 0.0005},
+    }
+    _sym_upper = symbol.upper() if symbol else ""
+    # Futures (non-XAUUSD) fall back to XAUUSD-style point thresholds
+    if _sym_upper in YFINANCE_FUTURES_MAP and _sym_upper != "XAUUSD":
+        _thresholds = {"strong": 15.0, "valid": 8.0}
+    else:
+        _thresholds = _OB_THRESHOLDS.get(_sym_upper, {"strong": 0.0015, "valid": 0.0008})
+    _strong_disp = _thresholds["strong"]
+    _valid_disp  = _thresholds["valid"]
 
     def _ob_quality(ob_mid: float, breakout_close: float) -> tuple:
         disp = abs(breakout_close - ob_mid)
-        if disp > _strong_disp:
+        if disp >= _strong_disp:
             return disp, "strong"
         if disp >= _valid_disp:
             return disp, "valid"
