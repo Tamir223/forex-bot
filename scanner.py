@@ -921,6 +921,18 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
             score += 2
             factors.append(f"Rejection candle at OB zone: {candle_type}")
 
+        # Contradicting rejection candle — penalise candles that directly oppose signal direction
+        _c0 = candles[0]
+        _c0_body = abs(_c0["close"] - _c0["open"])
+        _c0_upper_wick = _c0["high"] - max(_c0["close"], _c0["open"])
+        _c0_lower_wick = min(_c0["close"], _c0["open"]) - _c0["low"]
+        if direction_str == "BUY" and _c0_body > 0 and _c0_upper_wick >= 2 * _c0_body:
+            score = max(0, score - 2)
+            factors.append("⚠️ Shooting star on BUY signal — directional contradiction (-2)")
+        elif direction_str == "SELL" and _c0_body > 0 and _c0_lower_wick >= 2 * _c0_body:
+            score = max(0, score - 2)
+            factors.append("⚠️ Hammer on SELL signal — directional contradiction (-2)")
+
         pd_levels = get_previous_day_levels(candles)
         pdh = pd_levels.get("pdh")
         pdl = pd_levels.get("pdl")
@@ -1420,13 +1432,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             score_data["score"] = max(0, score_data["score"] - 1)
             score_data["factors"] = score_data.get("factors", []) + [f"Outside optimal session — {optimal_reason}"]
 
-        # Hard cap — ranging market can never score above 7
-        if is_ranging_candles and is_ranging_structure:
-            if score_data["score"] > 7:
-                logger.info(f"[scanner] {symbol} ranging market — score capped at 7 (was {score_data['score']})")
-                score_data["score"] = 7
-                score_data["factors"] = score_data.get("factors", []) + ["⚠️ Score capped at 7 — ranging market"]
-
         # Recalculate recommendation after all penalties
         final_score = score_data["score"]
         score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
@@ -1462,6 +1467,11 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             score_data["score"] = min(10, score_data["score"] + 2)
             score_data["factors"] = score_data.get("factors", []) + ["🔄 CHoCH — trend reversal confirmed"]
             logger.info(f"[scanner] {symbol} CHoCH detected — trend reversal confirmed")
+
+        # Hard cap — ranging market can never score above 7 (applied after all bonuses)
+        if is_ranging_candles and is_ranging_structure:
+            score_data["score"] = min(score_data["score"], 7)
+            logger.info(f"[scanner] {symbol} ranging hard cap — score capped at 7")
 
         final_score = score_data["score"]
         score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
