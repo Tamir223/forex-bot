@@ -67,6 +67,35 @@ def _risk_line(analysis: dict) -> str:
     return f"Risk %:       {pct}%{suffix}\n"
 
 
+def _action_line(analysis: dict) -> str:
+    """Build the execution action line at the bottom of the grade report."""
+    _is_tc = "TREND CONTINUATION" in str(analysis.get("setup_type", "")).upper()
+    _direction = str(analysis.get("direction", "")).upper()
+    _entry = fmt(analysis.get("entry_zone"))
+    _sl = fmt(analysis.get("stop_loss"))
+    _tp1 = fmt(analysis.get("tp1"))
+    _lots = analysis.get("lot_size_suggestion")
+
+    if _is_tc:
+        _dir_word = "BUY" if _direction == "BUY" else "SELL"
+        _lots_line = f"\nLots: {fmt(_lots)}" if _lots else ""
+        _body = (
+            f"⚡ MARKET ORDER — Open {_dir_word} NOW at current price\n"
+            f"SL: {_sl}\n"
+            f"TP1: {_tp1}"
+            + _lots_line
+        )
+    else:
+        _dir_word = "Buy" if _direction == "BUY" else "Sell"
+        _body = f"Set {_dir_word} Limit at {_entry}"
+
+    return (
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        + _body + "\n"
+        + f"━━━━━━━━━━━━━━━━━━━━"
+    )
+
+
 def execute_report(analysis: dict) -> str:
     confluence = calculate_confluence(analysis)
     return (
@@ -107,11 +136,7 @@ def execute_report(analysis: dict) -> str:
            if analysis.get('correlation_warning') else "")
         + f"\n📝 REASON\n"
         f"{fmt(analysis.get('reason'))}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Reply YES to execute\n"
-        f"Reply NO to skip\n"
-        f"⏱ Expires in 5 minutes\n"
-        f"━━━━━━━━━━━━━━━━━━━━"
+        + _action_line(analysis)
     )
 
 
