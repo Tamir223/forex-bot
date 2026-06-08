@@ -1492,17 +1492,28 @@ def is_kill_zone(symbol: str) -> tuple[bool, str]:
 
 # ─── 21. MARKET STRUCTURE ANALYSIS ───────────────────────────────────────────
 
-def analyze_market_structure(candles: list) -> str:
+def analyze_market_structure(candles: list) -> dict:
     """
     Identify market structure using swing highs/lows on the last 20 candles.
-    Candles must be newest-first. Returns 'uptrend', 'downtrend', or 'ranging'.
+    Candles must be newest-first.
+
+    Returns dict with keys:
+      structure: 'uptrend' | 'downtrend' | 'ranging'
+      choch:     True if Change of Character (reversal) detected
+      bos:       True if Break of Structure (continuation) detected
+      last_swing_high: float | None
+      last_swing_low:  float | None
     """
+    _default = {
+        "structure": "ranging", "choch": False, "bos": False,
+        "last_swing_high": None, "last_swing_low": None,
+    }
+
     if len(candles) < 20:
-        return "ranging"
+        return _default
 
     swing_highs = []
     swing_lows = []
-
     chron = list(reversed(candles[:20]))
 
     for i in range(2, len(chron) - 2):
@@ -1519,10 +1530,11 @@ def analyze_market_structure(candles: list) -> str:
             swing_lows.append(chron[i]['low'])
 
     if len(swing_highs) < 2 or len(swing_lows) < 2:
-        return "ranging"
+        return _default
 
     last_highs = swing_highs[-2:]
     last_lows = swing_lows[-2:]
+    current_close = chron[-1]['close']
 
     higher_highs = last_highs[1] > last_highs[0]
     higher_lows = last_lows[1] > last_lows[0]
@@ -1530,11 +1542,35 @@ def analyze_market_structure(candles: list) -> str:
     lower_lows = last_lows[1] < last_lows[0]
 
     if higher_highs and higher_lows:
-        return "uptrend"
+        structure = "uptrend"
     elif lower_highs and lower_lows:
-        return "downtrend"
+        structure = "downtrend"
     else:
-        return "ranging"
+        structure = "ranging"
+
+    # CHoCH — Change of Character (trend reversal: price breaks last swing extreme)
+    choch = False
+    if structure == "uptrend" and current_close < last_lows[-1]:
+        choch = True
+        structure = "downtrend"
+    elif structure == "downtrend" and current_close > last_highs[-1]:
+        choch = True
+        structure = "uptrend"
+
+    # BOS — Break of Structure (trend continuation: price extends beyond last swing)
+    bos = False
+    if structure == "uptrend" and current_close > last_highs[-1]:
+        bos = True
+    elif structure == "downtrend" and current_close < last_lows[-1]:
+        bos = True
+
+    return {
+        "structure": structure,
+        "choch": choch,
+        "bos": bos,
+        "last_swing_high": last_highs[-1],
+        "last_swing_low": last_lows[-1],
+    }
 
 
 # ─── 22. UNIFIED TRADE DIRECTION ─────────────────────────────────────────────
@@ -1553,23 +1589,23 @@ def get_trade_direction(symbol: str, candles_15m: list) -> tuple:
       (None,   'conflict')— bias conflicts with market structure → skip
     """
     daily_bias = get_daily_bias(symbol)
-    market_structure = analyze_market_structure(candles_15m)
-
+    ms = analyze_market_structure(candles_15m)
+    structure = ms["structure"]
     bias = daily_bias.get('bias', 'neutral')
 
-    if bias == 'bullish' and market_structure == 'uptrend':
-        return 'BUY', 'strong'
-    elif bias == 'bearish' and market_structure == 'downtrend':
-        return 'SELL', 'strong'
-    elif bias == 'neutral' and market_structure == 'uptrend':
-        return 'BUY', 'weak'
-    elif bias == 'neutral' and market_structure == 'downtrend':
-        return 'SELL', 'weak'
-    elif market_structure == 'ranging':
+    if structure == 'ranging':
         return None, 'ranging'
-    elif bias == 'bullish' and market_structure == 'downtrend':
+    if bias == 'bullish' and structure == 'uptrend':
+        return 'BUY', 'strong'
+    elif bias == 'bearish' and structure == 'downtrend':
+        return 'SELL', 'strong'
+    elif bias == 'neutral' and structure == 'uptrend':
+        return 'BUY', 'weak'
+    elif bias == 'neutral' and structure == 'downtrend':
+        return 'SELL', 'weak'
+    elif bias == 'bullish' and structure == 'downtrend':
         return None, 'conflict'
-    elif bias == 'bearish' and market_structure == 'uptrend':
+    elif bias == 'bearish' and structure == 'uptrend':
         return None, 'conflict'
     else:
         return None, 'ranging'

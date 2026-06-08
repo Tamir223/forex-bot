@@ -290,13 +290,65 @@ async def cmd_bias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user:
         await update.message.reply_text("❌ No active subscription.")
         return
-    await update.message.reply_text("📊 Fetching daily bias for your watchlist...")
+    await update.message.reply_text("📊 Fetching market intelligence...")
     from database import get_user_watchlist
-    from scanner import build_bias_report, DEFAULT_WATCHLIST
+    from scanner import DEFAULT_WATCHLIST, fetch_all_timeframes
+    from scanner_improvements import analyze_market_structure, get_trade_direction, get_daily_bias
     watchlist_str = get_user_watchlist(user.id)
     watchlist = [s.strip() for s in watchlist_str.split(",")] if watchlist_str else DEFAULT_WATCHLIST
-    report = build_bias_report(watchlist)
-    await update.message.reply_text(report, parse_mode="Markdown")
+
+    lines = [
+        "📊 *MARKET INTELLIGENCE*",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "`PAIR      BIAS        STRUCTURE     ACTION`",
+    ]
+
+    for sym in watchlist[:8]:
+        try:
+            data = fetch_all_timeframes(sym)
+            candles = data.get("candles_15m", [])
+            if not candles:
+                lines.append(f"`{sym:<9}` -- -- ⛔ NO DATA")
+                continue
+
+            b = get_daily_bias(sym)
+            bias = b.get("bias", "neutral")
+            ms = analyze_market_structure(candles)
+            structure = ms["structure"]
+            choch = ms.get("choch", False)
+            direction, strength = get_trade_direction(sym, candles)
+
+            bias_str = ("🟢 Bullish " if bias == "bullish"
+                        else "🔴 Bearish " if bias == "bearish"
+                        else "⚪ Neutral  ")
+
+            struct_str = ("📈 Uptrend   " if structure == "uptrend"
+                          else "📉 Downtrend " if structure == "downtrend"
+                          else "↔️ Ranging   ")
+
+            if direction == "BUY" and strength == "strong":
+                action = "✅ BUY"
+            elif direction == "SELL" and strength == "strong":
+                action = "✅ SELL"
+            elif direction == "BUY" and strength == "weak":
+                action = "⚠️ WEAK BUY"
+            elif direction == "SELL" and strength == "weak":
+                action = "⚠️ WEAK SELL"
+            else:
+                action = "⛔ SKIP"
+
+            choch_tag = " 🔄" if choch else ""
+            pair_col = f"{sym}{choch_tag}"
+            lines.append(f"`{pair_col:<9}` {bias_str} {struct_str} {action}")
+        except Exception:
+            lines.append(f"`{sym:<9}` -- -- ⛔ ERROR")
+
+    lines += [
+        "━━━━━━━━━━━━━━━━━━━━",
+        "🔄 = CHoCH detected — potential trend reversal",
+        "✅ = bias + structure aligned  ⚠️ = structure only  ⛔ = skip",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):

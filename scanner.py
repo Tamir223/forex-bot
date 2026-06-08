@@ -1327,17 +1327,17 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             except Exception:
                 pass  # unparseable datetime string — proceed normally
 
-        # Flag ranging candles early — penalty applied after scoring, not a hard block
+        # Flag ranging candles early — -1 penalty applied post-scoring
         is_ranging_candles = is_ranging_market(candles)
 
-        # ── UNIFIED DIRECTION — bias + market structure (shared with /bias) ────
+        # ── STEP 3: Market structure + direction — PRIMARY GATE ──────────────
+        ms = analyze_market_structure(candles)
         _gt_direction, _gt_strength = get_trade_direction(symbol, candles)
         if _gt_direction is None:
             logger.info(f"[scanner] {symbol} {_gt_strength} — no trade")
             return None
         logger.info(f"[scanner] {symbol} direction {_gt_direction} ({_gt_strength})")
-        # market_structure derived from direction for downstream checks
-        market_structure = "uptrend" if _gt_direction == "BUY" else "downtrend"
+        market_structure = ms["structure"]  # "uptrend" or "downtrend" (ranging already gated)
 
         price_data = {"price": _data["price"]} if _data.get("price") else None
         atr_data   = _data.get("atr") or None
@@ -1361,7 +1361,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         if trend == "unclear":
             return None
 
-        ob = detect_order_block(candles, trend, symbol=symbol)
+        # OB detection uses direction from the primary gate (not detect_structure trend)
+        _ob_trend = "bullish" if _gt_direction == "BUY" else "bearish"
+        ob = detect_order_block(candles, _ob_trend, symbol=symbol)
         fvg = detect_fvg(candles, symbol)
 
         # Single daily_bias fetch — reused for direction fallback, TIER 3.5 block, and score_setup
@@ -1421,7 +1423,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} direction locked {_lock['direction']} — blocking {direction} signal")
                 return None
 
-        # Strength-based score adjustment
+        # ── STEP 6 addendum: Strength-based score adjustment ─────────────────
         if _gt_strength == "strong":
             _ms_text = "Higher highs + Higher lows" if direction == "BUY" else "Lower highs + Lower lows"
             _ms_trend = "uptrend" if direction == "BUY" else "downtrend"
@@ -1435,58 +1437,31 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 "⚠️ Weak alignment — market structure only, no daily bias"
             ]
             score_data["score"] = max(0, score_data["score"] - 1)
+
+        # ── STEP 4: CHoCH bonus — trend reversal confirmation ─────────────────
+        if ms.get("choch"):
+            score_data["score"] = min(10, score_data["score"] + 2)
+            score_data["factors"] = score_data.get("factors", []) + ["🔄 CHoCH — trend reversal confirmed"]
+            logger.info(f"[scanner] {symbol} CHoCH detected — trend reversal confirmed")
+
         final_score = score_data["score"]
         score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
 
-        # ── TIER 3.2: MOMENTUM CONFIRMATION ──────────────────────────────────
-        # candles are newest-first; last 3 = candles[0..2]
+        # ── STEP 7: TIER 3.2 — 3 consecutive extreme candles against signal ───
         if len(candles) >= 3:
             _c0, _c1, _c2 = candles[0], candles[1], candles[2]
             _all_bullish = all(c["close"] > c["open"] for c in (_c0, _c1, _c2))
             _all_bearish = all(c["close"] < c["open"] for c in (_c0, _c1, _c2))
             if direction == "SELL" and _all_bullish:
-                logger.info(f"[scanner] {symbol} SELL signal but last 3 candles all bullish — -2 momentum penalty")
+                logger.info(f"[scanner] {symbol} SELL — last 3 candles all bullish, -2 momentum penalty")
                 score_data["score"] = max(0, score_data["score"] - 2)
-                score_data["factors"] = score_data.get("factors", []) + ["⚠️ Counter-momentum: last 3 candles bullish vs SELL direction"]
+                score_data["factors"] = score_data.get("factors", []) + ["⚠️ 3 consecutive candles against signal — reduced confidence"]
             elif direction == "BUY" and _all_bearish:
-                logger.info(f"[scanner] {symbol} BUY signal but last 3 candles all bearish — -2 momentum penalty")
+                logger.info(f"[scanner] {symbol} BUY — last 3 candles all bearish, -2 momentum penalty")
                 score_data["score"] = max(0, score_data["score"] - 2)
-                score_data["factors"] = score_data.get("factors", []) + ["⚠️ Counter-momentum: last 3 candles bearish vs BUY direction"]
+                score_data["factors"] = score_data.get("factors", []) + ["⚠️ 3 consecutive candles against signal — reduced confidence"]
             final_score = score_data["score"]
             score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
-
-        # ── TIER 3.5: BIAS CONFLICT / CONFIRMATION ────────────────────────────
-        # Uses daily_bias only — htf_bias is for alignment bonuses, not conflict
-        try:
-            _bias_val = daily_bias.get("bias", "neutral")
-            if _bias_val == "neutral":
-                pass  # neutral — no penalty, no bonus
-            elif _bias_val == "bullish" and direction == "SELL":
-                score_data["score"] = max(0, score_data["score"] - 2)
-                score_data["factors"] = score_data.get("factors", []) + [
-                    "⚠️ Confirmed bias conflict — daily bias BULLISH vs SELL signal"
-                ]
-                logger.info(f"[scanner] {symbol} SELL — daily bias BULLISH conflict, -2")
-            elif _bias_val == "bearish" and direction == "BUY":
-                score_data["score"] = max(0, score_data["score"] - 2)
-                score_data["factors"] = score_data.get("factors", []) + [
-                    "⚠️ Confirmed bias conflict — daily bias BEARISH vs BUY signal"
-                ]
-                logger.info(f"[scanner] {symbol} BUY — daily bias BEARISH conflict, -2")
-            elif _bias_val == "bullish" and direction == "BUY":
-                score_data["score"] = min(10, score_data["score"] + 1)
-                score_data["factors"] = score_data.get("factors", []) + [
-                    "✅ Daily bias bullish confirms BUY direction"
-                ]
-            elif _bias_val == "bearish" and direction == "SELL":
-                score_data["score"] = min(10, score_data["score"] + 1)
-                score_data["factors"] = score_data.get("factors", []) + [
-                    "✅ Daily bias bearish confirms SELL direction"
-                ]
-            final_score = score_data["score"]
-            score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
-        except Exception:
-            pass
 
         # ── TIER 3.7: CONTRADICTION CHECK ────────────────────────────────────
         # FIX 3: Strip contradictory factors before checking
@@ -1623,8 +1598,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} blocked — TP1 RR {_sig_actual_rr:.2f} below minimum 1.5")
                 return None
 
-        # Direction validation — block structurally invalid limit orders before sending
-        if _sig_entry_m and current_price:
+        # ── STEP 11: Entry direction validation (skip for TREND CONTINUATION market orders)
+        if not _is_trend_continuation and _sig_entry_m and current_price:
             _spot_entry_for_dir = float(_sig_entry_m.group(1))
             _spot_price_for_dir = float(current_price)
             if direction == "SELL" and _spot_entry_for_dir <= _spot_price_for_dir:
