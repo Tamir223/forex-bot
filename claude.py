@@ -229,6 +229,9 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
 
         logger.info(f"[user:{user_id}] {result.get('decision')} {result.get('pair')} "
                     f"grade={result.get('grade')} conf={result.get('confidence')}")
+        # Force source — Claude ignores the prompt instruction and returns "ICT" for SMC setups
+        result['signal_source'] = 'TNL Scanner'
+        result['source'] = 'TNL Scanner'
         return result
 
     except json.JSONDecodeError as e:

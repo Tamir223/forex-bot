@@ -51,6 +51,7 @@ class DrawdownTracker:
         losses_today = self.get_losses_today(user_id)
         from database import get_state
         state = get_state(user_id)
+        logger.info(f"[pause_check] user={user_id} losses={losses_today} daily_pnl={state.daily_pnl:.2f}")
 
         if losses_today >= 2:
             if state.daily_pnl < 0:
