@@ -769,6 +769,8 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         elif _ob_q == "weak":
             score = max(0, score - 1)
             factors.append("⚠️ Weak OB displacement — low institutional conviction (-1)")
+        if _ob_q in ("strong", "weak", "valid"):
+            logger.info(f"[ob_quality] {symbol or 'unknown'} quality={_ob_q} displacement={ob.get('displacement', '?')} score_after_ob_block={score}")
 
     if fvg:
         score += 2
