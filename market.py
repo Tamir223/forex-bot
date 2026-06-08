@@ -119,6 +119,27 @@ def get_live_price(pair: str) -> dict:
         yf_ticker = "GC=F" if upper == "XAUUSD" else YFINANCE_FUTURES_MAP[upper]
         try:
             t = yf.Ticker(yf_ticker)
+
+            # Method 1: 1-minute candle most recent close — freshest data
+            if upper == "XAUUSD":
+                try:
+                    import datetime as _dt
+                    hist = t.history(period="1d", interval="1m")
+                    if len(hist) > 0:
+                        raw = float(hist['Close'].iloc[-1])
+                        last_time = hist.index[-1]
+                        if hasattr(last_time, 'tzinfo') and last_time.tzinfo:
+                            age = (_dt.datetime.now(_dt.timezone.utc) - last_time).total_seconds()
+                        else:
+                            age = 0
+                        if age < 120:  # candle less than 2 minutes old — fresh
+                            price = round(raw + _FUTURES_SPOT_OFFSET.get(upper, 0), 2)
+                            return {"price": price, "symbol": pair}
+                        logger.warning(f"[market] XAUUSD 1m candle stale ({age:.0f}s) — falling back to fast_info")
+                except Exception as _e1:
+                    logger.warning(f"[market] XAUUSD 1m candle error: {_e1} — falling back to fast_info")
+
+            # Method 2: fast_info fallback (or primary for non-XAUUSD futures)
             try:
                 raw = float(t.fast_info['last_price'])
             except Exception:
