@@ -1504,10 +1504,11 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             ]
             score_data["score"] = max(0, score_data["score"] - 1)
 
-        # Hard cap — ranging market can never score above 7 (applied after CHoCH and strength bonuses)
+        # Hard cap — LAST bonus-limiting step. Order: CHoCH +2 → strength ±1 → this cap.
+        # TIER 3.2 and 3.7 (penalties only) fire after but can never push score UP past the cap.
         if is_ranging_candles and is_ranging_structure:
             score_data["score"] = min(score_data["score"], 7)
-            logger.info(f"[scanner] {symbol} ranging hard cap applied — score capped at 7")
+            logger.info(f"[scanner] {symbol} ranging hard cap applied — score capped at 7 (post-CHoCH, post-strength)")
 
         # Overall cap
         score_data["score"] = min(score_data["score"], 10)
@@ -1516,7 +1517,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
 
         # ── STEP 7: TIER 3.2 — 3 consecutive extreme candles against signal ───
+        # direction = _gt_direction (from get_trade_direction — single source of truth)
         if len(candles) >= 3:
+            logger.info(f"[tier32] {symbol} checking 3 candles against direction={direction}")
             _c0, _c1, _c2 = candles[0], candles[1], candles[2]
             _all_bullish = all(c["close"] > c["open"] for c in (_c0, _c1, _c2))
             _all_bearish = all(c["close"] < c["open"] for c in (_c0, _c1, _c2))
