@@ -374,44 +374,45 @@ if PATTERN_IMPORTS_OK:
         except Exception as _e:
             fail(_label, str(_e))
 
-    # Score impact verification via scanner.py source
+    # TJR gate system checks
     try:
-        _src = open(os.path.join(os.path.dirname(__file__), "scanner.py")).read()
-
-        # Kill zone: +1
-        if _re.search(r'_kz_ok\b.{0,60}score\s*\+=\s*1', _src, _re.DOTALL):
-            ok("Kill zone score impact: +1 confirmed")
-        else:
-            fail("Kill zone score impact", "score += 1 not found after _kz_ok")
-
-        # Equal highs/lows: +2
-        if _re.search(r'eq_ok\b.{0,60}score\s*\+=\s*2', _src, _re.DOTALL):
-            ok("Equal highs/lows score impact: +2 confirmed")
-        else:
-            fail("Equal highs/lows score impact", "score += 2 not found after eq_ok")
-
-        # MSS: +2 in direction, -2 against
-        _mss_plus  = _re.search(r'mss_ok\b.{0,60}score\s*\+=\s*2', _src, _re.DOTALL)
-        _mss_minus = _re.search(r'score\s*=\s*max\(0,\s*score\s*-\s*2\)', _src)
-        if _mss_plus and _mss_minus:
-            ok("MSS score impact: +2 in direction, -2 against confirmed")
-        else:
-            fail("MSS score impact",
-                 f"plus={'found' if _mss_plus else 'missing'}, "
-                 f"minus={'found' if _mss_minus else 'missing'}")
-
-        # Premium/discount: +1 favourable, -1 unfavourable
-        _pd_plus  = _re.search(r'_zone\b.{0,200}score\s*\+=\s*1', _src, _re.DOTALL)
-        _pd_minus = _re.search(r'_zone\b.{0,200}score\s*=\s*max\(0,\s*score\s*-\s*1\)', _src, _re.DOTALL)
-        if _pd_plus and _pd_minus:
-            ok("Premium/discount score impact: +1/-1 confirmed")
-        else:
-            fail("Premium/discount score impact",
-                 f"plus={'found' if _pd_plus else 'missing'}, "
-                 f"minus={'found' if _pd_minus else 'missing'}")
-
+        from scanner import check_tjr_gates, format_unified_signal
+        ok("check_tjr_gates function exists in scanner.py")
+        ok("format_unified_signal function exists in scanner.py")
     except Exception as _e:
-        fail("Pattern score impact checks", str(_e))
+        fail("TJR gate functions in scanner.py", str(_e))
+
+    try:
+        from scanner_improvements import is_kill_zone
+        ok("is_kill_zone function exists in scanner_improvements.py")
+    except Exception as _e:
+        fail("is_kill_zone in scanner_improvements.py", str(_e))
+
+    # 7 gates present in check_tjr_gates source
+    try:
+        import inspect
+        _src = inspect.getsource(check_tjr_gates)
+        _gates = ['kill_zone', 'htf_bias', 'structure', 'sweep', 'ob_fvg', 'bos', 'volatility']
+        for _g in _gates:
+            if f"gates['{_g}']" in _src or f'gates["{_g}"]' in _src:
+                ok(f"Gate present: {_g}")
+            else:
+                fail(f"Gate missing: {_g}", f"gates['{_g}'] not found in check_tjr_gates")
+    except Exception as _e:
+        fail("7-gate check in check_tjr_gates", str(_e))
+
+    # PAIR_KILL_ZONES dict with all 8 pairs
+    try:
+        _imp_src = open(os.path.join(os.path.dirname(__file__), "scanner_improvements.py")).read()
+        _expected_pairs = ['EURUSD', 'GBPUSD', 'XAUUSD', 'USDJPY', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDCHF']
+        _all_pairs_ok = all(p in _imp_src for p in _expected_pairs)
+        if '_PAIR_KILL_ZONES' in _imp_src and _all_pairs_ok:
+            ok("PAIR_KILL_ZONES dict exists with all 8 pairs")
+        else:
+            _missing = [p for p in _expected_pairs if p not in _imp_src]
+            fail("PAIR_KILL_ZONES dict", f"missing pairs: {_missing}" if _missing else "_PAIR_KILL_ZONES not found")
+    except Exception as _e:
+        fail("PAIR_KILL_ZONES check", str(_e))
 
 
 # ── PRINT RESULTS ─────────────────────────────────────────────────────────────

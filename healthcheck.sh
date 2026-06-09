@@ -148,26 +148,27 @@ print('Signal detection OK')
 " 2>/dev/null
 check $? "Phase 2 futures signal detection working"
 
-# 21. Scanner module loadable
+# 21. Scanner module loadable (forex pairs only — ES/NQ not in our pair list)
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 import sys; sys.path.insert(0, '/home/ubuntu/apfee')
-from scanner import get_candles_yfinance, detect_structure, detect_order_block, detect_fvg, score_setup
-candles = get_candles_yfinance('ES')
-assert candles and len(candles) > 10, 'ES candles failed'
+from scanner import detect_structure, detect_order_block, detect_fvg, _get_candles_yfinance_forex
+candles = _get_candles_yfinance_forex('EURUSD', outputsize=20)
+assert candles and len(candles) > 10, 'EURUSD candles failed'
 structure = detect_structure(candles)
 assert structure.get('trend') in ('bullish','bearish','ranging'), 'Structure detection failed'
 " 2>/dev/null
-check $? "Phase 3 scanner — yFinance ES data and structure detection"
+check $? "Phase 3 scanner — yFinance EURUSD data and structure detection"
 
-# 22. yFinance futures data
+# 22. yFinance forex/gold data feeds
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 import sys; sys.path.insert(0, '/home/ubuntu/apfee')
-from scanner import get_candles_yfinance
-for sym in ['NQ','ES','CL','GC']:
-    c = get_candles_yfinance(sym)
-    assert c and len(c) > 5, f'{sym} failed'
+from scanner import _get_candles_yfinance_forex
+import yfinance as yf
+for sym, ticker in [('EURUSD','EURUSD=X'),('GBPUSD','GBPUSD=X'),('XAUUSD','GC=F')]:
+    h = yf.Ticker(ticker).history(period='1d', interval='5m')
+    assert not h.empty, f'{sym} yFinance failed'
 " 2>/dev/null
-check $? "Phase 3 yFinance — NQ ES CL GC data feeds working"
+check $? "Phase 3 yFinance — EURUSD GBPUSD XAUUSD data feeds working"
 
 # ── CONFIGURATION CHECKS ──────────────────────────────────────────────────────
 
@@ -497,13 +498,30 @@ check $? "Pattern: all 4 patterns imported in scanner"
 grep -q '07.*09\|12.*14\|14.*16' /home/ubuntu/apfee/scanner_improvements.py
 check $? "Pattern: kill zone UTC times correct (07-09, 12-14, 14-16)"
 
-# 59. Equal highs/lows score +2
-grep -A5 'detect_equal_highs_lows' /home/ubuntu/apfee/scanner.py | grep -q '+2\|+= 2'
-check $? "Pattern: equal highs/lows score +2"
+# 59. check_tjr_gates and format_unified_signal exist in scanner.py
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+from scanner import check_tjr_gates, format_unified_signal
+" 2>/dev/null
+check $? "Pattern: check_tjr_gates and format_unified_signal exist in scanner.py"
 
-# 60. MSS score +2/-2
-grep -A5 'detect_market_structure_shift' /home/ubuntu/apfee/scanner.py | grep -q '+2\|+= 2'
-check $? "Pattern: MSS score +2/-2"
+# 60. All 7 TJR gates present in check_tjr_gates
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import inspect
+from scanner import check_tjr_gates
+src = inspect.getsource(check_tjr_gates)
+for gate in ['kill_zone','htf_bias','structure','sweep','ob_fvg','bos','volatility']:
+    assert f\"gates['{gate}']\" in src or f'gates[\"{gate}\"]' in src, f'Missing gate: {gate}'
+" 2>/dev/null
+check $? "Pattern: all 7 TJR gates present (kill_zone htf_bias structure sweep ob_fvg bos volatility)"
+
+# 61. PAIR_KILL_ZONES has all 8 pairs
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+src = open('scanner_improvements.py').read()
+assert '_PAIR_KILL_ZONES' in src
+for p in ['EURUSD','GBPUSD','XAUUSD','USDJPY','AUDUSD','NZDUSD','USDCAD','USDCHF']:
+    assert p in src, f'Missing pair: {p}'
+" 2>/dev/null
+check $? "Pattern: PAIR_KILL_ZONES dict has all 8 pairs"
 
 echo ""
 echo "Running mathematical verification..."
