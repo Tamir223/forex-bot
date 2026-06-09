@@ -1512,6 +1512,28 @@ def analyze_market_structure(candles: list) -> dict:
     if len(candles) < 20:
         return _default
 
+    # MOMENTUM OVERRIDE — strong directional moves bypass swing structure check
+    recent = candles[:10]  # newest first
+    bullish_count = sum(1 for c in recent if c['close'] > c['open'])
+    bearish_count = sum(1 for c in recent if c['close'] < c['open'])
+
+    if bullish_count >= 8:
+        return {
+            "structure": "uptrend",
+            "choch": False,
+            "bos": True,
+            "last_swing_high": candles[0]['high'],
+            "last_swing_low": candles[9]['low'],
+        }
+    elif bearish_count >= 8:
+        return {
+            "structure": "downtrend",
+            "choch": False,
+            "bos": True,
+            "last_swing_high": candles[9]['high'],
+            "last_swing_low": candles[0]['low'],
+        }
+
     swing_highs = []
     swing_lows = []
     chron = list(reversed(candles[:20]))
