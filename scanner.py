@@ -1576,10 +1576,21 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             score_data["factors"] = score_data.get("factors", []) + _contra_warnings
 
         # ── TIER 4: POST-SCORE BLOCKS ─────────────────────────────────────────
-        # Score threshold — 9+ guarantee overrides range/session penalties
-        if final_score < 7:
+        # Score threshold — strong momentum bypasses minimum before trend continuation fires
+        _mc_pre = score_data.get("momentum_candles", 0)
+        _ts_pre = score_data.get("trend_streak", 0)
+        _is_strong_momentum = (
+            market_structure in ("uptrend", "downtrend") and
+            (_mc_pre >= 8 or _ts_pre >= 5)
+        )
+        if final_score < 7 and not _is_strong_momentum:
             logger.info(f"[scanner] {symbol} score {final_score}/10 — below threshold")
             return None
+        elif final_score < 7 and _is_strong_momentum:
+            logger.info(f"[scanner] {symbol} score {final_score}/10 — below threshold but strong momentum override (momentum={_mc_pre} streak={_ts_pre})")
+            final_score = 7
+            score_data["score"] = 7
+            score_data["recommendation"] = "MODERATE"
 
         # OB proximity check — only fire if price is at or near the OB zone.
         # XAUUSD: price_data["price"] is already spot (GC=F + offset).
