@@ -1722,12 +1722,15 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             price_for_ob_check = float(current_price)
         entry_valid, deviation = validate_entry(symbol, entry_check, price_for_ob_check)
 
-        # TIER 4: Entry missed — block unless score >= 9
+        # TIER 4: Entry missed — block unless score >= 9 or strong momentum
         if not entry_valid:
-            if final_score < 9:
+            if _is_strong_momentum:
+                logger.info(f"[scanner] {symbol} entry missed by {deviation} — strong momentum override, continuing to trend continuation check")
+            elif final_score < 9:
                 logger.info(f"[scanner] {symbol} entry missed by {deviation} — blocking (score {final_score})")
                 return None
-            logger.info(f"[scanner] {symbol} entry missed by {deviation} — score {final_score}/10 overrides entry check")
+            else:
+                logger.info(f"[scanner] {symbol} entry missed by {deviation} — score {final_score}/10 overrides entry check")
 
         # TIER 4: RR check — hard block regardless of score
         _min_sl = _min_sl_dist(symbol)
