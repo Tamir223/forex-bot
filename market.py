@@ -168,7 +168,7 @@ def get_live_price(pair: str) -> dict:
                     )
                     _cb_price = float(_cb.json()["data"]["amount"])
                     logger.info(f"[market] XAUUSD coinbase spot: {_cb_price}")
-                    return {"price": round(_cb_price, 2), "symbol": pair}
+                    return {"price": round(_cb_price, 2), "symbol": pair, "source": "coinbase"}
                 except Exception as _e0:
                     logger.warning(f"[market] XAUUSD coinbase failed: {_e0} — trying yfinance")
 
