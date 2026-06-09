@@ -2108,28 +2108,33 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                                 if symbol.upper() not in _user_symbols:
                                     logger.info(f"[scanner] Skipping {symbol} for {chat_id} — not in watchlist")
                                     continue
-                        # Auto-grade scores 9-10.
+                        # Auto-grade scores 9-10 (or 7+ for TREND CONTINUATION).
                         # Require 10/10 when outside optimal session OR bias data unavailable.
                         _outside_session = "Outside optimal session" in result.get("alert_text", "")
                         _bias_unknown = result.get("bias_unknown", False)
                         _needs_10 = (_outside_session or _bias_unknown) and score < 10
-                        if score >= 9 and not _needs_10:
+                        _is_tc = result.get("is_trend_continuation", False)
+                        _should_auto_grade = (_is_tc and score >= 7) or (score >= 9 and not _needs_10)
+                        if _should_auto_grade:
                             from database import get_user_by_chat_id
                             user = get_user_by_chat_id(str(chat_id))
                             if user and user.is_active:
                                 # Send alert first so they see what was found
+                                _grade_label = "⚡ *TREND CONTINUATION — Auto-grading now...*" if _is_tc else "⚡ *Score 9+/10 — Auto-grading now...*"
                                 await bot.send_message(
                                     chat_id=chat_id,
-                                    text=result["alert_text"] + "\n\n⚡ *Score 9+/10 — Auto-grading now...*",
+                                    text=result["alert_text"] + f"\n\n{_grade_label}",
                                     parse_mode="Markdown"
                                 )
                                 # Then immediately grade and send report
                                 graded = await auto_grade_and_send(result, bot, chat_id, user)
                                 if graded:
+                                    _locked_until = _time.time() + 1800
                                     _direction_lock[symbol] = {
                                         "direction": direction,
-                                        "locked_until": _time.time() + 1800
+                                        "locked_until": _locked_until
                                     }
+                                    logger.info(f"[direction_lock] {symbol} locked {direction} until {_locked_until:.0f} (+30 min)")
                                 if not graded:
                                     # If auto-grade failed send manual button as fallback
                                     grade_label = f"⚡ Grade This Signal ({symbol} {direction})"
