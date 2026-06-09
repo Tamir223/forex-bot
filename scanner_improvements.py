@@ -1471,23 +1471,43 @@ def check_premium_discount_zone(candles: list, entry: float, direction: str) -> 
 
 # ─── 20. KILL ZONE TIMING BONUS ──────────────────────────────────────────────
 
+_KILL_ZONES = {
+    'asian':        (0,  2),   # 00:00-02:00 UTC — JPY, AUD, NZD only
+    'london':       (7,  10),  # 07:00-10:00 UTC — EUR, GBP, XAUUSD
+    'ny_open':      (12, 15),  # 12:00-15:00 UTC — all pairs
+    'london_close': (15, 16),  # 15:00-16:00 UTC — EUR, GBP bonus window
+}
+
+_PAIR_KILL_ZONES = {
+    'EURUSD':  ['london', 'ny_open', 'london_close'],
+    'GBPUSD':  ['london', 'ny_open', 'london_close'],
+    'XAUUSD':  ['london', 'ny_open', 'london_close'],
+    'USDJPY':  ['asian',  'london', 'ny_open'],
+    'AUDUSD':  ['asian',  'london', 'ny_open'],
+    'NZDUSD':  ['asian',  'london', 'ny_open'],
+    'USDCAD':  ['london', 'ny_open'],
+    'USDCHF':  ['london', 'ny_open'],
+}
+
+_KILL_ZONE_LABELS = {
+    'asian':        "Asian Open",
+    'london':       "London Open",
+    'ny_open':      "NY Open",
+    'london_close': "London Close",
+}
+
 def is_kill_zone(symbol: str) -> tuple[bool, str]:
     """
-    Check if current UTC time falls within a high-probability institutional kill zone.
-    London Kill Zone: 07:00-09:00 UTC
-    NY Kill Zone:     12:00-14:00 UTC
-    NY Lunch Kill Zone: 14:00-16:00 UTC
-    Returns (in_kill_zone, description).
+    Check if current UTC time falls within the pair's ICT kill zone window.
+    Returns (in_kill_zone, label_string).
     """
     hour = datetime.now(timezone.utc).hour
-
-    if 7 <= hour < 9:
-        return True, "Kill zone active — London Kill Zone — peak institutional activity"
-    if 12 <= hour < 14:
-        return True, "Kill zone active — NY Kill Zone — peak institutional activity"
-    if 14 <= hour < 16:
-        return True, "Kill zone active — NY Lunch Kill Zone — peak institutional activity"
-
+    valid_zones = _PAIR_KILL_ZONES.get(symbol.upper(), ['london', 'ny_open'])
+    for zone in valid_zones:
+        start, end = _KILL_ZONES[zone]
+        if start <= hour < end:
+            label = _KILL_ZONE_LABELS[zone]
+            return True, f"Kill zone active — {label} — peak institutional activity"
     return False, ""
 
 
