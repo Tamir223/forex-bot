@@ -401,8 +401,8 @@ if PATTERN_IMPORTS_OK:
                  f"minus={'found' if _mss_minus else 'missing'}")
 
         # Premium/discount: +1 favourable, -1 unfavourable
-        _pd_plus  = _re.search(r'pd_ok\b.{0,200}score\s*\+=\s*1', _src, _re.DOTALL)
-        _pd_minus = _re.search(r'score\s*=\s*max\(0,\s*score\s*-\s*1\)', _src)
+        _pd_plus  = _re.search(r'_zone\b.{0,200}score\s*\+=\s*1', _src, _re.DOTALL)
+        _pd_minus = _re.search(r'_zone\b.{0,200}score\s*=\s*max\(0,\s*score\s*-\s*1\)', _src, _re.DOTALL)
         if _pd_plus and _pd_minus:
             ok("Premium/discount score impact: +1/-1 confirmed")
         else:

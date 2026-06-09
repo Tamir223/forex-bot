@@ -989,15 +989,26 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
             score = max(0, score - 2)
             factors.append(f"⚠️ {mss_desc}")
 
-        # Premium/discount zone filter
+        # Premium/discount zone penalty
         _entry_px = candles[0]["close"]
-        pd_ok, pd_desc = check_premium_discount_zone(candles, _entry_px, direction_str)
-        if pd_desc:
-            if pd_ok:
-                score += 1
-            else:
+        _recent20 = candles[:20]
+        _rng_high = max(c["high"] for c in _recent20)
+        _rng_low = min(c["low"] for c in _recent20)
+        if _rng_high != _rng_low:
+            _equil = (_rng_high + _rng_low) / 2
+            _zone = "discount" if _entry_px <= _equil else "premium"
+            if direction_str == "SELL" and _zone == "discount":
                 score = max(0, score - 1)
-            factors.append(pd_desc)
+                factors.append("⚠️ Selling in discount zone — unfavorable entry")
+            elif direction_str == "BUY" and _zone == "premium":
+                score = max(0, score - 1)
+                factors.append("⚠️ Buying in premium zone — unfavorable entry")
+            elif direction_str == "SELL" and _zone == "premium":
+                score += 1
+                factors.append("✅ Selling in premium zone — optimal entry")
+            elif direction_str == "BUY" and _zone == "discount":
+                score += 1
+                factors.append("✅ Buying in discount zone — optimal entry")
 
         # Trend strength bonus — consecutive same-direction candles confirm momentum
         _trend_streak, _ts_dir = detect_trend_strength(candles)
