@@ -851,12 +851,13 @@ def validate_risk_reward(entry: float, sl: float, tp1: float, min_rr: float = 1.
         return False, 0.0
 
     actual_rr = round(abs(tp1 - entry) / sl_dist, 2)
-    if actual_rr < min_rr:
+    passes = round(actual_rr, 1) >= min_rr
+    if not passes:
         logger.warning(
             f"[RR_check] FAILED — entry={entry} sl={sl} tp1={tp1} "
             f"sl_dist={round(sl_dist, 5)} actual_rr={actual_rr} min={min_rr}"
         )
-    return actual_rr >= min_rr, actual_rr
+    return passes, actual_rr
 
 
 # ─── 13. CORRELATION FILTER ───────────────────────────────────────────────────
