@@ -45,12 +45,6 @@ gemini_client = google_genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY el
 
 CORRELATED_USD_LONGS = {"GBPUSD", "EURUSD", "AUDUSD", "NZDUSD"}
 
-RISK_TIERS = {
-    10: 0.0075,  # 0.75% — Premium
-    9:  0.0050,  # 0.50% — Standard
-    8:  0.0035,  # 0.35% — Conservative — below minimum, skip
-    7:  0.0025,  # 0.25% — Minimal — always skip
-}
 
 _PIP_SIZE = {
     "USDJPY": 0.01, "EURJPY": 0.01, "GBPJPY": 0.01,
@@ -237,8 +231,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         result["signal_source"] = provider or result.get("signal_source") or "UNKNOWN"
         result['lot_size_suggestion'] = None
 
-        # Tiered risk sizing — prefer scanner score injected via account_state (reliable),
-        # fall back to Claude's confidence field (may be a string like "9/10")
+        # Flat risk — all 7-gate signals are equal quality
         _raw_conf = result.get("confidence", 9)
         if isinstance(_raw_conf, str):
             try:
@@ -248,9 +241,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         else:
             confidence_score = int(_raw_conf or 9)
         scanner_score = int(account_state.get('score', confidence_score))
-        risk_val = RISK_TIERS.get(scanner_score, 0.005)
-        if not risk_val or risk_val <= 0:
-            risk_val = 0.005
+        risk_val = 0.0075  # Always 0.75% — all gate-passing signals are equal quality
         result['risk_percent'] = round(risk_val * 100, 4)
         logger.info(f"[risk] score={scanner_score} risk={result['risk_percent']}%")
         risk_percent = result['risk_percent']

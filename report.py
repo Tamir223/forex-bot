@@ -54,13 +54,7 @@ def _risk_line(analysis: dict) -> str:
     conf = analysis.get('confidence', 9)
     risk_rounded = round(float(raw), 2)
     if risk_rounded == 0.75:
-        label = "Premium — full confluence (10/10)"
-    elif risk_rounded == 0.50:
-        label = "Standard (9/10)"
-    elif risk_rounded == 0.35:
-        label = "Conservative (8/10) — below minimum"
-    elif risk_rounded == 0.25:
-        label = "Minimal (7/10) — skip this trade"
+        label = "Institutional (7/7 Gates)"
     else:
         label = ""
     suffix = f" ({label})" if label else ""

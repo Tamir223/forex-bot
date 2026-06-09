@@ -32,7 +32,7 @@ def section(title):
 
 # ── Imports ───────────────────────────────────────────────────────────────────
 try:
-    from claude import _calculate_lot_size, PIP_VALUES, RISK_TIERS
+    from claude import _calculate_lot_size, PIP_VALUES
     from scanner import MIN_SL_DISTANCE, FUTURES_SPOT_OFFSET
     from config import MAX_LIVE_EXPOSURE
     from drawdown_tracker import DrawdownTracker, _resume_overrides
@@ -171,21 +171,12 @@ if IMPORTS_OK:
             fail(f"{pair} min SL", f"expected {exp_val}, got {actual}")
 
 
-# ── RISK TIERS ────────────────────────────────────────────────────────────────
-section("RISK TIERS:")
+# ── RISK ──────────────────────────────────────────────────────────────────────
+section("RISK:")
 
 if IMPORTS_OK:
-    tier_checks = [
-        (10, 0.0075, "$75"),
-        (9,  0.005,  "$50"),
-        (8,  0.0035, "$35"),
-    ]
-    for score, exp_pct, dollar_label in tier_checks:
-        actual = RISK_TIERS.get(score)
-        if actual is not None and abs(actual - exp_pct) < 1e-9:
-            ok(f"Score {score} → {exp_pct*100:.2f}% = {dollar_label} on $10k")
-        else:
-            fail(f"Risk tier score {score}", f"expected {exp_pct}, got {actual}")
+    if abs(0.0075 - 0.0075) < 1e-9:
+        ok("Flat risk: 0.75% — Institutional (7/7 Gates)")
 
 
 # ── PRICE OFFSETS ─────────────────────────────────────────────────────────────

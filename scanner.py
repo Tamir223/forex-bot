@@ -1363,8 +1363,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 return None
 
         # ── BUILD UNIFIED SIGNAL ────────────────────────────────────────────────
-        from claude import RISK_TIERS as _RISK_TIERS, _calculate_lot_size as _cals
-        _risk_pct = _RISK_TIERS.get(10, 0.005) * 100  # all 7 gates passed = top quality
+        from claude import _calculate_lot_size as _cals
+        _risk_pct = 0.75  # Always 0.75% — all gate-passing signals are equal quality
         _sl_dist_for_lots = abs(_sig_entry - _sig_sl) if _sig_sl else _min_sl
         try:
             _lot_full = _cals(_risk_pct, _sl_dist_for_lots, symbol)
@@ -1568,10 +1568,8 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         if not analysis:
             return False
 
-        # Override risk tier and confidence from scanner score — single source of truth
-        from claude import RISK_TIERS as _RISK_TIERS
-        _scanner_risk = _RISK_TIERS.get(_scanner_score, 0.005)
-        _final_risk = round(_scanner_risk * 100, 4)
+        # Flat risk — all gate-passing signals are equal quality
+        _final_risk = 0.75
         analysis['risk_percent'] = _final_risk
         analysis['confidence'] = _scanner_score  # sync confidence display with scanner score
         analysis['score'] = _scanner_score        # ensure score field matches scanner score
