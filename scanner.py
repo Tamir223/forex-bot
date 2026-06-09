@@ -1020,6 +1020,13 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
             score += _ts_bonus
             factors.append(f"Trend strength: {_trend_streak} consecutive candles in signal direction (+{_ts_bonus})")
 
+        # Momentum candles — count of last 10 candles matching signal direction
+        _recent10 = candles[:10]
+        if direction_str == "BUY":
+            _momentum_candles = sum(1 for c in _recent10 if c["close"] > c["open"])
+        else:
+            _momentum_candles = sum(1 for c in _recent10 if c["close"] < c["open"])
+
         # Breakout detection — current close beyond last 5 candle extremes
         if detect_breakout(candles, direction_str):
             score += 2
@@ -1062,6 +1069,7 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         "direction": "BUY" if trend == "bullish" else "SELL" if trend == "bearish" else None,
         "bias_unknown": _bias_unknown,
         "trend_streak": _trend_streak,
+        "momentum_candles": _momentum_candles if candles is not None else 0,
     }
 
 
@@ -1591,10 +1599,13 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         # ── TREND CONTINUATION DETECTION ─────────────────────────────────────
         _trend_streak = score_data.get("trend_streak", 0)
+        _momentum_candles = score_data.get("momentum_candles", 0)
         _is_trend_continuation = (
             market_structure in ("uptrend", "downtrend") and
-            _trend_streak >= 3 and
-            final_score >= 9
+            (
+                (_trend_streak >= 5 and final_score >= 7) or
+                (_momentum_candles >= 8 and final_score >= 6)
+            )
         )
         if _is_trend_continuation:
             score_data["factors"] = score_data.get("factors", []) + ["⚡ Strong trend continuation — market order entry"]
