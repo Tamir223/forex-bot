@@ -278,14 +278,21 @@ assert abs(PIP_VALUES['USDJPY'] - 9.30) < 0.01
 " 2>/dev/null
 check $? "Math: pip values correct (EURUSD/GBPUSD=\$10, XAUUSD=\$100, USDJPY=\$9.30)"
 
-# 34. Risk tiers correct
+# 34. Flat risk 0.75% for all signals (7/7 gates)
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
-from claude import RISK_TIERS
-assert RISK_TIERS[10] == 0.0075
-assert RISK_TIERS[9]  == 0.005
-assert RISK_TIERS[8]  == 0.0035
+import ast, pathlib
+src = pathlib.Path('claude.py').read_text()
+tree = ast.parse(src)
+found = False
+for node in ast.walk(tree):
+    if isinstance(node, ast.Assign):
+        for t in node.targets:
+            if isinstance(t, ast.Name) and t.id == 'risk_val':
+                if isinstance(node.value, ast.Constant) and abs(node.value.value - 0.0075) < 1e-9:
+                    found = True
+assert found, 'risk_val = 0.0075 not found in claude.py'
 " 2>/dev/null
-check $? "Math: risk tiers correct (10=0.75%, 9=0.50%, 8=0.35%)"
+check $? "Math: flat risk 0.75% for all gate-passing signals (7/7 gates)"
 
 # ── SYSTEM INTEGRITY CHECKS ───────────────────────────────────────────────────
 
