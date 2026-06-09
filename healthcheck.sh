@@ -357,15 +357,6 @@ assert hasattr(dt, 'set_resume_override')
 " 2>/dev/null
 check $? "System: DrawdownTracker has get_losses_today / is_signals_paused / set_resume_override"
 
-# 41. /resume command registered in bot.py
-cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
-src = open('bot.py').read()
-assert 'cmd_resume' in src
-assert 'CommandHandler(\"resume\"' in src or \"CommandHandler('resume'\" in src
-assert 'BotCommand(\"resume\"' in src or \"BotCommand('resume'\" in src
-" 2>/dev/null
-check $? "System: /resume command registered in bot.py"
-
 # 42. Signal pause thresholds correct in source
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 import inspect

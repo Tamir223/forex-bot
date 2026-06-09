@@ -108,13 +108,10 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from drawdown_tracker import DrawdownTracker
     dt = DrawdownTracker()
     losses_today = dt.get_losses_today(user.id)
-    paused, pause_reason = dt.is_signals_paused(user.id)
     status_text = get_status_report(state, profile)
     extra = [f"\n📊 Trades Today: {trades_today_count}"]
     if losses_today > 0:
         extra.append(f"❌ Losses Today: {losses_today}")
-    if paused:
-        extra.append(f"⏸ Signals Paused: Yes — {pause_reason}")
     status_text += "\n" + "\n".join(extra)
     await update.message.reply_text(status_text, parse_mode="Markdown")
 
@@ -351,12 +348,3 @@ async def cmd_bias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
-async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = get_user_by_chat_id(str(update.effective_user.id))
-    if not user:
-        await update.message.reply_text("❌ No active subscription.")
-        return
-    from drawdown_tracker import DrawdownTracker
-    dt = DrawdownTracker()
-    dt.set_resume_override(user.id)
-    await update.message.reply_text("✅ Signals resumed. Trade carefully — you have consecutive losses today.")

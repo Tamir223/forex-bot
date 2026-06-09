@@ -887,7 +887,7 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
 
 def build_auto_signal(symbol: str, direction: str, price: float,
                       ob: dict, fvg: dict, structure: dict,
-                      score_data: dict, htf_bias: dict) -> str:
+                      htf_bias: dict) -> str:
     """
     Auto-build a complete formatted signal from scanner data.
     This is what gets sent to the grader when user taps Grade button.
@@ -1006,74 +1006,6 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     )
     return signal
 
-
-def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_data: dict, price_data: dict, htf_bias: dict = None, candles: list = None) -> str:
-    """Format a scan alert for Telegram."""
-    trend = structure.get("trend", "unclear")
-    direction = score_data.get("direction", "")
-    score = score_data.get("score", 0)
-    rec = score_data.get("recommendation", "WEAK")
-    factors = score_data.get("factors", [])
-    current_price = price_data.get("price", "--") if price_data else "--"
-    if current_price == "--" and candles:
-        current_price = candles[0]["close"]
-    if isinstance(current_price, float):
-        # Gold and indices: 2dp; forex: 5dp
-        if symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP:
-            current_price = round(current_price, 3)
-        else:
-            current_price = round(current_price, 5)
-
-    rec_emoji = "🔥" if rec == "STRONG" else "⚡" if rec == "MODERATE" else "👀"
-    dir_emoji = "📈" if direction == "BUY" else "📉" if direction == "SELL" else "↔️"
-
-    lines = [
-        f"{rec_emoji} *{symbol} SETUP DETECTED*",
-        f"{'─' * 28}",
-        f"{dir_emoji} Direction: {direction or 'Unclear'}",
-        f"💰 Price: {current_price}",
-        f"📊 Setup Score: {score}/10 — {rec}",
-        f"📈 Trend: {'Bullish' if direction == 'BUY' else 'Bearish' if direction == 'SELL' else trend.capitalize()}",
-        "",
-        "✅ *Confluence Factors:*",
-    ]
-
-    for f in factors:
-        lines.append(f"  • {f}")
-
-    _disp_offset = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
-
-    if ob:
-        ob_label = "🟢 Bullish OB" if ob["type"] == "bullish_ob" else "🔴 Bearish OB"
-        _ob_low  = round(ob["low"]  + _disp_offset, 3)
-        _ob_high = round(ob["high"] + _disp_offset, 3)
-        _ob_mid  = round(ob["mid"]  + _disp_offset, 3)
-        lines.append(f"\n{ob_label}: {_ob_low} — {_ob_high} (mid: {_ob_mid})")
-
-    if fvg:
-        _fvg_bottom = round(fvg["bottom"] + _disp_offset, 3)
-        _fvg_top    = round(fvg["top"]    + _disp_offset, 3)
-        _fvg_mid = (_fvg_bottom + _fvg_top) / 2
-        _entry_ref = (round(ob["mid"] + _disp_offset, 3) if ob
-                      else (float(current_price) if isinstance(current_price, (int, float)) else _fvg_mid))
-        if direction == "BUY":
-            _fvg_emoji = "🟢"
-            _fvg_desc = "Bullish FVG target" if _fvg_mid > _entry_ref else "FVG support"
-        elif direction == "SELL":
-            _fvg_emoji = "🔴"
-            _fvg_desc = "Bearish FVG target" if _fvg_mid < _entry_ref else "FVG resistance"
-        else:
-            _fvg_emoji = "🟢" if fvg["type"] == "bullish_fvg" else "🔴"
-            _fvg_desc = "Bullish FVG" if fvg["type"] == "bullish_fvg" else "Bearish FVG"
-        lines.append(f"{_fvg_emoji} {_fvg_desc}: {_fvg_bottom} — {_fvg_top}")
-
-    lines += [
-        "",
-        f"⏱ Scanned: {datetime.now(timezone.utc).strftime('%H:%M UTC')} — {get_current_session()} Session",
-        f"📡 Send this signal to the bot to get a full grade and execute report.",
-    ]
-
-    return "\n".join(lines)
 
 
 def format_unified_signal(symbol: str, direction: str,
@@ -1279,7 +1211,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         auto_signal = build_auto_signal(
             symbol, direction, _build_cp,
-            ob, fvg, structure, {}, htf_bias or {}
+            ob, fvg, structure, htf_bias or {}
         )
 
         signal_key = _cache_signal(auto_signal, score=None)
@@ -1407,7 +1339,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             "fvg": fvg,
             "structure": structure,
             "htf_bias": htf_bias or {},
-            "score_data": {"score": 10, "factors": [], "direction": direction},
             "entry":    _sig_entry,
             "sl":       _sig_sl,
             "tp1":      _sig_tp1,
@@ -1421,241 +1352,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
     except Exception as e:
         logger.error(f"[scanner] Error scanning {symbol}: {e}")
         return None
-
-
-async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
-    """
-    Automatically grade a high-score signal and send full report.
-    Called when scanner score is 9 or 10 — no user tap needed.
-    """
-    try:
-        from drawdown_tracker import DrawdownTracker
-        _dt = DrawdownTracker()
-        _paused, _pause_reason = _dt.is_signals_paused(user.id)
-        if _paused:
-            logger.info(f"[auto-grade] {user.id} signals paused — {_pause_reason}")
-            return False
-        _loss_warning = _pause_reason if (not _paused and _pause_reason) else None
-        if _loss_warning:
-            logger.info(f"[auto-grade] {user.id} loss warning — {_loss_warning}")
-
-        signal_text = result.get("auto_signal", "")
-        if not signal_text:
-            return False
-
-        # Entry validation — reject if price has moved outside strict tolerance since signal fired
-        import re as _re
-        _limit_note = None
-        _symbol = result.get("symbol", "")
-        _direction = result.get("direction", "")
-        _entry_match = _re.search(r"Entry Zone:\s*([\d.]+)", signal_text)
-        _live_price = None
-        if _entry_match:
-            _entry_price = float(_entry_match.group(1))
-            if _symbol.upper() in YFINANCE_FUTURES_MAP:
-                _candles = get_candles_yfinance(_symbol, outputsize=5)
-                _live_price = float(_candles[0]["close"]) if _candles else None
-                _tolerance = 5.0
-            elif _symbol.upper() == "XAUUSD":
-                # Use 1m GC=F candle, then subtract futures basis to match spot entry levels
-                try:
-                    _gc_hist = yf.Ticker("GC=F").history(period="1d", interval="1m")
-                    _live_price = float(_gc_hist["Close"].iloc[-1]) if not _gc_hist.empty else None
-                    if _live_price is not None:
-                        _live_price = round(_live_price + FUTURES_SPOT_OFFSET.get("XAUUSD", 0), 3)
-                except Exception:
-                    _live_price = None
-                _tolerance = 8.0  # gold volatility needs wider window than other instruments
-            else:
-                _price_data = get_live_price(_symbol)
-                _live_price = float(_price_data["price"]) if _price_data else None
-                _tolerance = 0.10 if "JPY" in _symbol.upper() else 0.0005
-            if _live_price is not None:
-                logger.info(f"[entry_check] {_symbol} live={_live_price} entry={_entry_price} diff={abs(_live_price - _entry_price):.5f} tolerance={_tolerance}")
-                logger.info(f"[entry_validation] {_symbol} live_spot={_live_price} entry_spot={_entry_price} diff={abs(_live_price - _entry_price)}")
-            if _live_price is not None:
-                if _direction == "SELL" and _entry_price <= _live_price:
-                    logger.info(f"[scanner] {_symbol} SELL entry {_entry_price} not above price {_live_price} — invalid Sell Limit")
-                    return False
-                if _direction == "BUY" and _entry_price >= _live_price:
-                    logger.info(f"[scanner] {_symbol} BUY entry {_entry_price} not below price {_live_price} — invalid Buy Limit")
-                    return False
-
-            if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
-                _score = int(result.get("score", 0))
-                logger.info(f"[grade_block] score={_score} type={type(_score)} direction={_direction} live={_live_price} entry={_entry_price}")
-                if _score == 10:
-                    if _direction == "BUY" and _live_price > _entry_price:
-                        _limit_note = (
-                            f"⚠️ Entry zone passed — price already moved in your direction.\n"
-                            f"📌 LIMIT ORDER SUGGESTION: Set a Buy Limit at {_entry_price} if price retraces back to the OB zone.\n"
-                            f"Cancel limit order before 8:00 AM EDT if unfilled."
-                        )
-                    elif _direction == "SELL" and _live_price < _entry_price:
-                        _limit_note = (
-                            f"⚠️ Entry zone passed — price already moved in your direction.\n"
-                            f"📌 LIMIT ORDER SUGGESTION: Set a Sell Limit at {_entry_price} if price retraces back to the OB zone.\n"
-                            f"Cancel limit order before 8:00 AM EDT if unfilled."
-                        )
-                if _limit_note is None:
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=f"⏰ Signal expired — {_symbol} entry at {_entry_price} but price is now at {_live_price}. Entry zone missed."
-                    )
-                    try:
-                        from database import get_conn
-                        with get_conn() as conn:
-                            with conn.cursor() as cur:
-                                cur.execute(
-                                    "UPDATE trades SET result='CANCELLED' WHERE user_id=%s AND result='PENDING' AND created_at > NOW() - INTERVAL '1 hour'",
-                                    (user.id,)
-                                )
-                            conn.commit()
-                    except Exception as _ce:
-                        logger.error(f"PENDING cleanup error on signal expiry: {_ce}")
-                    return False
-
-        # Regenerate signal with fresh live price so entry reflects current OB zone position
-        _ob = result.get("ob")
-        _fvg = result.get("fvg")
-        if _live_price is not None and (_ob or _fvg):
-            try:
-                # OB/FVG levels are in futures domain (from yFinance candles).
-                # _live_price is already spot (offset applied above), so convert back to
-                # futures domain before passing to build_auto_signal — rp() will re-apply
-                # the offset and all output prices come out correctly in spot domain.
-                _build_price = _live_price - FUTURES_SPOT_OFFSET.get(_symbol.upper(), 0)
-                _fresh_signal = build_auto_signal(
-                    _symbol, _direction, _build_price,
-                    _ob, _fvg,
-                    result.get("structure", {}),
-                    result.get("score_data", {}),
-                    result.get("htf_bias", {}),
-                )
-                if _fresh_signal:
-                    signal_text = _fresh_signal
-                    logger.info(f"[auto-grade] {_symbol} signal regenerated with build_price={_build_price} (spot={_live_price})")
-            except Exception as _regen_err:
-                logger.warning(f"[auto-grade] {_symbol} signal regen failed: {_regen_err} — using cached signal")
-
-        from claude import analyze_signal
-        from report import execute_report, blocked_report
-        from database import get_user_firm, load_challenge_state
-        from prop_firm_profiles import get_profile
-        from drawdown_tracker import state_from_json, check_signal_allowed
-        from database import get_state, log_trade
-        from database import Trade
-
-        firm_code = get_user_firm(user.id)
-        profile = get_profile(firm_code)
-        state = get_state(user.id)
-
-        _scanner_score = int(result.get('score', 9))
-        state_dict = {
-            "trades_today": state.trades_today,
-            "open_trades": state.open_trades,
-            "live_exposure": state.live_exposure,
-            "session_losses": state.session_losses,
-            "weekly_losses": state.weekly_losses,
-            "daily_pnl": state.daily_pnl,
-            "account_size": profile.account_size if profile else 10000.0,
-            "risk_percent": 1.0,
-            "max_contracts": profile.max_contracts if profile else None,
-            "score": _scanner_score,  # inject scanner score so analyze_signal uses it for risk tier
-        }
-
-        analysis = analyze_signal(signal_text, state_dict, user_id=user.id)
-        if not analysis:
-            return False
-
-        # Flat risk — all gate-passing signals are equal quality
-        _final_risk = 0.75
-        analysis['risk_percent'] = _final_risk
-        analysis['confidence'] = _scanner_score  # sync confidence display with scanner score
-        analysis['score'] = _scanner_score        # ensure score field matches scanner score
-        result['risk_percent'] = _final_risk      # keep scan result in sync too
-        logger.info(f"[risk] score={_scanner_score} risk={_final_risk}%")
-
-        block_risk = f"{_final_risk}%"
-
-        # Apply firm risk cap
-        if profile:
-            max_daily_pct = profile.max_daily_loss_pct * 100
-            signal_risk = analysis.get("risk_percent", 0) or 0
-            if max_daily_pct > 0 and signal_risk > (max_daily_pct / 5):
-                analysis["risk_percent"] = round(max_daily_pct / 5, 2)
-            priority_header = f"⚡ AUTO-GRADED — {profile.name}\n🏆 7/7 Gates ✅ — {result['recommendation']}\n"
-        else:
-            priority_header = f"⚡ AUTO-GRADED — 7/7 Gates ✅\n"
-        if _loss_warning:
-            priority_header = f"{_loss_warning}\n\n{priority_header}"
-
-        decision = analysis.get("decision", "").upper()
-        grade = analysis.get("grade", "")
-
-        if decision == "BLOCK" or grade in ["C", "D", "F"]:
-            logger.info(f"[auto-grade] {result['symbol']} blocked — {grade}")
-            if "Entry missed" in analysis.get("reason", ""):
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=f"⛔ {result['symbol']} {_direction} — BLOCKED — Entry missed\n📊 Risk if valid: {block_risk}"
-                )
-                return True
-            else:
-                return False
-
-        report_text = priority_header + execute_report(analysis)
-        if _limit_note:
-            report_text += f"\n\n{_limit_note}"
-
-        _losses_today = _dt.get_losses_today(user.id)
-        if _losses_today == 1:
-            report_text += "\n\n⚠️ 1 loss today — another loss pauses signals. Trade carefully."
-
-        # Store for WIN/LOSS tracking
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        execute_keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ YES — Execute", callback_data="trade_yes"),
-            InlineKeyboardButton("❌ NO — Skip", callback_data="trade_no"),
-        ]])
-
-        await bot.send_message(
-            chat_id=chat_id,
-            text=report_text,
-            parse_mode="Markdown",
-            reply_markup=execute_keyboard
-        )
-
-        # Log the trade
-        trade_id = log_trade(Trade(
-            user_id=user.id,
-            pair=analysis.get("pair", ""),
-            direction=analysis.get("direction", ""),
-            grade=analysis.get("grade", ""),
-            confidence=analysis.get("confidence", 0),
-            signal_source="TNL Scanner (Auto)",
-            risk_percent=analysis.get("risk_percent", 0),
-            entry_zone=str(analysis.get("entry_zone", "")),
-            stop_loss=str(analysis.get("stop_loss", "")),
-        ))
-
-        # Store analysis for WIN/LOSS reply
-        # Use a simple module-level dict accessible from bot.py
-        from bot import last_analysis, last_trade_id
-        last_analysis[chat_id] = analysis
-        if trade_id:
-            last_trade_id[chat_id] = trade_id
-
-        # Don't count trade until user taps YES
-        # log_trade_opened called in callback_trade_button instead
-        logger.info(f"[auto-grade] {result['symbol']} {result['direction']} — {grade} {analysis.get('confidence')}/10 — sent to {chat_id}")
-        return True
-
-    except Exception as e:
-        import traceback
-        logger.error(f"[auto-grade] Error: {e}")
-        logger.error(f"[auto-grade] Traceback: {traceback.format_exc()}")
-        return False
 
 
 async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = False):
