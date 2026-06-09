@@ -779,7 +779,7 @@ def detect_breakout(candles: list, direction: str) -> bool:
     return False
 
 
-def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None, candles: list = None, symbol: str = None, candles_1h: list = None, candles_4h: list = None, daily_bias: dict = None) -> dict:
+def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None, candles: list = None, symbol: str = None, candles_1h: list = None, candles_4h: list = None, daily_bias: dict = None, signal_direction: str = None) -> dict:
     """
     Score the overall setup quality. Returns score 0-10 and recommendation.
     """
@@ -905,7 +905,7 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
         pass
     # Candle-based confluence — liquidity sweep, rejection, previous day levels
     if candles is not None:
-        direction_str = "BUY" if trend == "bullish" else "SELL"
+        direction_str = signal_direction if signal_direction else ("BUY" if trend == "bullish" else "SELL")
         ob_mid = ob["mid"] if ob else (candles[0]["close"] if candles else 0.0)
 
         _factor_offset = FUTURES_SPOT_OFFSET.get(symbol.upper() if symbol else "", 0)
@@ -1448,6 +1448,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             candles_1h=_data.get("candles_1h"),
             candles_4h=_data.get("candles_4h"),
             daily_bias=daily_bias,
+            signal_direction=_gt_direction,
         )
 
         # ── TIER 2: SCORE PENALTIES ──────────────────────────────────────────
