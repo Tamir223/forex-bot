@@ -1530,7 +1530,7 @@ async def check_bias_shifts(symbols: list, bot, user_chat_ids: list):
 
             old_bias = _previous_bias.get(symbol)
 
-            if abs(intraday_move_pct) < 0.1:
+            if abs(intraday_move_pct) < 0.20:
                 logger.info(f"[bias_shift] {symbol} move {intraday_move_pct:.3f}% too small — ignoring")
                 _previous_bias[symbol] = new_bias
                 continue
