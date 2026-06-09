@@ -1159,10 +1159,12 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         atr_data   = _data.get("atr") or None
 
         # ── TIER 1: HARD BLOCKS ──────────────────────────────────────────────
-        news_blocked, news_reason = is_news_window()
+        news_blocked, news_reason, news_warning = is_news_window(symbol)
         if news_blocked:
             logger.info(f"[scanner] {symbol} BLOCKED — {news_reason}")
             return None
+        if news_warning:
+            logger.info(f"[scanner] {symbol} WARNING — {news_warning}")
 
         # Structure and setup detection
         structure = detect_structure(candles)
@@ -1639,7 +1641,7 @@ async def start_scanner(bot, get_active_users_fn):
 
             # ── NEWS RESUMPTION ALERT ────────────────────────────────────────
             global _news_was_blocked, _news_resume_sent
-            _currently_blocked, _ = is_news_window()
+            _currently_blocked, _, _ = is_news_window()
 
             if _currently_blocked and not _news_was_blocked:
                 _news_was_blocked = True

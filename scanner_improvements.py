@@ -80,6 +80,32 @@ _FOMC_DATES_2026 = {
     "2026-07-29", "2026-09-16", "2026-10-28", "2026-12-09",
 }
 
+# Finnhub returns country codes — map to currency for pair matching
+_COUNTRY_TO_CURRENCY = {
+    'US': 'USD',
+    'EU': 'EUR', 'DE': 'EUR', 'FR': 'EUR', 'IT': 'EUR', 'ES': 'EUR',
+    'GB': 'GBP',
+    'JP': 'JPY',
+    'AU': 'AUD',
+    'NZ': 'NZD',
+    'CA': 'CAD',
+    'CH': 'CHF',
+}
+
+_TRADEABLE_CURRENCIES = {'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'NZD', 'CAD', 'CHF'}
+
+# Which currencies are relevant when scanning a given symbol
+_SYMBOL_CURRENCIES: dict = {
+    'EURUSD': {'EUR', 'USD'}, 'GBPUSD': {'GBP', 'USD'},
+    'USDJPY': {'USD', 'JPY'}, 'AUDUSD': {'AUD', 'USD'},
+    'NZDUSD': {'NZD', 'USD'}, 'USDCAD': {'USD', 'CAD'},
+    'USDCHF': {'USD', 'CHF'}, 'EURJPY': {'EUR', 'JPY'},
+    'GBPJPY': {'GBP', 'JPY'}, 'XAUUSD': {'USD'},
+    'XAGUSD': {'USD'}, 'GC': {'USD'}, 'MGC': {'USD'},
+    'ES': {'USD'}, 'MES': {'USD'}, 'NQ': {'USD'}, 'MNQ': {'USD'},
+    'RTY': {'USD'}, 'YM': {'USD'}, 'CL': {'USD'}, 'MCL': {'USD'},
+}
+
 
 def _smart_hardcoded_fallback() -> list:
     """NFP and FOMC only — last resort when Finnhub is unavailable."""
@@ -135,9 +161,19 @@ def fetch_forexfactory_today() -> list:
 
         events: list = []
         for event in data.get('economicCalendar', []):
-            impact = event.get('impact', '')
-            if impact not in ('high', '3'):
+            raw_impact = event.get('impact', '')
+            if raw_impact in ('high', '3'):
+                impact = 'high'
+            elif raw_impact in ('medium', '2'):
+                impact = 'medium'
+            else:
                 continue
+
+            country = event.get('country', '').upper()
+            currency = _COUNTRY_TO_CURRENCY.get(country)
+            if not currency or currency not in _TRADEABLE_CURRENCIES:
+                continue
+
             time_str = event.get('time', '')
             try:
                 if 'T' in time_str:
@@ -152,13 +188,15 @@ def fetch_forexfactory_today() -> list:
                 continue
             events.append({
                 'time_utc': time_utc,
-                'currency': event.get('country', ''),
-                'impact': 'high',
+                'currency': currency,
+                'impact': impact,
                 'event': event.get('event', ''),
             })
-            logger.info(f"[news] High impact event: {event.get('event')} at {time_str} ({event.get('country')})")
+            logger.info(f"[news] {impact.capitalize()} impact event: {event.get('event')} at {time_str} ({currency})")
 
-        logger.info(f"[news] Finnhub calendar: {len(events)} high impact events today")
+        high_count = sum(1 for e in events if e['impact'] == 'high')
+        med_count = sum(1 for e in events if e['impact'] == 'medium')
+        logger.info(f"[news] Finnhub calendar: {high_count} high, {med_count} medium impact events today")
         _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
         return events
 
@@ -167,24 +205,40 @@ def fetch_forexfactory_today() -> list:
         return _smart_hardcoded_fallback()
 
 
-def is_news_window() -> tuple[bool, str]:
+def is_news_window(symbol: str = "") -> tuple[bool, str, str]:
     """
-    Check if current time is within a news window.
-    Returns (is_blocked, reason).
+    Check if current time is within a news window for the given symbol.
+    Returns (is_blocked, block_reason, medium_warning).
+    HIGH impact → block signal entirely (is_blocked=True).
+    MEDIUM impact → warn only (is_blocked=False, medium_warning set).
+    Filters to currencies relevant to symbol; no filtering when symbol is empty.
     """
     now = datetime.now(timezone.utc)
     cur = now.hour * 60 + now.minute
+    relevant = _SYMBOL_CURRENCIES.get(symbol.upper(), set()) if symbol else set()
+    medium_warning = ""
     try:
         for e in fetch_forexfactory_today():
+            if relevant and e['currency'] not in relevant:
+                continue
             ev = e["time_utc"].hour * 60 + e["time_utc"].minute
-            if -NEWS_BLOCK_MINUTES_BEFORE <= (cur - ev) <= NEWS_BLOCK_MINUTES_AFTER:
-                return True, (
-                    f"High impact news: {e['currency']} {e['event']} "
-                    f"at {e['time_utc'].strftime('%H:%M')} UTC"
-                )
+            if e['impact'] == 'high':
+                if -NEWS_BLOCK_MINUTES_BEFORE <= (cur - ev) <= NEWS_BLOCK_MINUTES_AFTER:
+                    reason = (
+                        f"High impact news: {e['currency']} {e['event']} "
+                        f"at {e['time_utc'].strftime('%H:%M')} UTC"
+                    )
+                    return True, reason, ""
+            elif e['impact'] == 'medium' and not medium_warning:
+                if -30 <= (cur - ev) <= 30:
+                    medium_warning = (
+                        f"Medium impact news within 30 min — "
+                        f"{e['currency']} {e['event']} "
+                        f"at {e['time_utc'].strftime('%H:%M')} UTC"
+                    )
     except Exception:
         pass
-    return False, ""
+    return False, "", medium_warning
 
 
 def get_next_news_event() -> str:
@@ -443,11 +497,13 @@ def run_pre_scan_checks(symbol: str, entry_price: float,
     }
 
     # 1. News filter
-    news_blocked, news_reason = is_news_window()
+    news_blocked, news_reason, news_warning = is_news_window(symbol)
     if news_blocked:
         results["news_blocked"] = True
         results["passed"] = False
         results["blocks"].append(f"🚨 {news_reason}")
+    elif news_warning:
+        results["warnings"].append(f"⚠️ {news_warning}")
 
     # 2. Session quality bonus
     session_bonus = get_session_score_bonus(session)
