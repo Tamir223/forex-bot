@@ -9,6 +9,7 @@ import re
 import time
 import anthropic
 import groq
+from google import genai as google_genai
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS, SYSTEM_PROMPT
 from phase4_learning import get_confidence_modifier, get_session, log_trade_insight
 from market import get_live_price, get_atr, check_entry_validity
@@ -19,6 +20,9 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 GROQ_API_KEY = "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"
 groq_client = groq.Groq(api_key=GROQ_API_KEY)
+
+GEMINI_API_KEY = "AQ.Ab8RN6JekawJHWpw2tyeDFzmtvXvn6mf0QC7nwQRy2LLYRME_g"
+gemini_client = google_genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 CORRELATED_USD_LONGS = {"GBPUSD", "EURUSD", "AUDUSD", "NZDUSD"}
 
@@ -146,9 +150,22 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
             raw = _groq_response.choices[0].message.content
             logger.info("[claude] Groq response received")
         except Exception as _groq_err:
-            logger.warning(f"[claude] Groq failed, falling back to Anthropic: {_groq_err}")
+            logger.warning(f"[claude] Groq failed, falling back to Gemini: {_groq_err}")
 
-        # 2. Anthropic fallback
+        # 2. Gemini fallback (free tier — 1,500 req/day, 1M tokens/day)
+        if raw is None and gemini_client:
+            try:
+                _gemini_prompt = f"{SYSTEM_PROMPT}\n\n{full_message}"
+                _gemini_response = gemini_client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=_gemini_prompt,
+                )
+                raw = _gemini_response.text
+                logger.info("[claude] Gemini fallback response received")
+            except Exception as _gemini_err:
+                logger.warning(f"[claude] Gemini failed, falling back to Anthropic: {_gemini_err}")
+
+        # 3. Anthropic fallback
         if raw is None:
             _api_retry_delay = 2
             for _api_attempt in range(3):
@@ -172,7 +189,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
                         logger.error("[claude] All Anthropic attempts failed")
 
         if raw is None:
-            logger.error("[claude] Both Groq and Anthropic failed — returning None")
+            logger.error("[claude] All providers failed (Groq, Gemini, Anthropic) — returning None")
             return None
         cleaned = re.sub(r"```json|```", "", raw).strip()
         result = json.loads(cleaned)

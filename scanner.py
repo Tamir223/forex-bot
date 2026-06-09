@@ -2167,13 +2167,9 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                                 if symbol.upper() not in _user_symbols:
                                     logger.info(f"[scanner] Skipping {symbol} for {chat_id} — not in watchlist")
                                     continue
-                        # Auto-grade scores 9-10 (or 7+ for TREND CONTINUATION).
-                        # Require 10/10 when outside optimal session OR bias data unavailable.
-                        _outside_session = "Outside optimal session" in result.get("alert_text", "")
-                        _bias_unknown = result.get("bias_unknown", False)
-                        _needs_10 = (_outside_session or _bias_unknown) and score < 10
+                        # Auto-grade all signals at 9+. 7/8 show manual grade button only.
                         _is_tc = result.get("is_trend_continuation", False)
-                        _should_auto_grade = (_is_tc and score >= 7) or (score >= 9 and not _needs_10)
+                        _should_auto_grade = score >= 9
                         if _should_auto_grade:
                             from database import get_user_by_chat_id
                             user = get_user_by_chat_id(str(chat_id))
