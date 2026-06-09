@@ -42,47 +42,34 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.twelvedata.com"
 
-# ER-API free tier — updates every 24h so only used when data is fresh (<3600s)
-_er_api_cache: dict = {"rates": {}, "ts": 0.0, "data_ts": 0.0}
-# True = 1/rate (USD-quoted), False = rate directly (USD-base)
-_ER_API_PAIR_MAP: dict = {
-    "EURUSD": ("EUR", True),
-    "GBPUSD": ("GBP", True),
-    "USDJPY": ("JPY", False),
-    "AUDUSD": ("AUD", True),
-    "USDCAD": ("CAD", False),
-    "NZDUSD": ("NZD", True),
-    "USDCHF": ("CHF", False),
-}
+# Per-symbol cache for Yahoo Finance direct API — avoids yfinance internal request cache
+# {ticker: {"price": float, "ts": float}}
+_forex_price_cache: dict = {}
+_FOREX_CACHE_TTL = 30  # seconds
 
 
-def _get_er_api_price(pair: str) -> float | None:
-    """Return ER-API price for a forex pair, cached 60s. Returns None if data is stale (>1h)."""
-    global _er_api_cache
+def _get_yahoo_direct_price(yf_ticker: str) -> float | None:
+    """
+    Fetch regularMarketPrice directly from Yahoo Finance v8 chart API.
+    Bypasses yfinance's internal cache — returns data typically <60s old.
+    Results cached per-ticker for 30s to avoid rate limits.
+    """
     now = _dt.datetime.now(_dt.timezone.utc).timestamp()
-    if now - _er_api_cache["ts"] > 60:
-        try:
-            r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=3)
-            d = r.json()
-            if d.get("result") == "success":
-                _er_api_cache["rates"] = d["rates"]
-                _er_api_cache["ts"] = now
-                _er_api_cache["data_ts"] = float(d.get("time_last_update_unix", 0))
-        except Exception:
-            pass
-
-    data_age = now - _er_api_cache["data_ts"]
-    if data_age > 3600:  # ER-API updates daily — skip if data is older than 1 hour
+    cached = _forex_price_cache.get(yf_ticker)
+    if cached and now - cached["ts"] < _FOREX_CACHE_TTL:
+        return cached["price"]
+    try:
+        r = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_ticker}?interval=1m&range=1d",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=3,
+        )
+        meta = r.json()["chart"]["result"][0]["meta"]
+        price = float(meta["regularMarketPrice"])
+        _forex_price_cache[yf_ticker] = {"price": price, "ts": now}
+        return price
+    except Exception:
         return None
-
-    mapping = _ER_API_PAIR_MAP.get(pair.upper())
-    if not mapping or not _er_api_cache["rates"]:
-        return None
-    currency, inverse = mapping
-    rate = _er_api_cache["rates"].get(currency)
-    if not rate:
-        return None
-    return round(1 / rate if inverse else rate, 5)
 
 # Map common signal pair names to Twelve Data symbols
 SYMBOL_MAP = {
@@ -125,18 +112,19 @@ def normalize_symbol(pair: str) -> str:
 
 
 def _get_live_price_yfinance(pair: str) -> dict | None:
-    """Real-time forex price. Tries ER-API (when fresh) then yFinance fast_info."""
+    """Real-time forex price. Yahoo direct API first, yFinance fast_info fallback."""
     ticker_sym = YFINANCE_FOREX_MAP.get(pair.upper())
     if not ticker_sym:
         return None
 
-    # Method 1: ER-API free tier — only used when data is <1 hour old
-    er_price = _get_er_api_price(pair)
-    if er_price:
-        logger.info(f"[market] ER-API price for {pair}: {er_price}")
-        return {"price": er_price, "symbol": pair, "source": "er-api"}
+    # Method 1: Yahoo Finance v8 direct HTTP — bypasses yfinance cache, ~1-60s fresh
+    price = _get_yahoo_direct_price(ticker_sym)
+    if price is not None:
+        price = round(price, 5)
+        logger.info(f"[market] Yahoo direct price for {pair}: {price}")
+        return {"price": price, "symbol": pair, "source": "yahoo-direct"}
 
-    # Method 2: yFinance fast_info (~1 min delay)
+    # Method 2: yFinance fast_info fallback
     try:
         t = yf.Ticker(ticker_sym)
         try:
@@ -147,7 +135,7 @@ def _get_live_price_yfinance(pair: str) -> dict | None:
                 return None
             price = float(hist['Close'].iloc[-1])
         price = round(price, 5)
-        logger.info(f"[market] yFinance price for {pair}: {price}")
+        logger.info(f"[market] yFinance fallback price for {pair}: {price}")
         return {"price": price, "symbol": pair, "source": "yfinance"}
     except Exception as e:
         logger.error(f"yFinance live price error for {pair}: {e}")
