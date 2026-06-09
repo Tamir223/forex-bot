@@ -1227,7 +1227,7 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
         f"{dir_emoji} Direction: {direction or 'Unclear'}",
         f"💰 Price: {current_price}",
         f"📊 Setup Score: {score}/10 — {rec}",
-        f"📈 Trend: {trend.capitalize()}",
+        f"📈 Trend: {'Bullish' if direction == 'BUY' else 'Bearish' if direction == 'SELL' else trend.capitalize()}",
         "",
         "✅ *Confluence Factors:*",
     ]
@@ -1968,13 +1968,15 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 _sl_pips = "N/A"
             _tc_mc     = result.get("score_data", {}).get("momentum_candles", 0)
             _tc_streak = result.get("score_data", {}).get("trend_streak", 0)
-            _tc_struct = result.get("structure", {}).get("trend", "unknown")
+            _tc_trend  = "BULLISH" if _direction == "BUY" else "BEARISH"
             _tc_htf    = result.get("htf_bias", {})
             _tc_bias   = _tc_htf.get("bias", "unknown") if _tc_htf else "unknown"
             signal_text = (
                 f"TREND CONTINUATION SIGNAL — MARKET ORDER\n"
                 f"Pair: {_symbol}\n"
                 f"Direction: {_direction}\n"
+                f"Trend direction: {_tc_trend} — this is a {_direction} signal\n"
+                f"DO NOT return {'bullish' if _direction == 'SELL' else 'bearish'} trend on a {_direction} signal\n"
                 f"Score: {_scanner_score}/10\n"
                 f"Entry: MARKET ORDER at current price {_live_price} — DO NOT recalculate entry\n"
                 f"Stop Loss: {_tc_sl} ({_sl_pips}) — USE EXACTLY THIS LEVEL\n"
@@ -1982,7 +1984,6 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 f"TP2: {_tc_tp2 if _tc_tp2 != 'N/A' else 'N/A'} (2.5R) — USE EXACTLY THIS LEVEL\n"
                 f"Setup: TREND CONTINUATION\n"
                 f"Momentum: {_tc_mc}/10 candles in signal direction, streak={_tc_streak}\n"
-                f"Market Structure: {_tc_struct}\n"
                 f"HTF Bias: {_tc_bias}\n"
                 f"Action: EXECUTE at market price NOW — do not wait for retracement\n"
                 f"IMPORTANT: DO NOT recalculate SL, TP1, or TP2. Use the exact values provided above.\n"
