@@ -373,8 +373,8 @@ check $? "System: signal pause thresholds (2 losses or \$200 loss)"
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 from scanner_improvements import is_news_window
 result = is_news_window()
-assert isinstance(result, tuple) and len(result) == 2
-blocked, reason = result
+assert isinstance(result, tuple) and len(result) == 3
+blocked, reason, warning = result
 assert isinstance(blocked, bool)
 " 2>/dev/null
 check $? "Signal flow: news filter active and callable"
