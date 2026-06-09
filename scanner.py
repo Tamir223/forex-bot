@@ -1583,14 +1583,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             market_structure in ("uptrend", "downtrend") and
             (_mc_pre >= 8 or _ts_pre >= 5)
         )
-        if final_score < 7 and not _is_strong_momentum:
-            logger.info(f"[scanner] {symbol} score {final_score}/10 — below threshold")
+        if final_score < 9:
+            logger.info(f"[scanner] {symbol} score {final_score}/10 — below alert threshold, silent skip")
             return None
-        elif final_score < 7 and _is_strong_momentum:
-            logger.info(f"[scanner] {symbol} score {final_score}/10 — below threshold but strong momentum override (momentum={_mc_pre} streak={_ts_pre})")
-            final_score = 7
-            score_data["score"] = 7
-            score_data["recommendation"] = "MODERATE"
 
         # OB proximity check — only fire if price is at or near the OB zone.
         # XAUUSD: price_data["price"] is already spot (GC=F + offset).
