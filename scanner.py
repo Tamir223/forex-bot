@@ -916,25 +916,46 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
             _swept_disp = round(swept_level + _factor_offset, 3) if _factor_offset else swept_level
             factors.append(f"Liquidity sweep confirmed at {_swept_disp} — institutional entry signal")
 
-        rej_ok, candle_type = detect_rejection_candle(candles, direction_str, ob_mid)
-        if rej_ok:
-            score += 2
-            factors.append(f"Rejection candle at OB zone: {candle_type}")
-
-        # Contradicting rejection candle — penalise candles that directly oppose signal direction
+        # Unified candle type — one candle, one result, either aligned (+1) or contradicting (-2)
         _c0 = candles[0]
         _c0_body = abs(_c0["close"] - _c0["open"])
-        _c0_upper_wick = _c0["high"] - max(_c0["close"], _c0["open"])
-        _c0_lower_wick = min(_c0["close"], _c0["open"]) - _c0["low"]
-        logger.info(f"[score] {symbol} rejection candle check: type={candle_type} direction={direction_str}")
-        if direction_str == "BUY" and _c0_body > 0 and _c0_upper_wick >= 2 * _c0_body:
+        _c0_upper = _c0["high"] - max(_c0["close"], _c0["open"])
+        _c0_lower = min(_c0["close"], _c0["open"]) - _c0["low"]
+        _most_recent_type = None
+        if _c0_body > 0:
+            if _c0_lower >= 2 * _c0_body:
+                _most_recent_type = "hammer"
+            elif _c0_upper >= 2 * _c0_body:
+                _most_recent_type = "shooting_star"
+            elif len(candles) > 1:
+                _prev = candles[1]
+                if (_c0["close"] > _c0["open"] and _prev["close"] < _prev["open"] and
+                        _c0["close"] >= _prev["open"] and _c0["open"] <= _prev["close"]):
+                    _most_recent_type = "bullish_engulfing"
+                elif (_c0["close"] < _c0["open"] and _prev["close"] > _prev["open"] and
+                        _c0["close"] <= _prev["low"] and _c0["open"] >= _prev["high"]):
+                    _most_recent_type = "bearish_engulfing"
+
+        logger.info(f"[score] {symbol} candle type check: type={_most_recent_type} direction={direction_str}")
+
+        score = min(score, 10)
+
+        if _most_recent_type in ("hammer", "bullish_engulfing") and direction_str == "BUY":
+            score += 1
+            factors.append(f"Aligned candle at OB zone: {_most_recent_type} (+1)")
+            logger.info(f"[score] {symbol} aligned candle {_most_recent_type} on {direction_str} — +1, score now {score}")
+        elif _most_recent_type in ("shooting_star", "bearish_engulfing") and direction_str == "SELL":
+            score += 1
+            factors.append(f"Aligned candle at OB zone: {_most_recent_type} (+1)")
+            logger.info(f"[score] {symbol} aligned candle {_most_recent_type} on {direction_str} — +1, score now {score}")
+        elif _most_recent_type in ("shooting_star", "bearish_engulfing") and direction_str == "BUY":
             score = max(0, score - 2)
-            factors.append("⚠️ Shooting star on BUY signal — directional contradiction (-2)")
-            logger.info(f"[score] {symbol} contradicting candle shooting star on {direction_str} — -2 penalty, score now {score}")
-        elif direction_str == "SELL" and _c0_body > 0 and _c0_lower_wick >= 2 * _c0_body:
+            factors.append(f"⚠️ {_most_recent_type.replace('_', ' ')} on BUY signal — directional contradiction (-2)")
+            logger.info(f"[score] {symbol} contradicting candle {_most_recent_type} on {direction_str} — -2 penalty, score now {score}")
+        elif _most_recent_type in ("hammer", "bullish_engulfing") and direction_str == "SELL":
             score = max(0, score - 2)
-            factors.append("⚠️ Hammer on SELL signal — directional contradiction (-2)")
-            logger.info(f"[score] {symbol} contradicting candle hammer on {direction_str} — -2 penalty, score now {score}")
+            factors.append(f"⚠️ {_most_recent_type.replace('_', ' ')} on SELL signal — directional contradiction (-2)")
+            logger.info(f"[score] {symbol} contradicting candle {_most_recent_type} on {direction_str} — -2 penalty, score now {score}")
 
         pd_levels = get_previous_day_levels(candles)
         pdh = pd_levels.get("pdh")
