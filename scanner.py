@@ -789,27 +789,6 @@ def get_htf_bias(symbol: str, candles_1h: list = None, candles_4h: list = None, 
     return result
 
 
-def detect_trend_strength(candles: list) -> tuple:
-    """
-    Count consecutive same-direction candles from most recent (newest-first list).
-    Returns (count, direction) where direction is 'bullish' or 'bearish'.
-    """
-    if not candles:
-        return 0, ""
-    first = candles[0]
-    if first["close"] == first["open"]:
-        return 0, ""
-    streak_dir = "bullish" if first["close"] > first["open"] else "bearish"
-    count = 0
-    for c in candles:
-        if streak_dir == "bullish" and c["close"] > c["open"]:
-            count += 1
-        elif streak_dir == "bearish" and c["close"] < c["open"]:
-            count += 1
-        else:
-            break
-    return count, streak_dir
-
 
 def detect_breakout(candles: list, direction: str) -> bool:
     """
@@ -1100,7 +1079,7 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
 def format_unified_signal(symbol: str, direction: str,
                           entry: float, sl: float, tp1: float, tp2: float,
                           ob: dict, fvg: dict, structure: dict, htf_bias: dict,
-                          swept_level: float, is_trend_continuation: bool,
+                          swept_level: float,
                           kill_zone_label: str, lot_str: str,
                           gates: dict = None, gate_details: dict = None) -> str:
     """Build the single clean TNL TRADER SIGNAL block — no scan alert, no grade step."""
@@ -1119,9 +1098,7 @@ def format_unified_signal(symbol: str, direction: str,
         _sl_display = f"{round(sl_dist * 10000, 1)} pips"
 
     # Order type
-    if is_trend_continuation:
-        _type_str = "Trend Continuation / MARKET ORDER"
-    elif ob:
+    if ob:
         _type_str = "OB Retracement / LIMIT ORDER"
     elif fvg:
         _type_str = "FVG Fill / LIMIT ORDER"
@@ -1162,10 +1139,7 @@ def format_unified_signal(symbol: str, direction: str,
 
     # Action line
     _dir_word = "Buy" if direction == "BUY" else "Sell"
-    if is_trend_continuation:
-        _action = f"⚡ Market {_dir_word} NOW at {entry:.{_dp}f}"
-    else:
-        _action = f"🔄 Set {_dir_word} Limit at {entry:.{_dp}f}"
+    _action = f"🔄 Set {_dir_word} Limit at {entry:.{_dp}f}"
 
     # Gate checklist — show which of the 7 gates passed
     if gates and gate_details:
@@ -1299,67 +1273,14 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed")
 
-        # ── TREND CONTINUATION DETECTION ───────────────────────────────────────
-        _trend_streak, _ts_dir = detect_trend_strength(candles)
-        _recent10 = candles[:10]
-        if direction == "BUY":
-            _momentum_candles = sum(1 for c in _recent10 if c["close"] > c["open"])
-        else:
-            _momentum_candles = sum(1 for c in _recent10 if c["close"] < c["open"])
-
-        _is_trend_continuation = (
-            market_structure in ("uptrend", "downtrend") and
-            ((_trend_streak >= 5) or (_momentum_candles >= 8))
-        )
-
         # ── BUILD SIGNAL LEVELS ─────────────────────────────────────────────────
         current_price = price_data.get("price", 0) if price_data else 0
         _build_cp = float(current_price) - FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
 
-        if _is_trend_continuation:
-            _atr_val = (atr_data.get("atr", 0) if atr_data else 0) or 0
-            _sl_dist_tc = min(2.0 * _atr_val, _max_sl_dist(symbol)) if _atr_val > 0 else _max_sl_dist(symbol)
-            _sl_dist_tc = max(_sl_dist_tc, _min_sl_dist(symbol))
-            from futures_instruments import is_futures as _is_fut_tc, get_spec as _get_spec_tc
-            _spec_tc = _get_spec_tc(symbol) if _is_fut_tc(symbol) else None
-            _dp_tc = 3 if (_spec_tc or symbol.upper() in ("XAUUSD", "US30", "NAS100")) else 5
-            _tc_entry = round(float(current_price), _dp_tc)
-            if direction == "BUY":
-                _tc_sl  = round(float(current_price) - _sl_dist_tc, _dp_tc)
-                _tc_tp1 = round(float(current_price) + 1.5 * _sl_dist_tc, _dp_tc)
-                _tc_tp2 = round(float(current_price) + 2.5 * _sl_dist_tc, _dp_tc)
-                _tc_tp3 = round(float(current_price) + 4.0 * _sl_dist_tc, _dp_tc)
-            else:
-                _tc_sl  = round(float(current_price) + _sl_dist_tc, _dp_tc)
-                _tc_tp1 = round(float(current_price) - 1.5 * _sl_dist_tc, _dp_tc)
-                _tc_tp2 = round(float(current_price) - 2.5 * _sl_dist_tc, _dp_tc)
-                _tc_tp3 = round(float(current_price) - 4.0 * _sl_dist_tc, _dp_tc)
-            _htf_str = "HTF aligned"
-            if htf_bias:
-                _d1_tc = htf_bias.get("d1_trend", "")
-                _h4_tc = htf_bias.get("h4_trend", "")
-                _h1_tc = htf_bias.get("h1_trend", "")
-                if _d1_tc and _h4_tc and _h1_tc:
-                    _htf_str = f"Daily {_d1_tc}, 4H {_h4_tc}, 1H {_h1_tc}"
-            auto_signal = (
-                f"{symbol} {direction} SIGNAL\n"
-                f"Provider: TNL Scanner\n"
-                f"Timeframe: 15M\n"
-                f"Setup: TREND CONTINUATION\n"
-                f"Entry Zone: {_tc_entry}\n"
-                f"Stop Loss: {_tc_sl}\n"
-                f"TP1: {_tc_tp1}\n"
-                f"TP2: {_tc_tp2}\n"
-                f"TP3: {_tc_tp3}\n"
-                f"Trend: {'Bullish' if direction == 'BUY' else 'Bearish'}\n"
-                f"Confirmation: Yes — all 7 institutional gates passed, {_htf_str}"
-            )
-        else:
-            auto_signal = build_auto_signal(
-                symbol, direction, _build_cp,
-                ob, fvg, structure, {}, htf_bias or {}
-            )
-            _tc_entry = _tc_sl = _tc_tp1 = _tc_tp2 = None
+        auto_signal = build_auto_signal(
+            symbol, direction, _build_cp,
+            ob, fvg, structure, {}, htf_bias or {}
+        )
 
         signal_key = _cache_signal(auto_signal, score=None)
 
@@ -1384,8 +1305,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         _sig_tp2 = float(_sig_tp2_m.group(1)) if _sig_tp2_m else 0.0
 
-        # Entry direction validation (skip for market orders)
-        if not _is_trend_continuation and _sig_entry_m and current_price:
+        # Entry direction validation
+        if _sig_entry_m and current_price:
             _spot_entry_for_dir = float(_sig_entry_m.group(1))
             _spot_price_for_dir = float(current_price)
             if direction == "SELL" and _spot_entry_for_dir <= _spot_price_for_dir:
@@ -1407,7 +1328,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         price_for_ob_check = float(current_price) - _spot_offset if _spot_offset != 0 else float(current_price)
         entry_valid, deviation = validate_entry(symbol, entry_check, price_for_ob_check)
 
-        if not entry_valid and not _is_trend_continuation:
+        if not entry_valid:
             logger.info(f"[scanner] {symbol} entry missed by {deviation} — blocking")
             return None
 
@@ -1463,7 +1384,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             structure=structure,
             htf_bias=htf_bias or {},
             swept_level=_swept_level,
-            is_trend_continuation=_is_trend_continuation,
             kill_zone_label=_kz_label,
             lot_str=_lot_str,
             gates=gates,
@@ -1483,17 +1403,11 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             "deviation": deviation,
             "correlation_warning": corr_warning,
             "bias_unknown": False,
-            "is_trend_continuation": _is_trend_continuation,
-            "tc_entry": _tc_entry,
-            "tc_sl":    _tc_sl,
-            "tc_tp1":   _tc_tp1,
-            "tc_tp2":   _tc_tp2,
             "ob": ob,
             "fvg": fvg,
             "structure": structure,
             "htf_bias": htf_bias or {},
-            "score_data": {"score": 10, "factors": [], "direction": direction,
-                           "momentum_candles": _momentum_candles, "trend_streak": _trend_streak},
+            "score_data": {"score": 10, "factors": [], "direction": direction},
             "entry":    _sig_entry,
             "sl":       _sig_sl,
             "tp1":      _sig_tp1,
@@ -1534,7 +1448,6 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         _limit_note = None
         _symbol = result.get("symbol", "")
         _direction = result.get("direction", "")
-        _is_tc = result.get("is_trend_continuation", False)
         _entry_match = _re.search(r"Entry Zone:\s*([\d.]+)", signal_text)
         _live_price = None
         if _entry_match:
@@ -1560,8 +1473,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             if _live_price is not None:
                 logger.info(f"[entry_check] {_symbol} live={_live_price} entry={_entry_price} diff={abs(_live_price - _entry_price):.5f} tolerance={_tolerance}")
                 logger.info(f"[entry_validation] {_symbol} live_spot={_live_price} entry_spot={_entry_price} diff={abs(_live_price - _entry_price)}")
-            # Direction validation — skip for TREND CONTINUATION (market order, entry = current price)
-            if _live_price is not None and not _is_tc:
+            if _live_price is not None:
                 if _direction == "SELL" and _entry_price <= _live_price:
                     logger.info(f"[scanner] {_symbol} SELL entry {_entry_price} not above price {_live_price} — invalid Sell Limit")
                     return False
@@ -1569,7 +1481,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                     logger.info(f"[scanner] {_symbol} BUY entry {_entry_price} not below price {_live_price} — invalid Buy Limit")
                     return False
 
-            if _live_price is not None and not _is_tc and abs(_live_price - _entry_price) > _tolerance:
+            if _live_price is not None and abs(_live_price - _entry_price) > _tolerance:
                 _score = int(result.get("score", 0))
                 logger.info(f"[grade_block] score={_score} type={type(_score)} direction={_direction} live={_live_price} entry={_entry_price}")
                 if _score == 10:
@@ -1652,49 +1564,6 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             "score": _scanner_score,  # inject scanner score so analyze_signal uses it for risk tier
         }
 
-        # For TC signals, use scanner-calculated levels directly from result dict
-        _tc_sl_f = _tc_tp1_f = _tc_tp2_f = None  # floats for post-grade override
-        if _is_tc and _live_price is not None:
-            _tc_sl_f  = result.get("tc_sl")
-            _tc_tp1_f = result.get("tc_tp1")
-            _tc_tp2_f = result.get("tc_tp2")
-            _tc_sl  = str(_tc_sl_f)  if _tc_sl_f  is not None else "N/A"
-            _tc_tp1 = str(_tc_tp1_f) if _tc_tp1_f is not None else "N/A"
-            _tc_tp2 = str(_tc_tp2_f) if _tc_tp2_f is not None else "N/A"
-            # Calculate SL distance in pips/points for Groq context
-            if _tc_sl_f is not None:
-                _raw_dist = abs(_live_price - _tc_sl_f)
-                if "JPY" in _symbol.upper():
-                    _sl_pips = f"{round(_raw_dist * 100, 1)} pips"
-                elif _symbol.upper() in ("XAUUSD",) or _symbol.upper() in YFINANCE_FUTURES_MAP:
-                    _sl_pips = f"{round(_raw_dist, 1)} points"
-                else:
-                    _sl_pips = f"{round(_raw_dist * 10000, 1)} pips"
-            else:
-                _sl_pips = "N/A"
-            _tc_mc     = result.get("score_data", {}).get("momentum_candles", 0)
-            _tc_streak = result.get("score_data", {}).get("trend_streak", 0)
-            _tc_trend  = "BULLISH" if _direction == "BUY" else "BEARISH"
-            _tc_htf    = result.get("htf_bias", {})
-            _tc_bias   = _tc_htf.get("bias", "unknown") if _tc_htf else "unknown"
-            signal_text = (
-                f"TREND CONTINUATION SIGNAL — MARKET ORDER\n"
-                f"Pair: {_symbol}\n"
-                f"Direction: {_direction}\n"
-                f"Trend direction: {_tc_trend} — this is a {_direction} signal\n"
-                f"DO NOT return {'bullish' if _direction == 'SELL' else 'bearish'} trend on a {_direction} signal\n"
-                f"Entry: MARKET ORDER at current price {_live_price} — DO NOT recalculate entry\n"
-                f"Stop Loss: {_tc_sl} ({_sl_pips}) — USE EXACTLY THIS LEVEL\n"
-                f"TP1: {_tc_tp1} (1.5R) — USE EXACTLY THIS LEVEL\n"
-                f"TP2: {_tc_tp2 if _tc_tp2 != 'N/A' else 'N/A'} (2.5R) — USE EXACTLY THIS LEVEL\n"
-                f"Setup: TREND CONTINUATION\n"
-                f"Momentum: {_tc_mc}/10 candles in signal direction, streak={_tc_streak}\n"
-                f"HTF Bias: {_tc_bias}\n"
-                f"Action: EXECUTE at market price NOW — do not wait for retracement\n"
-                f"IMPORTANT: DO NOT recalculate SL, TP1, or TP2. Use the exact values provided above.\n"
-            )
-            logger.info(f"[auto-grade] {_symbol} TC signal text built for Groq — entry={_live_price} sl={_tc_sl} ({_sl_pips}) tp1={_tc_tp1}")
-
         analysis = analyze_signal(signal_text, state_dict, user_id=user.id)
         if not analysis:
             return False
@@ -1708,16 +1577,6 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         analysis['score'] = _scanner_score        # ensure score field matches scanner score
         result['risk_percent'] = _final_risk      # keep scan result in sync too
         logger.info(f"[risk] score={_scanner_score} risk={_final_risk}%")
-
-        # TC signals: override Groq's levels with scanner-calculated values
-        if _is_tc and _live_price is not None:
-            analysis['entry_zone'] = _live_price
-            if _tc_sl_f  is not None: analysis['stop_loss'] = _tc_sl_f
-            if _tc_tp1_f is not None: analysis['tp1']       = _tc_tp1_f
-            if _tc_tp2_f is not None: analysis['tp2']       = _tc_tp2_f
-            analysis['tp1_rr'] = "1.5R"
-            analysis['tp2_rr'] = "2.5R"
-            logger.info(f"[auto-grade] {_symbol} TC levels locked — entry={_live_price} sl={_tc_sl_f} tp1={_tc_tp1_f} tp2={_tc_tp2_f}")
 
         block_risk = f"{_final_risk}%"
 
@@ -1739,16 +1598,12 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         if decision == "BLOCK" or grade in ["C", "D", "F"]:
             logger.info(f"[auto-grade] {result['symbol']} blocked — {grade}")
             if "Entry missed" in analysis.get("reason", ""):
-                if _is_tc:
-                    # TC signals are market orders — entry IS current price, never "missed"
-                    logger.info(f"[auto-grade] {result['symbol']} TC signal — ignoring LLM entry missed block, continuing")
-                else:
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=f"⛔ {result['symbol']} {_direction} — BLOCKED — Entry missed\n📊 Risk if valid: {block_risk}"
-                    )
-                    return True
-            elif not _is_tc:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⛔ {result['symbol']} {_direction} — BLOCKED — Entry missed\n📊 Risk if valid: {block_risk}"
+                )
+                return True
+            else:
                 return False
 
         report_text = priority_header + execute_report(analysis)
