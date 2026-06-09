@@ -5,6 +5,7 @@ Free tier: 800 requests/day, 8 requests/minute.
 """
 
 import logging
+import datetime as _dt
 import requests
 import yfinance as yf
 from config import TWELVE_DATA_API_KEY
@@ -120,26 +121,65 @@ def get_live_price(pair: str) -> dict:
         try:
             t = yf.Ticker(yf_ticker)
 
-            # Method 1: 1-minute candle most recent close — freshest data
             if upper == "XAUUSD":
+                _stale_1m_raw = None
+
+                # Method 1: 1m candle — fresh within 5 minutes
                 try:
-                    import datetime as _dt
-                    hist = t.history(period="1d", interval="1m")
-                    if len(hist) > 0:
-                        raw = float(hist['Close'].iloc[-1])
-                        last_time = hist.index[-1]
+                    hist1m = t.history(period="1d", interval="1m")
+                    if len(hist1m) > 0:
+                        raw1m = float(hist1m['Close'].iloc[-1])
+                        last_time = hist1m.index[-1]
                         if hasattr(last_time, 'tzinfo') and last_time.tzinfo:
                             age = (_dt.datetime.now(_dt.timezone.utc) - last_time).total_seconds()
                         else:
                             age = 0
-                        if age < 120:  # candle less than 2 minutes old — fresh
-                            price = round(raw + _FUTURES_SPOT_OFFSET.get(upper, 0), 2)
+                        if age < 300:
+                            price = round(raw1m + _FUTURES_SPOT_OFFSET.get(upper, 0), 2)
                             return {"price": price, "symbol": pair}
-                        logger.warning(f"[market] XAUUSD 1m candle stale ({age:.0f}s) — falling back to fast_info")
+                        _stale_1m_raw = raw1m
+                        logger.warning(f"[market] XAUUSD 1m candle stale ({age:.0f}s) — trying 2m fallback")
                 except Exception as _e1:
-                    logger.warning(f"[market] XAUUSD 1m candle error: {_e1} — falling back to fast_info")
+                    logger.warning(f"[market] XAUUSD 1m candle error: {_e1} — trying 2m fallback")
 
-            # Method 2: fast_info fallback (or primary for non-XAUUSD futures)
+                # Method 2: 2m candle fallback
+                try:
+                    hist2m = t.history(period="1d", interval="2m")
+                    if len(hist2m) > 0:
+                        raw2m = float(hist2m['Close'].iloc[-1])
+                        last_time2 = hist2m.index[-1]
+                        if hasattr(last_time2, 'tzinfo') and last_time2.tzinfo:
+                            age2 = (_dt.datetime.now(_dt.timezone.utc) - last_time2).total_seconds()
+                        else:
+                            age2 = 0
+                        if age2 < 600:
+                            price = round(raw2m + _FUTURES_SPOT_OFFSET.get(upper, 0), 2)
+                            return {"price": price, "symbol": pair}
+                        logger.warning(f"[market] XAUUSD 2m candle stale ({age2:.0f}s) — falling back to fast_info")
+                except Exception as _e2:
+                    logger.warning(f"[market] XAUUSD 2m candle error: {_e2} — falling back to fast_info")
+
+                # Method 3: fast_info — compare with stale 1m close for directional correction
+                try:
+                    raw_fi = float(t.fast_info['last_price'])
+                    if _stale_1m_raw is not None:
+                        # fast_info lags ~5-7 pts during active sessions;
+                        # 1m close reflects the most recent confirmed price
+                        if _stale_1m_raw > raw_fi:  # bullish — 1m higher, use higher
+                            raw = _stale_1m_raw
+                        else:                        # bearish — 1m lower, use lower
+                            raw = _stale_1m_raw
+                    else:
+                        raw = raw_fi
+                except Exception:
+                    if _stale_1m_raw is not None:
+                        raw = _stale_1m_raw
+                    else:
+                        return None
+                price = round(raw + _FUTURES_SPOT_OFFSET.get(upper, 0), 2)
+                return {"price": price, "symbol": pair}
+
+            # Non-XAUUSD futures: fast_info primary, 1m candle fallback
             try:
                 raw = float(t.fast_info['last_price'])
             except Exception:
