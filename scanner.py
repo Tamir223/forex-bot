@@ -1471,6 +1471,12 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} direction locked {_lock['direction']} — blocking {direction} signal")
                 return None
 
+        # ── STEP 4: CHoCH bonus — trend reversal confirmation ─────────────────
+        if ms.get("choch"):
+            score_data["score"] = min(10, score_data["score"] + 2)
+            score_data["factors"] = score_data.get("factors", []) + ["🔄 CHoCH — trend reversal confirmed"]
+            logger.info(f"[scanner] {symbol} CHoCH detected — trend reversal confirmed")
+
         # ── STEP 6 addendum: Strength-based score adjustment ─────────────────
         if _gt_strength == "strong":
             _ms_text = "Higher highs + Higher lows" if direction == "BUY" else "Lower highs + Lower lows"
@@ -1486,16 +1492,13 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             ]
             score_data["score"] = max(0, score_data["score"] - 1)
 
-        # ── STEP 4: CHoCH bonus — trend reversal confirmation ─────────────────
-        if ms.get("choch"):
-            score_data["score"] = min(10, score_data["score"] + 2)
-            score_data["factors"] = score_data.get("factors", []) + ["🔄 CHoCH — trend reversal confirmed"]
-            logger.info(f"[scanner] {symbol} CHoCH detected — trend reversal confirmed")
-
-        # Hard cap — ranging market can never score above 7 (applied after all bonuses)
+        # Hard cap — ranging market can never score above 7 (applied after CHoCH and strength bonuses)
         if is_ranging_candles and is_ranging_structure:
             score_data["score"] = min(score_data["score"], 7)
-            logger.info(f"[scanner] {symbol} ranging hard cap — score capped at 7")
+            logger.info(f"[scanner] {symbol} ranging hard cap applied — score capped at 7")
+
+        # Overall cap
+        score_data["score"] = min(score_data["score"], 10)
 
         final_score = score_data["score"]
         score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
