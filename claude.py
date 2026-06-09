@@ -8,6 +8,7 @@ import logging
 import re
 import time
 import anthropic
+import groq
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS, SYSTEM_PROMPT
 from phase4_learning import get_confidence_modifier, get_session, log_trade_insight
 from market import get_live_price, get_atr, check_entry_validity
@@ -15,6 +16,9 @@ from trading_calendar import check_news_window
 
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+GROQ_API_KEY = "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"
+groq_client = groq.Groq(api_key=GROQ_API_KEY)
 
 CORRELATED_USD_LONGS = {"GBPUSD", "EURUSD", "AUDUSD", "NZDUSD"}
 
@@ -127,28 +131,49 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         # Build full message
         full_message = _build_message(account_state, market_ctx, signal_text)
 
-        _api_retry_delay = 2
-        message = None
-        for _api_attempt in range(3):
-            try:
-                message = client.messages.create(
-                    model=CLAUDE_MODEL,
-                    max_tokens=CLAUDE_MAX_TOKENS,
-                    system=SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": full_message}]
-                )
-                break
-            except Exception as _api_err:
-                logger.error(f"[claude] API attempt {_api_attempt + 1} failed: {_api_err}")
-                if _api_attempt < 2:
-                    logger.info(f"[claude] Retrying in {_api_retry_delay}s...")
-                    time.sleep(_api_retry_delay)
-                    _api_retry_delay *= 2
-                else:
-                    logger.error(f"[claude] All 3 attempts failed")
-                    return None
+        raw = None
 
-        raw = message.content[0].text
+        # 1. Try Groq (primary — free and fast)
+        try:
+            _groq_response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": full_message},
+                ],
+                max_tokens=1000,
+            )
+            raw = _groq_response.choices[0].message.content
+            logger.info("[claude] Groq response received")
+        except Exception as _groq_err:
+            logger.warning(f"[claude] Groq failed, falling back to Anthropic: {_groq_err}")
+
+        # 2. Anthropic fallback
+        if raw is None:
+            _api_retry_delay = 2
+            for _api_attempt in range(3):
+                try:
+                    _anth_response = client.messages.create(
+                        model=CLAUDE_MODEL,
+                        max_tokens=CLAUDE_MAX_TOKENS,
+                        system=SYSTEM_PROMPT,
+                        messages=[{"role": "user", "content": full_message}],
+                    )
+                    raw = _anth_response.content[0].text
+                    logger.info("[claude] Anthropic fallback response received")
+                    break
+                except Exception as _api_err:
+                    logger.error(f"[claude] Anthropic attempt {_api_attempt + 1} failed: {_api_err}")
+                    if _api_attempt < 2:
+                        logger.info(f"[claude] Retrying in {_api_retry_delay}s...")
+                        time.sleep(_api_retry_delay)
+                        _api_retry_delay *= 2
+                    else:
+                        logger.error("[claude] All Anthropic attempts failed")
+
+        if raw is None:
+            logger.error("[claude] Both Groq and Anthropic failed — returning None")
+            return None
         cleaned = re.sub(r"```json|```", "", raw).strip()
         result = json.loads(cleaned)
 
