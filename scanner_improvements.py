@@ -10,7 +10,7 @@ Scanner Improvements — 6 upgrades for better market reading
 
 import logging
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -81,190 +81,13 @@ _FOMC_DATES_2026 = {
 }
 
 
-def fetch_forexfactory_today() -> list:
-    """
-    Fetch today's high-impact events. Caches result for 60 minutes.
-    Returns list of dicts: {time_utc, currency, event, impact}.
-    Four-strategy fallback: FF HTML → Investing.com → FF JSON → smart hardcoded.
-    """
+def _smart_hardcoded_fallback() -> list:
+    """NFP and FOMC only — last resort when Finnhub is unavailable."""
     import time as _t
     now = datetime.now(timezone.utc)
-
-    if _FF_CACHE["events"] is not None and (_t.time() - _FF_CACHE["fetched_at"]) < _FF_CACHE_TTL:
-        return _FF_CACHE["events"]
-
     events: list = []
-
-    def _cache_and_return(evs: list, source: str) -> list:
-        logger.info(f"[news] {source}: {len(evs)} high-impact events today")
-        for e in evs:
-            logger.info(f"[news]  {e['time_utc'].strftime('%H:%M UTC')}  {e['currency']}  {e['event']}")
-        _FF_CACHE.update({"events": evs, "fetched_at": _t.time()})
-        return evs
-
-    def _parse_ff_html(html: str) -> list:
-        from bs4 import BeautifulSoup
-        evs = []
-        soup = BeautifulSoup(html, "html.parser")
-        table = soup.find("table", class_="calendar__table")
-        if not table:
-            return evs
-        today_date = now.date()
-        in_today = False
-        current_time_str = ""
-        for row in table.find_all("tr"):
-            row_classes = row.get("class", [])
-            if "calendar__row--new-day" in row_classes:
-                date_td = row.find("td", class_="calendar__date")
-                if date_td:
-                    raw = date_td.get_text(strip=True).replace("\xa0", "")
-                    try:
-                        row_date = datetime.strptime(
-                            f"{raw} {today_date.year}", "%a%b %d %Y"
-                        ).date()
-                        in_today = (row_date == today_date)
-                        current_time_str = ""
-                    except Exception:
-                        in_today = False
-                time_td = row.find("td", class_="calendar__time")
-                if time_td and in_today:
-                    t_text = time_td.get_text(strip=True).replace("\xa0", "").strip()
-                    if t_text and t_text not in ("Tentative", "All Day", ""):
-                        current_time_str = t_text
-            if not in_today or "calendar__row" not in row_classes:
-                continue
-            impact_td = row.find("td", class_="calendar__impact")
-            if not impact_td:
-                continue
-            if not impact_td.find(class_=lambda c: c and "red" in str(c).lower()):
-                continue
-            time_td = row.find("td", class_="calendar__time")
-            if time_td:
-                t_text = time_td.get_text(strip=True).replace("\xa0", "").strip()
-                if t_text and t_text not in ("Tentative", "All Day", ""):
-                    current_time_str = t_text
-            if not current_time_str or current_time_str in ("Tentative", "All Day"):
-                continue
-            cur_td = row.find("td", class_="calendar__currency")
-            currency = cur_td.get_text(strip=True) if cur_td else ""
-            ev_td = row.find("td", class_="calendar__event")
-            event_title = ""
-            if ev_td:
-                title_el = ev_td.find(class_="calendar__event-title")
-                event_title = (title_el or ev_td).get_text(strip=True)
-            try:
-                t = datetime.strptime(current_time_str.upper(), "%I:%M%p")
-                utc_min = _et_to_utc_minutes(t.hour, t.minute)
-                utc_h, utc_m = divmod(utc_min, 60)
-                evs.append({
-                    "time_utc": now.replace(hour=utc_h, minute=utc_m, second=0, microsecond=0),
-                    "currency": currency,
-                    "event": event_title,
-                    "impact": "high",
-                })
-            except Exception:
-                continue
-        return evs
-
-    # ── Strategy 1: ForexFactory HTML (2 attempts, 5s apart) ─────────────────
-    for _attempt in range(2):
-        try:
-            resp = requests.get(
-                "https://www.forexfactory.com/calendar.php?day=today",
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.5",
-                    "Accept-Encoding": "gzip, deflate",
-                    "Connection": "keep-alive",
-                },
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                events = _parse_ff_html(resp.text)
-            if events:
-                return _cache_and_return(events, f"ForexFactory HTML (attempt {_attempt + 1})")
-            break  # succeeded but no events — skip retry, fall to Strategy 2
-        except Exception as _e:
-            logger.debug(f"[news] FF HTML fetch failed (attempt {_attempt + 1}): {_e}")
-            if _attempt == 0:
-                _t.sleep(5)
-
-    # ── Strategy 2: Investing.com economic calendar API ───────────────────────
-    try:
-        today_str = now.strftime("%Y-%m-%d")
-        resp = requests.get(
-            "https://api.investing.com/api/financialdata/calendar/economic",
-            params={"from": today_str, "to": today_str, "importance": "high"},
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "X-Requested-With": "XMLHttpRequest",
-            },
-            timeout=8,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            for item in (data.get("data") or data if isinstance(data, list) else []):
-                ev_time = item.get("time") or item.get("event_time", "")
-                currency = item.get("currency") or item.get("country", "")
-                title = item.get("event") or item.get("name", "?")
-                if not ev_time:
-                    continue
-                try:
-                    t = datetime.strptime(str(ev_time).upper(), "%I:%M%p")
-                    utc_min = _et_to_utc_minutes(t.hour, t.minute)
-                    utc_h, utc_m = divmod(utc_min, 60)
-                    events.append({
-                        "time_utc": now.replace(hour=utc_h, minute=utc_m, second=0, microsecond=0),
-                        "currency": currency,
-                        "event": title,
-                        "impact": "high",
-                    })
-                except Exception:
-                    continue
-        if events:
-            return _cache_and_return(events, "Investing.com API")
-    except Exception as _e:
-        logger.debug(f"[news] Investing.com API failed: {_e}")
-
-    # ── Strategy 3: nfs.faireconomy.media JSON feed ───────────────────────────
-    try:
-        resp = requests.get(
-            "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-            timeout=6,
-        )
-        if resp.status_code == 200:
-            today_str = now.strftime("%Y-%m-%d")
-            for item in resp.json():
-                if item.get("impact") != "High":
-                    continue
-                if today_str not in item.get("date", ""):
-                    continue
-                ev_time = item.get("time", "")
-                if not ev_time or ev_time == "Tentative":
-                    continue
-                try:
-                    t = datetime.strptime(ev_time.upper(), "%I:%M%p")
-                    utc_min = _et_to_utc_minutes(t.hour, t.minute)
-                    utc_h, utc_m = divmod(utc_min, 60)
-                    events.append({
-                        "time_utc": now.replace(hour=utc_h, minute=utc_m, second=0, microsecond=0),
-                        "currency": item.get("country", ""),
-                        "event": item.get("title", "?"),
-                        "impact": "high",
-                    })
-                except Exception:
-                    continue
-        if events:
-            return _cache_and_return(events, "FF JSON feed")
-    except Exception as _e:
-        logger.debug(f"[news] FF JSON feed failed: {_e}")
-
-    # ── Strategy 4: Smart hardcoded fallback — NFP and FOMC only ─────────────
-    logger.warning("[news] All live feeds failed — using smart hardcoded fallback")
     today_iso = now.date().isoformat()
     if is_nfp_friday():
-        # NFP releases at 8:30 AM ET = 12:30 UTC (EDT) / 13:30 UTC (EST)
         nfp_utc_h = 12 if (3 <= now.month <= 11) else 13
         events.append({
             "time_utc": now.replace(hour=nfp_utc_h, minute=30, second=0, microsecond=0),
@@ -283,6 +106,65 @@ def fetch_forexfactory_today() -> list:
         logger.info("[news] Hardcoded: FOMC date detected — blocking 18:00 UTC")
     _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
     return events
+
+
+def fetch_forexfactory_today() -> list:
+    """
+    Fetch today's high-impact events from Finnhub economic calendar. Caches result for 60 minutes.
+    Returns list of dicts: {time_utc, currency, event, impact}.
+    Falls back to smart hardcoded fallback (NFP/FOMC only) when Finnhub is unavailable.
+    """
+    import time as _t
+    now = datetime.now(timezone.utc)
+
+    if _FF_CACHE["events"] is not None and (_t.time() - _FF_CACHE["fetched_at"]) < _FF_CACHE_TTL:
+        return _FF_CACHE["events"]
+
+    try:
+        today = now.strftime("%Y-%m-%d")
+        tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        url = (
+            f"https://finnhub.io/api/v1/calendar/economic"
+            f"?from={today}&to={tomorrow}"
+            f"&token=d8k8lehr01qjgd6soecgd8k8lehr01qjgd6soed0"
+        )
+
+        response = requests.get(url, timeout=5)
+        data = response.json()
+
+        events: list = []
+        for event in data.get('economicCalendar', []):
+            impact = event.get('impact', '')
+            if impact not in ('high', '3'):
+                continue
+            time_str = event.get('time', '')
+            try:
+                if 'T' in time_str:
+                    time_utc = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+                elif time_str:
+                    time_utc = datetime.strptime(time_str[:16], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+                else:
+                    continue
+                if time_utc.date() != now.date():
+                    continue
+            except Exception:
+                continue
+            events.append({
+                'time_utc': time_utc,
+                'currency': event.get('country', ''),
+                'impact': 'high',
+                'event': event.get('event', ''),
+            })
+            logger.info(f"[news] High impact event: {event.get('event')} at {time_str} ({event.get('country')})")
+
+        logger.info(f"[news] Finnhub calendar: {len(events)} high impact events today")
+        _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
+        return events
+
+    except Exception as e:
+        logger.warning(f"[news] Finnhub failed: {e} — using smart hardcoded fallback")
+        return _smart_hardcoded_fallback()
 
 
 def is_news_window() -> tuple[bool, str]:
