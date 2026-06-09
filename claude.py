@@ -9,11 +9,30 @@ import re
 import time
 import anthropic
 import groq
-from google import genai as google_genai
-from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS, SYSTEM_PROMPT
+import google.generativeai as genai
+from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS
 from phase4_learning import get_confidence_modifier, get_session, log_trade_insight
 from market import get_live_price, get_atr, check_entry_validity
 from trading_calendar import check_news_window
+
+GRADE_PROMPT = """You are a forex signal grader. Respond in JSON only.
+
+Given a trading signal, return:
+{
+  "grade": "A+" or "A" or "B" or "C",
+  "confidence": <score 1-10>,
+  "decision": "EXECUTE" or "SKIP",
+  "signal_source": "TNL Scanner",
+  "entry_zone": <price>,
+  "stop_loss": <price>,
+  "tp1": <price>,
+  "tp2": <price>,
+  "trend": "bullish" or "bearish",
+  "reason": "<one sentence>"
+}
+
+Grade A+ = score 9-10, Grade A = score 8, Grade B = score 7, Grade C = score below 7.
+EXECUTE if grade A or above. SKIP if grade B or below."""
 
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -21,8 +40,9 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 GROQ_API_KEY = "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"
 groq_client = groq.Groq(api_key=GROQ_API_KEY)
 
-GEMINI_API_KEY = "AQ.Ab8RN6JekawJHWpw2tyeDFzmtvXvn6mf0QC7nwQRy2LLYRME_g"
-gemini_client = google_genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+GEMINI_API_KEY = "AQ.Ab8RN6JEDbtxxD0Sppau03P0YVMDHXo7W5SXu0ibe22H-s2Wlw"
+genai.configure(api_key=GEMINI_API_KEY)
+gemini_model = genai.GenerativeModel('gemini-2.0-flash-lite') if GEMINI_API_KEY else None
 
 CORRELATED_USD_LONGS = {"GBPUSD", "EURUSD", "AUDUSD", "NZDUSD"}
 
@@ -142,7 +162,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
             _groq_response = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": GRADE_PROMPT},
                     {"role": "user", "content": full_message},
                 ],
                 max_tokens=1000,
@@ -153,13 +173,10 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
             logger.warning(f"[claude] Groq failed, falling back to Gemini: {_groq_err}")
 
         # 2. Gemini fallback (free tier — 1,500 req/day, 1M tokens/day)
-        if raw is None and gemini_client:
+        if raw is None and gemini_model:
             try:
-                _gemini_prompt = f"{SYSTEM_PROMPT}\n\n{full_message}"
-                _gemini_response = gemini_client.models.generate_content(
-                    model="gemini-2.0-flash",
-                    contents=_gemini_prompt,
-                )
+                _gemini_prompt = f"{GRADE_PROMPT}\n\n{full_message}"
+                _gemini_response = gemini_model.generate_content(_gemini_prompt)
                 raw = _gemini_response.text
                 logger.info("[claude] Gemini fallback response received")
             except Exception as _gemini_err:
@@ -173,7 +190,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
                     _anth_response = client.messages.create(
                         model=CLAUDE_MODEL,
                         max_tokens=CLAUDE_MAX_TOKENS,
-                        system=SYSTEM_PROMPT,
+                        system=GRADE_PROMPT,
                         messages=[{"role": "user", "content": full_message}],
                     )
                     raw = _anth_response.content[0].text
