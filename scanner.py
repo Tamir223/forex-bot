@@ -1953,12 +1953,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         result['risk_percent'] = _final_risk      # keep scan result in sync too
         logger.info(f"[risk] score={_scanner_score} risk={_final_risk}%")
 
-        if _scanner_score == 10:
-            block_risk = "0.75%"
-        elif _scanner_score == 9:
-            block_risk = "0.50%"
-        else:
-            block_risk = "0%"
+        block_risk = f"{_final_risk}%"
 
         # Apply firm risk cap
         if profile:
@@ -1978,12 +1973,17 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         if decision == "BLOCK" or grade in ["C", "D", "F"]:
             logger.info(f"[auto-grade] {result['symbol']} blocked — {grade}")
             if "Entry missed" in analysis.get("reason", ""):
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=f"⛔ {result['symbol']} {_direction} — BLOCKED — Entry missed\n📊 Risk if valid: {block_risk}"
-                )
-                return True
-            return False
+                if _is_tc:
+                    # TC signals are market orders — entry IS current price, never "missed"
+                    logger.info(f"[auto-grade] {result['symbol']} TC signal — ignoring LLM entry missed block, continuing")
+                else:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=f"⛔ {result['symbol']} {_direction} — BLOCKED — Entry missed\n📊 Risk if valid: {block_risk}"
+                    )
+                    return True
+            elif not _is_tc:
+                return False
 
         report_text = priority_header + execute_report(analysis)
         if _limit_note:
