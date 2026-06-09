@@ -936,7 +936,14 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
                         _c0["close"] <= _prev["low"] and _c0["open"] >= _prev["high"]):
                     _most_recent_type = "bearish_engulfing"
 
-        logger.info(f"[score] {symbol} candle type check: type={_most_recent_type} direction={direction_str}")
+        # Momentum candles — count of last 10 candles matching signal direction (used below)
+        _recent10 = candles[:10]
+        if direction_str == "BUY":
+            _momentum_candles = sum(1 for c in _recent10 if c["close"] > c["open"])
+        else:
+            _momentum_candles = sum(1 for c in _recent10 if c["close"] < c["open"])
+
+        logger.info(f"[score] {symbol} candle type check: type={_most_recent_type} direction={direction_str} momentum_candles={_momentum_candles}")
 
         score = min(score, 10)
 
@@ -948,6 +955,9 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
             score += 1
             factors.append(f"Aligned candle at OB zone: {_most_recent_type} (+1)")
             logger.info(f"[score] {symbol} aligned candle {_most_recent_type} on {direction_str} — +1, score now {score}")
+        elif _momentum_candles >= 7:
+            # Strong momentum — single contradicting candle is noise, not reversal
+            logger.info(f"[score] {symbol} contradicting candle {_most_recent_type} ignored — strong momentum ({_momentum_candles}/10)")
         elif _most_recent_type in ("shooting_star", "bearish_engulfing") and direction_str == "BUY":
             score = max(0, score - 2)
             factors.append(f"⚠️ {_most_recent_type.replace('_', ' ')} on BUY signal — directional contradiction (-2)")
@@ -1019,13 +1029,6 @@ def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: 
             _ts_bonus = 3 if _trend_streak >= 5 else 2 if _trend_streak == 4 else 1
             score += _ts_bonus
             factors.append(f"Trend strength: {_trend_streak} consecutive candles in signal direction (+{_ts_bonus})")
-
-        # Momentum candles — count of last 10 candles matching signal direction
-        _recent10 = candles[:10]
-        if direction_str == "BUY":
-            _momentum_candles = sum(1 for c in _recent10 if c["close"] > c["open"])
-        else:
-            _momentum_candles = sum(1 for c in _recent10 if c["close"] < c["open"])
 
         # Breakout detection — current close beyond last 5 candle extremes
         if detect_breakout(candles, direction_str):
