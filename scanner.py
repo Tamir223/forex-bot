@@ -1939,6 +1939,37 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             "score": _scanner_score,  # inject scanner score so analyze_signal uses it for risk tier
         }
 
+        # For TC signals, replace signal text with clean market-order context for Groq
+        if _is_tc and _live_price is not None:
+            import re as _re_tc
+            _tc_sl_m   = _re_tc.search(r"Stop Loss:\s*([\d.]+)", signal_text)
+            _tc_tp1_m  = _re_tc.search(r"TP1:\s*([\d.]+)", signal_text)
+            _tc_tp2_m  = _re_tc.search(r"TP2:\s*([\d.]+)", signal_text)
+            _tc_sl     = _tc_sl_m.group(1)  if _tc_sl_m  else "N/A"
+            _tc_tp1    = _tc_tp1_m.group(1) if _tc_tp1_m else "N/A"
+            _tc_tp2    = _tc_tp2_m.group(1) if _tc_tp2_m else "N/A"
+            _tc_mc     = result.get("score_data", {}).get("momentum_candles", 0)
+            _tc_streak = result.get("score_data", {}).get("trend_streak", 0)
+            _tc_struct = result.get("structure", {}).get("trend", "unknown")
+            _tc_htf    = result.get("htf_bias", {})
+            _tc_bias   = _tc_htf.get("bias", "unknown") if _tc_htf else "unknown"
+            signal_text = (
+                f"TREND CONTINUATION SIGNAL — MARKET ORDER\n"
+                f"Pair: {_symbol}\n"
+                f"Direction: {_direction}\n"
+                f"Score: {_scanner_score}/10\n"
+                f"Entry: MARKET ORDER at current price {_live_price}\n"
+                f"Stop Loss: {_tc_sl}\n"
+                f"TP1: {_tc_tp1}\n"
+                f"TP2: {_tc_tp2}\n"
+                f"Setup: TREND CONTINUATION\n"
+                f"Momentum: {_tc_mc}/10 candles in signal direction, streak={_tc_streak}\n"
+                f"Market Structure: {_tc_struct}\n"
+                f"HTF Bias: {_tc_bias}\n"
+                f"Action: EXECUTE at market price NOW — do not wait for retracement\n"
+            )
+            logger.info(f"[auto-grade] {_symbol} TC signal text built for Groq — entry={_live_price} sl={_tc_sl} tp1={_tc_tp1}")
+
         analysis = analyze_signal(signal_text, state_dict, user_id=user.id)
         if not analysis:
             return False
