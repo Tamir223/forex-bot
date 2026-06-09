@@ -1940,6 +1940,7 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         }
 
         # For TC signals, replace signal text with clean market-order context for Groq
+        _tc_sl_f = _tc_tp1_f = _tc_tp2_f = None  # floats for post-grade override
         if _is_tc and _live_price is not None:
             import re as _re_tc
             _tc_sl_m   = _re_tc.search(r"Stop Loss:\s*([\d.]+)", signal_text)
@@ -1948,6 +1949,23 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             _tc_sl     = _tc_sl_m.group(1)  if _tc_sl_m  else "N/A"
             _tc_tp1    = _tc_tp1_m.group(1) if _tc_tp1_m else "N/A"
             _tc_tp2    = _tc_tp2_m.group(1) if _tc_tp2_m else "N/A"
+            try:
+                _tc_sl_f  = float(_tc_sl)
+                _tc_tp1_f = float(_tc_tp1)
+                _tc_tp2_f = float(_tc_tp2) if _tc_tp2 != "N/A" else None
+            except (ValueError, TypeError):
+                pass
+            # Calculate SL distance in pips/points for Groq context
+            if _tc_sl_f is not None:
+                _raw_dist = abs(_live_price - _tc_sl_f)
+                if "JPY" in _symbol.upper():
+                    _sl_pips = f"{round(_raw_dist * 100, 1)} pips"
+                elif _symbol.upper() in ("XAUUSD",) or _symbol.upper() in YFINANCE_FUTURES_MAP:
+                    _sl_pips = f"{round(_raw_dist, 1)} points"
+                else:
+                    _sl_pips = f"{round(_raw_dist * 10000, 1)} pips"
+            else:
+                _sl_pips = "N/A"
             _tc_mc     = result.get("score_data", {}).get("momentum_candles", 0)
             _tc_streak = result.get("score_data", {}).get("trend_streak", 0)
             _tc_struct = result.get("structure", {}).get("trend", "unknown")
@@ -1958,17 +1976,18 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 f"Pair: {_symbol}\n"
                 f"Direction: {_direction}\n"
                 f"Score: {_scanner_score}/10\n"
-                f"Entry: MARKET ORDER at current price {_live_price}\n"
-                f"Stop Loss: {_tc_sl}\n"
-                f"TP1: {_tc_tp1}\n"
-                f"TP2: {_tc_tp2}\n"
+                f"Entry: MARKET ORDER at current price {_live_price} — DO NOT recalculate entry\n"
+                f"Stop Loss: {_tc_sl} ({_sl_pips}) — USE EXACTLY THIS LEVEL\n"
+                f"TP1: {_tc_tp1} (1.5R) — USE EXACTLY THIS LEVEL\n"
+                f"TP2: {_tc_tp2 if _tc_tp2 != 'N/A' else 'N/A'} (2.5R) — USE EXACTLY THIS LEVEL\n"
                 f"Setup: TREND CONTINUATION\n"
                 f"Momentum: {_tc_mc}/10 candles in signal direction, streak={_tc_streak}\n"
                 f"Market Structure: {_tc_struct}\n"
                 f"HTF Bias: {_tc_bias}\n"
                 f"Action: EXECUTE at market price NOW — do not wait for retracement\n"
+                f"IMPORTANT: DO NOT recalculate SL, TP1, or TP2. Use the exact values provided above.\n"
             )
-            logger.info(f"[auto-grade] {_symbol} TC signal text built for Groq — entry={_live_price} sl={_tc_sl} tp1={_tc_tp1}")
+            logger.info(f"[auto-grade] {_symbol} TC signal text built for Groq — entry={_live_price} sl={_tc_sl} ({_sl_pips}) tp1={_tc_tp1}")
 
         analysis = analyze_signal(signal_text, state_dict, user_id=user.id)
         if not analysis:
@@ -1983,6 +2002,16 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
         analysis['score'] = _scanner_score        # ensure score field matches scanner score
         result['risk_percent'] = _final_risk      # keep scan result in sync too
         logger.info(f"[risk] score={_scanner_score} risk={_final_risk}%")
+
+        # TC signals: override Groq's levels with scanner-calculated values
+        if _is_tc and _live_price is not None:
+            analysis['entry_zone'] = _live_price
+            if _tc_sl_f  is not None: analysis['stop_loss'] = _tc_sl_f
+            if _tc_tp1_f is not None: analysis['tp1']       = _tc_tp1_f
+            if _tc_tp2_f is not None: analysis['tp2']       = _tc_tp2_f
+            analysis['tp1_rr'] = "1.5R"
+            analysis['tp2_rr'] = "2.5R"
+            logger.info(f"[auto-grade] {_symbol} TC levels locked — entry={_live_price} sl={_tc_sl_f} tp1={_tc_tp1_f} tp2={_tc_tp2_f}")
 
         block_risk = f"{_final_risk}%"
 
