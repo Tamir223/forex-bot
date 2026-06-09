@@ -9,7 +9,7 @@ import re
 import time
 import anthropic
 import groq
-import google.generativeai as genai
+from google import genai as google_genai
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS
 from phase4_learning import get_confidence_modifier, get_session, log_trade_insight
 from market import get_live_price, get_atr, check_entry_validity
@@ -41,8 +41,7 @@ GROQ_API_KEY = "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"
 groq_client = groq.Groq(api_key=GROQ_API_KEY)
 
 GEMINI_API_KEY = "AQ.Ab8RN6JEDbtxxD0Sppau03P0YVMDHXo7W5SXu0ibe22H-s2Wlw"
-genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel('gemini-2.0-flash-lite') if GEMINI_API_KEY else None
+gemini_client = google_genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 CORRELATED_USD_LONGS = {"GBPUSD", "EURUSD", "AUDUSD", "NZDUSD"}
 
@@ -173,10 +172,13 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
             logger.warning(f"[claude] Groq failed, falling back to Gemini: {_groq_err}")
 
         # 2. Gemini fallback (free tier — 1,500 req/day, 1M tokens/day)
-        if raw is None and gemini_model:
+        if raw is None and gemini_client:
             try:
                 _gemini_prompt = f"{GRADE_PROMPT}\n\n{full_message}"
-                _gemini_response = gemini_model.generate_content(_gemini_prompt)
+                _gemini_response = gemini_client.models.generate_content(
+                    model="gemini-2.0-flash-lite",
+                    contents=_gemini_prompt,
+                )
                 raw = _gemini_response.text
                 logger.info("[claude] Gemini fallback response received")
             except Exception as _gemini_err:
