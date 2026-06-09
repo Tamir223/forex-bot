@@ -828,301 +828,82 @@ def detect_breakout(candles: list, direction: str) -> bool:
     return False
 
 
-def score_setup(structure: dict, ob: dict, fvg: dict, atr_data: dict, htf_bias: dict = None, candles: list = None, symbol: str = None, candles_1h: list = None, candles_4h: list = None, daily_bias: dict = None, signal_direction: str = None) -> dict:
+def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
+                    htf_bias: dict, market_structure: str, daily_bias: dict,
+                    atr_data: dict, direction: str, structure: dict, ms: dict) -> tuple:
     """
-    Score the overall setup quality. Returns score 0-10 and recommendation.
+    7 binary gates — all must pass for a signal to fire.
+    Returns (all_passed, gates, gate_details, failed, kz_label, swept_level).
     """
-    score = 0
-    factors = []
-    _trend_streak = 0
+    gates = {}
+    gate_details = {}
 
-    trend = structure.get("trend", "unclear")
+    # GATE 1 — Kill zone active (London 07-09 UTC or NY 12-14 UTC)
+    _kz_active, _kz_label = is_kill_zone(symbol)
+    gates['kill_zone'] = _kz_active
+    _kz_short = (
+        _kz_label.replace("Kill zone active — ", "").replace(" — peak institutional activity", "")
+        if _kz_active else "outside kill zone"
+    )
+    gate_details['kill_zone'] = _kz_short
 
-    if trend in ("bullish", "bearish"):
-        score += 2
-        factors.append(f"Clear {trend} trend")
+    # GATE 2 — HTF bias confirmed (Daily + 4H agree with signal direction)
+    _htf_dir = "bullish" if direction == "BUY" else "bearish"
+    _htf_ok = (htf_bias.get("d1_trend") == _htf_dir and htf_bias.get("h4_trend") == _htf_dir)
+    gates['htf_bias'] = _htf_ok
+    _d1 = htf_bias.get("d1_trend", "unclear")
+    _h4 = htf_bias.get("h4_trend", "unclear")
+    gate_details['htf_bias'] = f"Daily/4H {_htf_dir}" if _htf_ok else f"D1={_d1} 4H={_h4} need={_htf_dir}"
 
-    if structure.get("bos"):
-        score += 2
-        factors.append("Break of structure confirmed")
+    # GATE 3 — Market structure confirmed (not ranging)
+    gates['structure'] = market_structure in ('uptrend', 'downtrend')
+    gate_details['structure'] = (
+        "Uptrend" if market_structure == "uptrend" else
+        "Downtrend" if market_structure == "downtrend" else
+        f"{market_structure} — not trending"
+    )
 
-    if structure.get("choch"):
-        score += 1
-        factors.append("Change of character detected")
+    # GATE 4 — Liquidity sweep detected (Asia range or recent swing)
+    _update_asia_levels(symbol, candles)
+    _sweep_ok, _swept_level = _detect_asia_sweep_or_recent(symbol, candles, direction)
+    gates['sweep'] = _sweep_ok
+    _sym_upper = symbol.upper()
+    _is_pts = _sym_upper in ("XAUUSD", "US30", "NAS100") or _sym_upper in YFINANCE_FUTURES_MAP
+    _swept_dp = 3 if _is_pts else 5
+    gate_details['sweep'] = (
+        f"swept at {_swept_level:.{_swept_dp}f}" if (_sweep_ok and _swept_level) else
+        "no liquidity sweep"
+    )
 
+    # GATE 5 — OB or FVG present within range of price
+    gates['ob_fvg'] = ob is not None or fvg is not None
+    _disp_off = FUTURES_SPOT_OFFSET.get(_sym_upper, 0)
+    _dp = 3 if _is_pts else 5
     if ob:
-        score += 2
-        ob_type = "Bullish" if ob["type"] == "bullish_ob" else "Bearish"
-        factors.append(f"{ob_type} order block at {ob['mid']}")
+        _ob_lo = round(ob['low']  + _disp_off, _dp)
+        _ob_hi = round(ob['high'] + _disp_off, _dp)
+        gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi}"
+    elif fvg:
+        _fb = fvg.get("display_bottom", round(fvg["bottom"] + _disp_off, _dp))
+        _ft = fvg.get("display_top",    round(fvg["top"]    + _disp_off, _dp))
+        gate_details['ob_fvg'] = f"FVG {_fb}-{_ft}"
+    else:
+        gate_details['ob_fvg'] = "no OB or FVG found"
 
-        # MTF OB confluence — check 1H and 4H alignment with the 15M OB
-        if symbol is not None:
-            _direction_str = "BUY" if trend == "bullish" else "SELL"
-            _mtf_found, _mtf_desc = detect_mtf_ob_confluence(
-                symbol, ob, _direction_str, candles_1h=candles_1h, candles_4h=candles_4h
-            )
-            if _mtf_found:
-                if "Triple" in _mtf_desc:
-                    score += 3
-                elif "4H" in _mtf_desc:
-                    score += 2
-                else:
-                    score += 1
-                factors.append(_mtf_desc)
+    # GATE 6 — BOS confirmed after sweep
+    _bos_ok = bool(structure.get('bos') or ms.get('bos'))
+    gates['bos'] = _bos_ok
+    gate_details['bos'] = "confirmed" if _bos_ok else "not confirmed"
 
-        # OB displacement quality — institutional move away from the zone
-        _ob_q = ob.get("ob_quality")
-        if _ob_q == "strong":
-            score += 1
-            factors.append("Strong OB displacement — institutional confirmation (+1)")
-        elif _ob_q == "weak":
-            score = max(0, score - 1)
-            factors.append("⚠️ Weak OB displacement — low institutional conviction (-1)")
-        if _ob_q in ("strong", "weak", "valid"):
-            logger.info(f"[ob_quality] {symbol or 'unknown'} quality={_ob_q} displacement={ob.get('displacement', '?')} score_after_ob_block={score}")
+    # GATE 7 — Volatility adequate (not low vol)
+    _vol_ok = not atr_data.get('is_low_volatility', False) if atr_data else True
+    gates['volatility'] = _vol_ok
+    gate_details['volatility'] = "healthy" if _vol_ok else "low volatility"
 
-    if fvg:
-        score += 2
-        fvg_type = "Bullish" if fvg["type"] == "bullish_fvg" else "Bearish"
-        _fvg_disp_bot = fvg.get("display_bottom", fvg["bottom"])
-        _fvg_disp_top = fvg.get("display_top", fvg["top"])
-        factors.append(f"{fvg_type} FVG {_fvg_disp_bot} - {_fvg_disp_top}")
+    all_passed = all(gates.values())
+    failed = [k for k, v in gates.items() if not v]
 
-    if atr_data and not atr_data.get("is_low_volatility"):
-        score += 1
-        factors.append("Healthy volatility")
-
-    # HTF confluence — biggest edge multiplier
-    if htf_bias:
-        h1 = htf_bias.get("h1_trend", "unclear")
-        h4 = htf_bias.get("h4_trend", "unclear")
-        d1 = htf_bias.get("d1_trend", "unclear")
-        bias = htf_bias.get("bias", "unclear")
-        aligned = htf_bias.get("aligned", False)
-        if aligned and bias == trend and d1 == trend:
-            score += 4
-            factors.append(f"STRONG HTF alignment — Daily, 4H, 1H all {bias}")
-        elif aligned and bias == trend:
-            score += 3
-            factors.append(f"HTF aligned — 1H and 4H both {bias}")
-        elif d1 == trend and h4 == trend:
-            score += 3
-            factors.append(f"Daily and 4H both {trend}")
-        elif h4 == trend:
-            score += 2
-            factors.append(f"4H bias {h4} aligns with setup")
-        elif d1 == trend:
-            score += 2
-            factors.append(f"Daily bias {d1} aligns with setup")
-        elif h1 == trend:
-            score += 1
-            factors.append(f"1H bias {h1} aligns with setup")
-        elif bias == "mixed":
-            score -= 1
-            factors.append("HTF mixed — timeframes disagreeing")
-
-    # Direction alignment
-    ob_aligned = ob and (
-        (ob["type"] == "bullish_ob" and trend == "bullish") or
-        (ob["type"] == "bearish_ob" and trend == "bearish")
-    )
-    fvg_aligned = fvg and (
-        (fvg["type"] == "bullish_fvg" and trend == "bullish") or
-        (fvg["type"] == "bearish_fvg" and trend == "bearish")
-    )
-
-    if ob_aligned and fvg_aligned:
-        score += 1
-        factors.append("OB and FVG both aligned with trend")
-
-    # Session quality bonus
-    try:
-        from scanner_improvements import get_session_score_bonus
-        hour = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).hour
-        if 7 <= hour < 10:
-            _session = "London Open"
-        elif 10 <= hour < 13:
-            _session = "London"
-        elif 13 <= hour < 16:
-            _session = "NY Open"
-        elif 16 <= hour < 21:
-            _session = "NY"
-        else:
-            _session = "Asian"
-        score += get_session_score_bonus(_session)
-    except Exception:
-        pass
-    # Candle-based confluence — liquidity sweep, rejection, previous day levels
-    if candles is not None:
-        direction_str = signal_direction if signal_direction else ("BUY" if trend == "bullish" else "SELL")
-        ob_mid = ob["mid"] if ob else (candles[0]["close"] if candles else 0.0)
-
-        _factor_offset = FUTURES_SPOT_OFFSET.get(symbol.upper() if symbol else "", 0)
-
-        sweep_ok, swept_level = detect_liquidity_sweep(candles, direction_str)
-        if sweep_ok:
-            score += 2
-            _swept_disp = round(swept_level + _factor_offset, 3) if _factor_offset else swept_level
-            factors.append(f"Liquidity sweep confirmed at {_swept_disp} — institutional entry signal")
-
-        # Unified candle type — one candle, one result, either aligned (+1) or contradicting (-2)
-        _c0 = candles[0]
-        _c0_body = abs(_c0["close"] - _c0["open"])
-        _c0_upper = _c0["high"] - max(_c0["close"], _c0["open"])
-        _c0_lower = min(_c0["close"], _c0["open"]) - _c0["low"]
-        _most_recent_type = None
-        if _c0_body > 0:
-            if _c0_lower >= 2 * _c0_body:
-                _most_recent_type = "hammer"
-            elif _c0_upper >= 2 * _c0_body:
-                _most_recent_type = "shooting_star"
-            elif len(candles) > 1:
-                _prev = candles[1]
-                if (_c0["close"] > _c0["open"] and _prev["close"] < _prev["open"] and
-                        _c0["close"] >= _prev["open"] and _c0["open"] <= _prev["close"]):
-                    _most_recent_type = "bullish_engulfing"
-                elif (_c0["close"] < _c0["open"] and _prev["close"] > _prev["open"] and
-                        _c0["close"] <= _prev["low"] and _c0["open"] >= _prev["high"]):
-                    _most_recent_type = "bearish_engulfing"
-
-        # Momentum candles — count of last 10 candles matching signal direction (used below)
-        _recent10 = candles[:10]
-        if direction_str == "BUY":
-            _momentum_candles = sum(1 for c in _recent10 if c["close"] > c["open"])
-        else:
-            _momentum_candles = sum(1 for c in _recent10 if c["close"] < c["open"])
-
-        logger.info(f"[score] {symbol} candle type check: type={_most_recent_type} direction={direction_str} momentum_candles={_momentum_candles}")
-
-        score = min(score, 10)
-
-        if _most_recent_type in ("hammer", "bullish_engulfing") and direction_str == "BUY":
-            score += 1
-            factors.append(f"Aligned candle at OB zone: {_most_recent_type} (+1)")
-            logger.info(f"[score] {symbol} aligned candle {_most_recent_type} on {direction_str} — +1, score now {score}")
-        elif _most_recent_type in ("shooting_star", "bearish_engulfing") and direction_str == "SELL":
-            score += 1
-            factors.append(f"Aligned candle at OB zone: {_most_recent_type} (+1)")
-            logger.info(f"[score] {symbol} aligned candle {_most_recent_type} on {direction_str} — +1, score now {score}")
-        elif _momentum_candles >= 7:
-            # Strong momentum — single contradicting candle is noise, not reversal
-            logger.info(f"[score] {symbol} contradicting candle {_most_recent_type} ignored — strong momentum ({_momentum_candles}/10)")
-        elif _most_recent_type in ("shooting_star", "bearish_engulfing") and direction_str == "BUY":
-            score = max(0, score - 2)
-            factors.append(f"⚠️ {_most_recent_type.replace('_', ' ')} on BUY signal — directional contradiction (-2)")
-            logger.info(f"[score] {symbol} contradicting candle {_most_recent_type} on {direction_str} — -2 penalty, score now {score}")
-        elif _most_recent_type in ("hammer", "bullish_engulfing") and direction_str == "SELL":
-            score = max(0, score - 2)
-            factors.append(f"⚠️ {_most_recent_type.replace('_', ' ')} on SELL signal — directional contradiction (-2)")
-            logger.info(f"[score] {symbol} contradicting candle {_most_recent_type} on {direction_str} — -2 penalty, score now {score}")
-
-        pd_levels = get_previous_day_levels(candles)
-        pdh = pd_levels.get("pdh")
-        pdl = pd_levels.get("pdl")
-        current_p = pd_levels.get("current_price")
-        if pdh and pdl and current_p:
-            if direction_str == "BUY" and current_p > pdh:
-                score += 1
-                factors.append("Breaking previous day high — strong breakout confirmation")
-            elif direction_str == "SELL" and current_p < pdl:
-                score += 1
-                factors.append("Breaking previous day low — strong breakout confirmation")
-
-        mom_ok, mom_desc = detect_momentum(candles, direction_str)
-        if mom_ok:
-            score += 2 if "Strong" in mom_desc else 1
-            factors.append(mom_desc)
-
-        # Equal highs/lows — liquidity pools at institutional levels
-        eq_ok, eq_desc = detect_equal_highs_lows(candles, direction_str, symbol or "")
-        if eq_ok:
-            score += 2
-            factors.append(eq_desc)
-
-        # Market structure shift — full reversal confirmation
-        mss_ok, mss_desc = detect_market_structure_shift(candles, direction_str)
-        if mss_ok:
-            score += 2
-            factors.append(mss_desc)
-        elif mss_desc:
-            score = max(0, score - 2)
-            factors.append(f"⚠️ {mss_desc}")
-
-        # Premium/discount zone penalty
-        _entry_px = candles[0]["close"]
-        _recent20 = candles[:20]
-        _rng_high = max(c["high"] for c in _recent20)
-        _rng_low = min(c["low"] for c in _recent20)
-        if _rng_high != _rng_low:
-            _equil = (_rng_high + _rng_low) / 2
-            _zone = "discount" if _entry_px <= _equil else "premium"
-            if direction_str == "SELL" and _zone == "discount":
-                score = max(0, score - 1)
-                factors.append("⚠️ Selling in discount zone — unfavorable entry")
-            elif direction_str == "BUY" and _zone == "premium":
-                score = max(0, score - 1)
-                factors.append("⚠️ Buying in premium zone — unfavorable entry")
-            elif direction_str == "SELL" and _zone == "premium":
-                score += 1
-                factors.append("✅ Selling in premium zone — optimal entry")
-            elif direction_str == "BUY" and _zone == "discount":
-                score += 1
-                factors.append("✅ Buying in discount zone — optimal entry")
-
-        # Trend strength bonus — consecutive same-direction candles confirm momentum
-        _trend_streak, _ts_dir = detect_trend_strength(candles)
-        if _trend_streak >= 3 and (
-            (direction_str == "BUY" and _ts_dir == "bullish") or
-            (direction_str == "SELL" and _ts_dir == "bearish")
-        ):
-            _ts_bonus = 3 if _trend_streak >= 5 else 2 if _trend_streak == 4 else 1
-            score += _ts_bonus
-            factors.append(f"Trend strength: {_trend_streak} consecutive candles in signal direction (+{_ts_bonus})")
-
-        # Breakout detection — current close beyond last 5 candle extremes
-        if detect_breakout(candles, direction_str):
-            score += 2
-            factors.append("Breakout: price closes beyond last 5 candle extremes (+2)")
-
-    # Kill zone timing bonus — peak institutional activity windows
-    _kz_ok, _kz_desc = is_kill_zone(symbol or "")
-    if _kz_ok:
-        score += 1
-        factors.append(_kz_desc)
-
-    # Daily bias alignment check — uses pre-fetched daily_bias if provided (no extra API call)
-    _bias_unknown = False
-    if symbol is not None and trend in ("bullish", "bearish"):
-        try:
-            if daily_bias is None:
-                from scanner_improvements import get_daily_bias as _get_db
-                daily_bias = _get_db(symbol)
-            _bias_unknown = (daily_bias.get("bias") == "unknown")
-            _trade_dir = "BUY" if trend == "bullish" else "SELL"
-            _bias_ok, _bias_msg = check_daily_bias_alignment(symbol, _trade_dir, _prefetched=daily_bias)
-            if not _bias_ok:
-                if daily_bias.get("strength") == "strong":
-                    score -= 2
-                else:
-                    score -= 1
-                factors.append(_bias_msg or "⚠️ Daily bias conflict — proceed with caution")
-            elif _bias_msg:
-                score += 1
-                factors.append(_bias_msg)
-        except Exception:
-            pass
-
-    recommendation = "STRONG" if score >= 8 else "MODERATE" if score >= 5 else "WEAK"
-
-    return {
-        "score": min(score, 10),
-        "recommendation": recommendation,
-        "factors": factors,
-        "direction": "BUY" if trend == "bullish" else "SELL" if trend == "bearish" else None,
-        "bias_unknown": _bias_unknown,
-        "trend_streak": _trend_streak,
-        "momentum_candles": _momentum_candles if candles is not None else 0,
-    }
+    return all_passed, gates, gate_details, failed, _kz_label, _swept_level
 
 
 def build_auto_signal(symbol: str, direction: str, price: float,
@@ -1133,8 +914,6 @@ def build_auto_signal(symbol: str, direction: str, price: float,
     This is what gets sent to the grader when user taps Grade button.
     """
     trend = structure.get("trend", "bullish")
-    score = score_data.get("score", 0)
-    factors = score_data.get("factors", [])
 
     # Calculate entry, stop loss, and targets
     from futures_instruments import is_futures, get_spec
@@ -1204,7 +983,6 @@ def build_auto_signal(symbol: str, direction: str, price: float,
             htf_parts.append(f"Daily {d1}, 4H {h4}, 1H {h1}")
     htf_str = ", ".join(htf_parts) if htf_parts else "HTF aligned"
 
-    factor_str = "; ".join(factors[:3]) if factors else "confluence confirmed"
     trend_dir = "Bullish" if direction == "BUY" else "Bearish"
 
     # Enforce minimum 1.5:1 TP1 floor before offset is applied
@@ -1245,7 +1023,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         f"TP2: {tp2}\n"
         f"TP3: {tp3}\n"
         f"Trend: {trend_dir}\n"
-        f"Confirmation: Yes — {score}/10 score, {htf_str}, {factor_str}"
+        f"Confirmation: Yes — all 7 institutional gates passed, {htf_str}"
     )
     return signal
 
@@ -1319,11 +1097,12 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
     return "\n".join(lines)
 
 
-def format_unified_signal(symbol: str, direction: str, score: int,
+def format_unified_signal(symbol: str, direction: str,
                           entry: float, sl: float, tp1: float, tp2: float,
                           ob: dict, fvg: dict, structure: dict, htf_bias: dict,
                           swept_level: float, is_trend_continuation: bool,
-                          kill_zone_label: str, lot_str: str) -> str:
+                          kill_zone_label: str, lot_str: str,
+                          gates: dict = None, gate_details: dict = None) -> str:
     """Build the single clean TNL TRADER SIGNAL block — no scan alert, no grade step."""
     DIV = "━━━━━━━━━━━━━━━━━━━━"
     sym = symbol.upper()
@@ -1388,11 +1167,30 @@ def format_unified_signal(symbol: str, direction: str, score: int,
     else:
         _action = f"🔄 Set {_dir_word} Limit at {entry:.{_dp}f}"
 
+    # Gate checklist — show which of the 7 gates passed
+    if gates and gate_details:
+        _gate_lines = [
+            f"✅ Kill zone: {gate_details.get('kill_zone', '')}",
+            f"✅ HTF: {gate_details.get('htf_bias', '')}",
+            f"✅ Structure: {gate_details.get('structure', '')}",
+            f"✅ Sweep: {gate_details.get('sweep', '')}",
+        ]
+        if ob:
+            _ob_label = "Bullish OB" if ob["type"] == "bullish_ob" else "Bearish OB"
+            _gate_lines.append(f"✅ {_ob_label}: {gate_details.get('ob_fvg', '')}")
+        elif fvg:
+            _gate_lines.append(f"✅ FVG: {gate_details.get('ob_fvg', '')}")
+        _gate_lines.append(f"✅ BOS: {gate_details.get('bos', 'confirmed')}")
+        _gate_lines.append(f"✅ Volatility: {gate_details.get('volatility', 'healthy')}")
+    else:
+        # Fallback when no gate data available
+        _gate_lines = _cond_lines
+
     lines = [
         DIV,
         "🏆 TNL TRADER SIGNAL",
         DIV,
-        f"📊 {symbol} | {direction} | {score}/10",
+        f"📊 {symbol} | {direction} | 7/7 Gates ✅",
         f"📍 Entry:    {entry:.{_dp}f}",
         f"🛑 SL:       {sl:.{_dp}f}  ({_sl_display})",
         f"🎯 TP1:      {tp1:.{_dp}f}  (1.5R)",
@@ -1400,7 +1198,7 @@ def format_unified_signal(symbol: str, direction: str, score: int,
         f"📦 Lots:     {lot_str}",
         f"⚡ Type:     {_type_str}",
         DIV,
-    ] + _cond_lines + [
+    ] + _gate_lines + [
         DIV,
         _action,
         DIV,
@@ -1408,111 +1206,11 @@ def format_unified_signal(symbol: str, direction: str, score: int,
     return "\n".join(lines)
 
 
-def check_signal_contradictions(direction: str, factors: list) -> tuple[int, list]:
-    contradictions = 0
-    warnings = []
-
-    factor_text = ' '.join(factors).lower()
-
-    if direction == 'BUY':
-        if 'bearish fvg' in factor_text:
-            contradictions += 1
-            warnings.append('⚠️ Bearish FVG against BUY direction')
-        if 'bearish engulfing' in factor_text:
-            contradictions += 1
-            warnings.append('⚠️ Bearish engulfing candle against BUY direction')
-        if 'shooting star' in factor_text:
-            contradictions += 1
-            warnings.append('⚠️ Shooting star against BUY direction')
-        if 'consecutive bearish' in factor_text:
-            contradictions += 1
-            warnings.append('⚠️ Bearish momentum against BUY direction')
-        if 'selling at premium' in factor_text:
-            contradictions += 1
-            warnings.append('⚠️ Selling in premium zone against BUY')
-
-    if direction == 'SELL':
-        if 'bullish fvg' in factor_text:
-            contradictions += 1
-            warnings.append('⚠️ Bullish FVG against SELL direction')
-        if 'bullish engulfing' in factor_text or 'hammer' in factor_text:
-            contradictions += 1
-            warnings.append('⚠️ Bullish rejection candle against SELL direction')
-        if 'consecutive bullish' in factor_text:
-            contradictions += 1
-            warnings.append('⚠️ Bullish momentum against SELL direction')
-        if 'buying in discount' in factor_text:
-            contradictions += 1
-            warnings.append('⚠️ Buying in discount zone against SELL')
-
-    return contradictions, warnings
-
-
-def check_price_action_vs_bias(candles: list, direction: str, daily_bias: dict) -> dict:
-    """
-    Detect when intraday price action strongly conflicts with the signal direction.
-    Also overrides daily_bias when last 3 candles form a clear consecutive trend.
-
-    candles: newest-first 15M list.
-    Returns: {has_conflict, penalty, factor, updated_bias}
-    """
-    result = {"has_conflict": False, "penalty": 0, "factor": None, "updated_bias": daily_bias}
-
-    if not candles or len(candles) < 5:
-        return result
-
-    last5 = candles[:5]
-    bullish_count = sum(1 for c in last5 if c["close"] > c["open"])
-    bearish_count = sum(1 for c in last5 if c["close"] < c["open"])
-
-    # oldest of the 5 is candles[4] (newest-first list)
-    first_open = last5[4]["open"]
-    last_close = last5[0]["close"]
-    pct_move = (last_close - first_open) / first_open if first_open else 0.0
-
-    conflict = False
-    if direction == "SELL":
-        if bullish_count >= 4 or pct_move > 0.003:
-            conflict = True
-    elif direction == "BUY":
-        if bearish_count >= 4 or pct_move < -0.003:
-            conflict = True
-
-    if conflict:
-        result["has_conflict"] = True
-        result["penalty"] = 2
-        result["factor"] = "⚠️ Price action conflict — intraday momentum against signal direction"
-
-    # Bias override: last 3 candles consecutive + escalating closes
-    if len(candles) >= 3:
-        c0, c1, c2 = candles[0], candles[1], candles[2]
-        strongly_bullish = (
-            all(c["close"] > c["open"] for c in (c0, c1, c2)) and
-            c0["close"] > c1["close"] > c2["close"]
-        )
-        strongly_bearish = (
-            all(c["close"] < c["open"] for c in (c0, c1, c2)) and
-            c0["close"] < c1["close"] < c2["close"]
-        )
-        if strongly_bullish or strongly_bearish:
-            updated = dict(daily_bias) if daily_bias else {}
-            updated["bias"] = "bullish" if strongly_bullish else "bearish"
-            updated["intraday_override"] = True
-            result["updated_bias"] = updated
-
-    return result
-
 
 async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
     """
     Run full scan on one symbol. Returns alert dict if setup found, None otherwise.
-
-    Tiered validation:
-      TIER 1 — Hard blocks (news, low volatility, market closed)
-      TIER 2 — Score penalties (ranging, off-session, bias conflict)
-      TIER 3 — Score bonuses (applied inside score_setup)
-      TIER 4 — Post-score blocks (score < 7, RR, entry missed, correlation)
-      Guarantee: score >= 9 always sends regardless of range/session flags
+    All 7 binary gates must pass — no scoring, no thresholds.
     """
     try:
         # ── UNIFIED DATA FETCH ───────────────────────────────────────────────
@@ -1542,10 +1240,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             except Exception:
                 pass  # unparseable datetime string — proceed normally
 
-        # Flag ranging candles early — -1 penalty applied post-scoring
-        is_ranging_candles = is_ranging_market(candles)
-
-        # ── STEP 3: Market structure + direction — PRIMARY GATE ──────────────
+        # ── MARKET STRUCTURE + DIRECTION — PRIMARY GATE ─────────────────────
         ms = analyze_market_structure(candles)
         _gt_direction, _gt_strength = get_trade_direction(symbol, candles)
         if _gt_direction is None:
@@ -1563,16 +1258,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(f"[scanner] {symbol} BLOCKED — {news_reason}")
             return None
 
-        if atr_data and atr_data.get("is_low_volatility"):
-            logger.info(f"[scanner] {symbol} BLOCKED — low volatility")
-            return None
-
         # Structure and setup detection
         structure = detect_structure(candles)
         trend = structure.get("trend", "unclear")
-        is_ranging_structure = (trend == "ranging")
-
-        # Completely unclear: no data to score at all
         if trend == "unclear":
             return None
 
@@ -1581,7 +1269,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         ob = detect_order_block(candles, _ob_trend, symbol=symbol)
         fvg = detect_fvg(candles, symbol)
 
-        # Single daily_bias fetch — reused for direction fallback, TIER 3.5 block, and score_setup
         from scanner_improvements import get_daily_bias as _get_daily_bias
         daily_bias = _get_daily_bias(symbol, candles=_data.get("candles_daily"))
 
@@ -1591,215 +1278,41 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             candles_4h=_data.get("candles_4h"),
             candles_daily=_data.get("candles_daily"),
         )
-        score_data = score_setup(
-            structure, ob, fvg, atr_data, htf_bias,
-            candles=candles, symbol=symbol,
-            candles_1h=_data.get("candles_1h"),
-            candles_4h=_data.get("candles_4h"),
-            daily_bias=daily_bias,
-            signal_direction=_gt_direction,
-        )
-
-        # ── TIER 2: SCORE PENALTIES ──────────────────────────────────────────
-        if is_ranging_candles:
-            logger.info(f"[scanner] {symbol} ranging candles — applying -1 penalty")
-            score_data["score"] = max(0, score_data["score"] - 1)
-            score_data["factors"] = score_data.get("factors", []) + ["Ranging candle pattern — reduced confidence"]
-
-        if is_ranging_structure:
-            logger.info(f"[scanner] {symbol} ranging structure — applying -1 penalty")
-            score_data["score"] = max(0, score_data["score"] - 1)
-            score_data["factors"] = score_data.get("factors", []) + ["Ranging price structure — no clear 15M trend"]
-
-        is_optimal, optimal_reason = is_optimal_time_for_pair(symbol)
-        if not is_optimal:
-            logger.info(f"[scanner] {symbol} outside optimal hours — applying -1 penalty")
-            score_data["score"] = max(0, score_data["score"] - 1)
-            score_data["factors"] = score_data.get("factors", []) + [f"Outside optimal session — {optimal_reason}"]
-
-        # Recalculate recommendation after all penalties
-        final_score = score_data["score"]
-        score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
-
-        # Direction from get_trade_direction — single source of truth
         direction = _gt_direction
-        score_data["direction"] = direction
 
-        # Direction lock — prevent opposite-direction signals within 30 min of a graded signal
+        # ── DIRECTION LOCK ──────────────────────────────────────────────────────
         _lock = _direction_lock.get(symbol)
         if _lock and _time.time() < _lock["locked_until"]:
             if direction != _lock["direction"]:
                 logger.info(f"[scanner] {symbol} direction locked {_lock['direction']} — blocking {direction} signal")
                 return None
 
-        # ── STEP 4: CHoCH bonus — trend reversal confirmation ─────────────────
-        if ms.get("choch"):
-            score_data["score"] = min(10, score_data["score"] + 2)
-            score_data["factors"] = score_data.get("factors", []) + ["🔄 CHoCH — trend reversal confirmed"]
-            logger.info(f"[scanner] {symbol} CHoCH detected — trend reversal confirmed")
-
-        # ── STEP 6 addendum: Strength-based score adjustment ─────────────────
-        if _gt_strength == "strong":
-            _ms_text = "Higher highs + Higher lows" if direction == "BUY" else "Lower highs + Lower lows"
-            _ms_trend = "uptrend" if direction == "BUY" else "downtrend"
-            _ms_emoji = "📈" if direction == "BUY" else "📉"
-            score_data["factors"] = score_data.get("factors", []) + [
-                f"{_ms_emoji} Market structure: {_ms_text} — confirmed {_ms_trend}"
-            ]
-            score_data["score"] = min(10, score_data["score"] + 1)
-        elif _gt_strength == "weak":
-            score_data["factors"] = score_data.get("factors", []) + [
-                "⚠️ Weak alignment — market structure only, no daily bias"
-            ]
-            score_data["score"] = max(0, score_data["score"] - 1)
-
-        # Hard cap — LAST bonus-limiting step. Order: CHoCH +2 → strength ±1 → this cap.
-        # TIER 3.2 and 3.7 (penalties only) fire after but can never push score UP past the cap.
-        if is_ranging_candles and is_ranging_structure:
-            score_data["score"] = min(score_data["score"], 7)
-            logger.info(f"[scanner] {symbol} ranging hard cap applied — score capped at 7 (post-CHoCH, post-strength)")
-
-        # Overall cap
-        score_data["score"] = min(score_data["score"], 10)
-
-        final_score = score_data["score"]
-        score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
-
-        # ── STEP 7: TIER 3.2 — 3 consecutive extreme candles against signal ───
-        # direction = _gt_direction (from get_trade_direction — single source of truth)
-        if len(candles) >= 3:
-            logger.info(f"[tier32] {symbol} checking 3 candles against direction={direction}")
-            _c0, _c1, _c2 = candles[0], candles[1], candles[2]
-            _all_bullish = all(c["close"] > c["open"] for c in (_c0, _c1, _c2))
-            _all_bearish = all(c["close"] < c["open"] for c in (_c0, _c1, _c2))
-            if direction == "SELL" and _all_bullish:
-                logger.info(f"[scanner] {symbol} SELL — last 3 candles all bullish, -2 momentum penalty")
-                score_data["score"] = max(0, score_data["score"] - 2)
-                score_data["factors"] = score_data.get("factors", []) + ["⚠️ 3 consecutive candles against signal — reduced confidence"]
-            elif direction == "BUY" and _all_bearish:
-                logger.info(f"[scanner] {symbol} BUY — last 3 candles all bearish, -2 momentum penalty")
-                score_data["score"] = max(0, score_data["score"] - 2)
-                score_data["factors"] = score_data.get("factors", []) + ["⚠️ 3 consecutive candles against signal — reduced confidence"]
-            final_score = score_data["score"]
-            score_data["recommendation"] = "STRONG" if final_score >= 8 else "MODERATE" if final_score >= 5 else "WEAK"
-
-        # ── TIER 3.7: CONTRADICTION CHECK ────────────────────────────────────
-        # FIX 3: Strip contradictory factors before checking
-        if direction == 'BUY':
-            score_data["factors"] = [
-                f for f in score_data.get("factors", [])
-                if 'bearish' not in f.lower() and 'selling' not in f.lower()
-            ]
-        elif direction == 'SELL':
-            score_data["factors"] = [
-                f for f in score_data.get("factors", [])
-                if 'bullish' not in f.lower() and 'buying' not in f.lower()
-            ]
-
-        _contradictions, _contra_warnings = check_signal_contradictions(
-            direction, score_data.get("factors", [])
+        # ── 7 BINARY GATES — ALL MUST PASS ─────────────────────────────────────
+        all_passed, gates, gate_details, failed_gates, _kz_label, _swept_level = check_tjr_gates(
+            symbol, candles, ob, fvg, htf_bias, market_structure,
+            daily_bias, atr_data, direction, structure, ms
         )
-        if _contradictions >= 3:
-            logger.info(
-                f"[scanner] {symbol} signal blocked — too many contradicting factors ({_contradictions})"
-            )
-            return None
-        if _contradictions > 0:
-            score_data["score"] = max(0, score_data["score"] - _contradictions)
-            final_score = score_data["score"]
-            score_data["recommendation"] = (
-                "STRONG" if final_score >= 8 else
-                "MODERATE" if final_score >= 5 else "WEAK"
-            )
-            score_data["factors"] = score_data.get("factors", []) + _contra_warnings
 
-        # ── TIER 4: POST-SCORE BLOCKS ─────────────────────────────────────────
-        # Score threshold — strong momentum bypasses minimum before trend continuation fires
-        _mc_pre = score_data.get("momentum_candles", 0)
-        _ts_pre = score_data.get("trend_streak", 0)
-        _is_strong_momentum = (
-            market_structure in ("uptrend", "downtrend") and
-            (_mc_pre >= 8 or _ts_pre >= 5)
-        )
-        if final_score < 9:
-            logger.info(f"[scanner] {symbol} score {final_score}/10 — below alert threshold, silent skip")
+        if not all_passed:
+            logger.info(f"[scanner] {symbol} — gates failed: {failed_gates} — silent skip")
             return None
 
-        # OB proximity check — only fire if price is at or near the OB zone.
-        # XAUUSD: price_data["price"] is already spot (GC=F + offset).
-        # OB levels come from GC=F candles (futures domain) — convert to spot for apples-to-apples.
-        if ob:
-            _ob_domain_offset = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
-            _ob_low_cmp  = ob["low"]  + _ob_domain_offset
-            _ob_high_cmp = ob["high"] + _ob_domain_offset
-            _ob_mid_cmp  = ob["mid"]  + _ob_domain_offset
-            _fallback_price = (candles[0]["close"] + _ob_domain_offset) if candles else 0
-            _cur = float(price_data.get("price", 0) if price_data else _fallback_price)
-            _ob_tol = 8.0 if (symbol.upper() == "XAUUSD" or symbol.upper() in YFINANCE_FUTURES_MAP) else 0.0008
-            if direction == "BUY":
-                _too_far = _cur < _ob_low_cmp - _ob_tol or _cur > _ob_high_cmp + (_ob_high_cmp - _ob_low_cmp) * 2
-            else:
-                _too_far = _cur > _ob_high_cmp + _ob_tol or _cur < _ob_low_cmp - (_ob_high_cmp - _ob_low_cmp) * 2
-            if _too_far:
-                logger.info(f"[scanner] {symbol} OB at {_ob_mid_cmp:.2f} (spot) but price {_cur} — too far from OB zone, skipping")
-                return None
+        logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed")
 
-        # ── TREND CONTINUATION DETECTION ─────────────────────────────────────
-        _trend_streak = score_data.get("trend_streak", 0)
-        _momentum_candles = score_data.get("momentum_candles", 0)
+        # ── TREND CONTINUATION DETECTION ───────────────────────────────────────
+        _trend_streak, _ts_dir = detect_trend_strength(candles)
+        _recent10 = candles[:10]
+        if direction == "BUY":
+            _momentum_candles = sum(1 for c in _recent10 if c["close"] > c["open"])
+        else:
+            _momentum_candles = sum(1 for c in _recent10 if c["close"] < c["open"])
+
         _is_trend_continuation = (
             market_structure in ("uptrend", "downtrend") and
-            (
-                (_trend_streak >= 5 and final_score >= 7) or
-                (_momentum_candles >= 8 and final_score >= 6)
-            )
+            ((_trend_streak >= 5) or (_momentum_candles >= 8))
         )
-        if _is_trend_continuation:
-            score_data["factors"] = score_data.get("factors", []) + ["⚡ Strong trend continuation — market order entry"]
 
-        # ── TJR 7-CONDITION GATE (Power of 3) ────────────────────────────────────
-        # Update Asia session range before sweep check
-        _update_asia_levels(symbol, candles)
-
-        # Gate 1: Kill zone — London 07-09 UTC or NY 12-14 UTC
-        _kz_active, _kz_label = is_kill_zone(symbol)
-        if not _kz_active:
-            logger.info(f"[scanner] {symbol} — outside kill zone, silent skip")
-            return None
-
-        # Gate 2: HTF — Daily AND 4H must align with signal direction
-        _htf_dir = "bullish" if direction == "BUY" else "bearish"
-        if not (htf_bias.get("d1_trend") == _htf_dir and htf_bias.get("h4_trend") == _htf_dir):
-            logger.info(
-                f"[scanner] {symbol} — HTF not aligned "
-                f"(D1={htf_bias.get('d1_trend')} 4H={htf_bias.get('h4_trend')} needed={_htf_dir}), silent skip"
-            )
-            return None
-
-        # Gate 3: Market structure confirmed — uptrend or downtrend (not ranging)
-        if market_structure not in ("uptrend", "downtrend"):
-            logger.info(f"[scanner] {symbol} — ranging market structure, silent skip")
-            return None
-
-        # Gate 4: Liquidity sweep at Asia range or recent swing high/low
-        _sweep_ok, _swept_level = _detect_asia_sweep_or_recent(symbol, candles, direction)
-        if not _sweep_ok:
-            logger.info(f"[scanner] {symbol} — no liquidity sweep detected, silent skip")
-            return None
-
-        # Gate 5: OB or FVG present (proximity already verified in TIER 4 above)
-        if not ob and not fvg:
-            logger.info(f"[scanner] {symbol} — no OB or FVG within range, silent skip")
-            return None
-
-        # Gate 6: BOS confirmed
-        if not (structure.get("bos") or ms.get("bos")):
-            logger.info(f"[scanner] {symbol} — no BOS confirmed, silent skip")
-            return None
-
-        # Gate 7: Score >= 9 — already verified at TIER 4 above
-
-        # ── BUILD SIGNAL LEVELS ───────────────────────────────────────────────
+        # ── BUILD SIGNAL LEVELS ─────────────────────────────────────────────────
         current_price = price_data.get("price", 0) if price_data else 0
         _build_cp = float(current_price) - FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
 
@@ -1821,7 +1334,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 _tc_tp1 = round(float(current_price) - 1.5 * _sl_dist_tc, _dp_tc)
                 _tc_tp2 = round(float(current_price) - 2.5 * _sl_dist_tc, _dp_tc)
                 _tc_tp3 = round(float(current_price) - 4.0 * _sl_dist_tc, _dp_tc)
-            _factors_str = "; ".join(score_data.get("factors", [])[:3])
             _htf_str = "HTF aligned"
             if htf_bias:
                 _d1_tc = htf_bias.get("d1_trend", "")
@@ -1840,18 +1352,18 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 f"TP2: {_tc_tp2}\n"
                 f"TP3: {_tc_tp3}\n"
                 f"Trend: {'Bullish' if direction == 'BUY' else 'Bearish'}\n"
-                f"Confirmation: Yes — {final_score}/10 score, {_htf_str}, {_factors_str}"
+                f"Confirmation: Yes — all 7 institutional gates passed, {_htf_str}"
             )
         else:
             auto_signal = build_auto_signal(
                 symbol, direction, _build_cp,
-                ob, fvg, structure, score_data, htf_bias or {}
+                ob, fvg, structure, {}, htf_bias or {}
             )
             _tc_entry = _tc_sl = _tc_tp1 = _tc_tp2 = None
 
-        signal_key = _cache_signal(auto_signal, score=score_data.get('score'))
+        signal_key = _cache_signal(auto_signal, score=None)
 
-        # ── RR VERIFICATION ────────────────────────────────────────────────────
+        # ── RR VERIFICATION ─────────────────────────────────────────────────────
         import re as _re_sig
         _sig_entry_m = _re_sig.search(r"Entry Zone:\s*([\d.]+)", auto_signal)
         _sig_sl_m    = _re_sig.search(r"Stop Loss:\s*([\d.]+)", auto_signal)
@@ -1895,14 +1407,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         price_for_ob_check = float(current_price) - _spot_offset if _spot_offset != 0 else float(current_price)
         entry_valid, deviation = validate_entry(symbol, entry_check, price_for_ob_check)
 
-        if not entry_valid:
-            if _is_strong_momentum:
-                logger.info(f"[scanner] {symbol} entry missed by {deviation} — strong momentum override")
-            elif final_score < 9:
-                logger.info(f"[scanner] {symbol} entry missed — blocking (score {final_score})")
-                return None
-            else:
-                logger.info(f"[scanner] {symbol} entry missed by {deviation} — score {final_score}/10 overrides")
+        if not entry_valid and not _is_trend_continuation:
+            logger.info(f"[scanner] {symbol} entry missed by {deviation} — blocking")
+            return None
 
         # OB-based RR hard check
         _min_sl = _min_sl_dist(symbol)
@@ -1934,9 +1441,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} correlation skip — {corr_reason}")
                 return None
 
-        # ── BUILD UNIFIED SIGNAL ───────────────────────────────────────────────
+        # ── BUILD UNIFIED SIGNAL ────────────────────────────────────────────────
         from claude import RISK_TIERS as _RISK_TIERS, _calculate_lot_size as _cals
-        _risk_pct = _RISK_TIERS.get(final_score, 0.005) * 100  # e.g. 0.50
+        _risk_pct = _RISK_TIERS.get(10, 0.005) * 100  # all 7 gates passed = top quality
         _sl_dist_for_lots = abs(_sig_entry - _sig_sl) if _sig_sl else _min_sl
         try:
             _lot_full = _cals(_risk_pct, _sl_dist_for_lots, symbol)
@@ -1947,7 +1454,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         _unified_signal = format_unified_signal(
             symbol=symbol,
             direction=direction,
-            score=final_score,
             entry=_sig_entry,
             sl=_sig_sl,
             tp1=_sig_tp1,
@@ -1960,13 +1466,15 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             is_trend_continuation=_is_trend_continuation,
             kill_zone_label=_kz_label,
             lot_str=_lot_str,
+            gates=gates,
+            gate_details=gate_details,
         )
-        logger.info(f"[scanner] {symbol} {direction} {final_score}/10 — unified signal built, sending")
+        logger.info(f"[scanner] {symbol} {direction} — all gates passed, unified signal built")
 
         return {
             "symbol": symbol,
-            "score": final_score,
-            "recommendation": score_data["recommendation"],
+            "score": 10,  # all 7 gates passed = institutional quality
+            "recommendation": "STRONG",
             "direction": direction,
             "unified_signal": _unified_signal,
             "signal_key": signal_key,
@@ -1974,7 +1482,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             "entry_valid": entry_valid,
             "deviation": deviation,
             "correlation_warning": corr_warning,
-            "bias_unknown": score_data.get("bias_unknown", False),
+            "bias_unknown": False,
             "is_trend_continuation": _is_trend_continuation,
             "tc_entry": _tc_entry,
             "tc_sl":    _tc_sl,
@@ -1984,14 +1492,16 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             "fvg": fvg,
             "structure": structure,
             "htf_bias": htf_bias or {},
-            "score_data": score_data,
-            # Parsed levels for YES/NO trade handler
+            "score_data": {"score": 10, "factors": [], "direction": direction,
+                           "momentum_candles": _momentum_candles, "trend_streak": _trend_streak},
             "entry":    _sig_entry,
             "sl":       _sig_sl,
             "tp1":      _sig_tp1,
             "tp2":      _sig_tp2,
             "risk_pct": _risk_pct,
             "swept_level": _swept_level,
+            "gates": gates,
+            "gate_details": gate_details,
         }
 
     except Exception as e:
@@ -2173,7 +1683,6 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
                 f"Direction: {_direction}\n"
                 f"Trend direction: {_tc_trend} — this is a {_direction} signal\n"
                 f"DO NOT return {'bullish' if _direction == 'SELL' else 'bearish'} trend on a {_direction} signal\n"
-                f"Score: {_scanner_score}/10\n"
                 f"Entry: MARKET ORDER at current price {_live_price} — DO NOT recalculate entry\n"
                 f"Stop Loss: {_tc_sl} ({_sl_pips}) — USE EXACTLY THIS LEVEL\n"
                 f"TP1: {_tc_tp1} (1.5R) — USE EXACTLY THIS LEVEL\n"
@@ -2218,9 +1727,9 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             signal_risk = analysis.get("risk_percent", 0) or 0
             if max_daily_pct > 0 and signal_risk > (max_daily_pct / 5):
                 analysis["risk_percent"] = round(max_daily_pct / 5, 2)
-            priority_header = f"⚡ AUTO-GRADED — {profile.name}\n🏆 Score {result['score']}/10 — {result['recommendation']}\n"
+            priority_header = f"⚡ AUTO-GRADED — {profile.name}\n🏆 7/7 Gates ✅ — {result['recommendation']}\n"
         else:
-            priority_header = f"⚡ AUTO-GRADED — Score {result['score']}/10\n"
+            priority_header = f"⚡ AUTO-GRADED — 7/7 Gates ✅\n"
         if _loss_warning:
             priority_header = f"{_loss_warning}\n\n{priority_header}"
 
