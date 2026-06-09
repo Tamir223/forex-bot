@@ -44,10 +44,12 @@ YFINANCE_FUTURES_MAP = {
 logger = logging.getLogger(__name__)
 
 # Cache for auto-built signals — keyed by short ID
-# Allows one-tap grading without user typing anything
 import uuid as _uuid
 AUTO_SIGNAL_CACHE = {}
 MAX_CACHE_SIZE = 200
+
+# Asia session high/low tracking per symbol (Power of 3 sweep detection)
+_asia_levels: dict = {}  # {symbol: {"high": float, "low": float, "date": str}}
 
 # Twelve Data circuit breaker — once daily credits are exhausted, skip TD calls
 # until the next UTC midnight rather than hitting the API on every scan cycle.
@@ -169,6 +171,53 @@ def get_cached_score(key: str) -> int | None:
     if entry is None:
         return None
     return entry.get("score")
+
+
+def _update_asia_levels(symbol: str, candles: list) -> None:
+    """Track Asia session (00:00-07:00 UTC) high/low from today's 15M candles."""
+    sym = symbol.upper()
+    today = datetime.now(timezone.utc).date()
+    asia_candles = []
+    for c in candles:
+        try:
+            dt = datetime.fromisoformat(str(c.get("datetime", "")))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
+            if dt.date() == today and 0 <= dt.hour < 7:
+                asia_candles.append(c)
+        except Exception:
+            continue
+    if asia_candles:
+        _asia_levels[sym] = {
+            "high": max(c["high"] for c in asia_candles),
+            "low":  min(c["low"]  for c in asia_candles),
+            "date": str(today),
+        }
+
+
+def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> tuple:
+    """
+    Power of 3: check for Asia range sweep, fall back to recent swing sweep.
+    SELL: wick above Asia high then close below it.
+    BUY:  wick below Asia low  then close above it.
+    Returns (swept, swept_level).
+    """
+    sym = symbol.upper()
+    today = datetime.now(timezone.utc).date()
+    asia = _asia_levels.get(sym, {})
+    if asia.get("date") == str(today) and asia.get("high") and asia.get("low"):
+        asia_high = asia["high"]
+        asia_low  = asia["low"]
+        for c in candles[:15]:
+            if direction == "SELL" and c["high"] > asia_high and c["close"] < asia_high:
+                return True, round(asia_high + FUTURES_SPOT_OFFSET.get(sym, 0), 5)
+            if direction == "BUY"  and c["low"]  < asia_low  and c["close"] > asia_low:
+                return True, round(asia_low  + FUTURES_SPOT_OFFSET.get(sym, 0), 5)
+    # Fallback to recent swing sweep
+    return detect_liquidity_sweep(candles, direction, symbol)
+
 
 BASE_URL = "https://api.twelvedata.com"
 
@@ -1270,6 +1319,95 @@ def format_scan_alert(symbol: str, structure: dict, ob: dict, fvg: dict, score_d
     return "\n".join(lines)
 
 
+def format_unified_signal(symbol: str, direction: str, score: int,
+                          entry: float, sl: float, tp1: float, tp2: float,
+                          ob: dict, fvg: dict, structure: dict, htf_bias: dict,
+                          swept_level: float, is_trend_continuation: bool,
+                          kill_zone_label: str, lot_str: str) -> str:
+    """Build the single clean TNL TRADER SIGNAL block — no scan alert, no grade step."""
+    DIV = "━━━━━━━━━━━━━━━━━━━━"
+    sym = symbol.upper()
+
+    # Decimal places and SL display
+    _is_pts = sym in ("XAUUSD", "US30", "NAS100") or sym in YFINANCE_FUTURES_MAP
+    _dp = 3 if _is_pts else 5
+    sl_dist = abs(entry - sl)
+    if _is_pts:
+        _sl_display = f"{round(sl_dist, 1)} pts"
+    elif "JPY" in sym:
+        _sl_display = f"{round(sl_dist * 100, 1)} pips"
+    else:
+        _sl_display = f"{round(sl_dist * 10000, 1)} pips"
+
+    # Order type
+    if is_trend_continuation:
+        _type_str = "Trend Continuation / MARKET ORDER"
+    elif ob:
+        _type_str = "OB Retracement / LIMIT ORDER"
+    elif fvg:
+        _type_str = "FVG Fill / LIMIT ORDER"
+    else:
+        _type_str = "Structure Setup / LIMIT ORDER"
+
+    # HTF summary line
+    d1 = htf_bias.get("d1_trend", "")
+    h4 = htf_bias.get("h4_trend", "")
+    h1 = htf_bias.get("h1_trend", "")
+    _htf_display = f"Daily/4H/1H {d1}" if (d1 and h4 and h1) else f"HTF {direction.lower()}"
+
+    # Swept level (already has spot offset applied from _detect_asia_sweep_or_recent)
+    _swept_dp = 3 if _is_pts else 5
+    _swept_str = f"{swept_level:.{_swept_dp}f}" if swept_level else "recent high/low"
+
+    # OB / FVG condition lines
+    _cond_lines = [
+        f"✅ HTF: {_htf_display}",
+        f"✅ Liquidity sweep at {_swept_str}",
+    ]
+    if ob:
+        _ob_off  = FUTURES_SPOT_OFFSET.get(sym, 0)
+        _ob_type = "Bullish OB" if ob["type"] == "bullish_ob" else "Bearish OB"
+        _ob_lo   = round(ob["low"]  + _ob_off, _dp)
+        _ob_hi   = round(ob["high"] + _ob_off, _dp)
+        _cond_lines.append(f"✅ {_ob_type}: {_ob_lo}-{_ob_hi}")
+    if fvg:
+        _fvg_bot = fvg.get("display_bottom", round(fvg["bottom"] + FUTURES_SPOT_OFFSET.get(sym, 0), _dp))
+        _fvg_top = fvg.get("display_top",    round(fvg["top"]    + FUTURES_SPOT_OFFSET.get(sym, 0), _dp))
+        _cond_lines.append(f"✅ FVG: {_fvg_bot}-{_fvg_top}")
+    if structure.get("bos"):
+        _cond_lines.append("✅ BOS confirmed")
+    _kz_short = (kill_zone_label
+                 .replace("Kill zone active — ", "")
+                 .replace(" — peak institutional activity", ""))
+    _cond_lines.append(f"✅ Kill zone: {_kz_short}")
+
+    # Action line
+    _dir_word = "Buy" if direction == "BUY" else "Sell"
+    if is_trend_continuation:
+        _action = f"⚡ Market {_dir_word} NOW at {entry:.{_dp}f}"
+    else:
+        _action = f"🔄 Set {_dir_word} Limit at {entry:.{_dp}f}"
+
+    lines = [
+        DIV,
+        "🏆 TNL TRADER SIGNAL",
+        DIV,
+        f"📊 {symbol} | {direction} | {score}/10",
+        f"📍 Entry:    {entry:.{_dp}f}",
+        f"🛑 SL:       {sl:.{_dp}f}  ({_sl_display})",
+        f"🎯 TP1:      {tp1:.{_dp}f}  (1.5R)",
+        f"🎯 TP2:      {tp2:.{_dp}f}  (2.5R)",
+        f"📦 Lots:     {lot_str}",
+        f"⚡ Type:     {_type_str}",
+        DIV,
+    ] + _cond_lines + [
+        DIV,
+        _action,
+        DIV,
+    ]
+    return "\n".join(lines)
+
+
 def check_signal_contradictions(direction: str, factors: list) -> tuple[int, list]:
     contradictions = 0
     warnings = []
@@ -1619,15 +1757,53 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         if _is_trend_continuation:
             score_data["factors"] = score_data.get("factors", []) + ["⚡ Strong trend continuation — market order entry"]
 
-        alert_text = format_scan_alert(symbol, structure, ob, fvg, score_data, price_data, htf_bias, candles=candles)
+        # ── TJR 7-CONDITION GATE (Power of 3) ────────────────────────────────────
+        # Update Asia session range before sweep check
+        _update_asia_levels(symbol, candles)
 
+        # Gate 1: Kill zone — London 07-09 UTC or NY 12-14 UTC
+        _kz_active, _kz_label = is_kill_zone(symbol)
+        if not _kz_active:
+            logger.info(f"[scanner] {symbol} — outside kill zone, silent skip")
+            return None
+
+        # Gate 2: HTF — Daily AND 4H must align with signal direction
+        _htf_dir = "bullish" if direction == "BUY" else "bearish"
+        if not (htf_bias.get("d1_trend") == _htf_dir and htf_bias.get("h4_trend") == _htf_dir):
+            logger.info(
+                f"[scanner] {symbol} — HTF not aligned "
+                f"(D1={htf_bias.get('d1_trend')} 4H={htf_bias.get('h4_trend')} needed={_htf_dir}), silent skip"
+            )
+            return None
+
+        # Gate 3: Market structure confirmed — uptrend or downtrend (not ranging)
+        if market_structure not in ("uptrend", "downtrend"):
+            logger.info(f"[scanner] {symbol} — ranging market structure, silent skip")
+            return None
+
+        # Gate 4: Liquidity sweep at Asia range or recent swing high/low
+        _sweep_ok, _swept_level = _detect_asia_sweep_or_recent(symbol, candles, direction)
+        if not _sweep_ok:
+            logger.info(f"[scanner] {symbol} — no liquidity sweep detected, silent skip")
+            return None
+
+        # Gate 5: OB or FVG present (proximity already verified in TIER 4 above)
+        if not ob and not fvg:
+            logger.info(f"[scanner] {symbol} — no OB or FVG within range, silent skip")
+            return None
+
+        # Gate 6: BOS confirmed
+        if not (structure.get("bos") or ms.get("bos")):
+            logger.info(f"[scanner] {symbol} — no BOS confirmed, silent skip")
+            return None
+
+        # Gate 7: Score >= 9 — already verified at TIER 4 above
+
+        # ── BUILD SIGNAL LEVELS ───────────────────────────────────────────────
         current_price = price_data.get("price", 0) if price_data else 0
-        # OB/FVG levels are in futures domain; convert spot price back to futures
-        # domain so build_auto_signal's zone comparisons and rp() offset are consistent.
         _build_cp = float(current_price) - FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
 
         if _is_trend_continuation:
-            # Market order entry — SL based on 2×ATR clamped to pair limits
             _atr_val = (atr_data.get("atr", 0) if atr_data else 0) or 0
             _sl_dist_tc = min(2.0 * _atr_val, _max_sl_dist(symbol)) if _atr_val > 0 else _max_sl_dist(symbol)
             _sl_dist_tc = max(_sl_dist_tc, _min_sl_dist(symbol))
@@ -1666,20 +1842,21 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 f"Trend: {'Bullish' if direction == 'BUY' else 'Bearish'}\n"
                 f"Confirmation: Yes — {final_score}/10 score, {_htf_str}, {_factors_str}"
             )
-            alert_text += "\n\n⚡ MARKET ORDER — Enter at current price NOW"
         else:
             auto_signal = build_auto_signal(
                 symbol, direction, _build_cp,
                 ob, fvg, structure, score_data, htf_bias or {}
             )
+            _tc_entry = _tc_sl = _tc_tp1 = _tc_tp2 = None
 
         signal_key = _cache_signal(auto_signal, score=score_data.get('score'))
 
-        # Verify RR >= 1.5 from the actual built signal prices
+        # ── RR VERIFICATION ────────────────────────────────────────────────────
         import re as _re_sig
         _sig_entry_m = _re_sig.search(r"Entry Zone:\s*([\d.]+)", auto_signal)
         _sig_sl_m    = _re_sig.search(r"Stop Loss:\s*([\d.]+)", auto_signal)
         _sig_tp1_m   = _re_sig.search(r"TP1:\s*([\d.]+)", auto_signal)
+        _sig_tp2_m   = _re_sig.search(r"TP2:\s*([\d.]+)", auto_signal)
         if _sig_entry_m and _sig_sl_m and _sig_tp1_m:
             _sig_entry = float(_sig_entry_m.group(1))
             _sig_sl    = float(_sig_sl_m.group(1))
@@ -1688,8 +1865,14 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             if not _sig_rr_valid:
                 logger.info(f"[scanner] {symbol} blocked — TP1 RR {_sig_actual_rr:.2f} below minimum 1.5")
                 return None
+        else:
+            _sig_entry = float(current_price) if current_price else 0.0
+            _sig_sl = 0.0
+            _sig_tp1 = 0.0
 
-        # ── STEP 11: Entry direction validation (skip for TREND CONTINUATION market orders)
+        _sig_tp2 = float(_sig_tp2_m.group(1)) if _sig_tp2_m else 0.0
+
+        # Entry direction validation (skip for market orders)
         if not _is_trend_continuation and _sig_entry_m and current_price:
             _spot_entry_for_dir = float(_sig_entry_m.group(1))
             _spot_price_for_dir = float(current_price)
@@ -1700,7 +1883,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} BUY entry {_spot_entry_for_dir} not below price {_spot_price_for_dir} — invalid Buy Limit")
                 return None
 
-        # Entry zone
+        # Entry zone proximity check
         if ob:
             entry_check = ob["mid"]
         elif fvg:
@@ -1708,69 +1891,84 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         else:
             entry_check = current_price
 
-        # OB/FVG levels are in futures domain; current_price from fetch_all_timeframes is spot.
-        # Convert current_price back to futures domain so validate_entry compares like-for-like.
         _spot_offset = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
-        if _spot_offset != 0:
-            price_for_ob_check = float(current_price) - _spot_offset
-        else:
-            price_for_ob_check = float(current_price)
+        price_for_ob_check = float(current_price) - _spot_offset if _spot_offset != 0 else float(current_price)
         entry_valid, deviation = validate_entry(symbol, entry_check, price_for_ob_check)
 
-        # TIER 4: Entry missed — block unless score >= 9 or strong momentum
         if not entry_valid:
             if _is_strong_momentum:
-                logger.info(f"[scanner] {symbol} entry missed by {deviation} — strong momentum override, continuing to trend continuation check")
+                logger.info(f"[scanner] {symbol} entry missed by {deviation} — strong momentum override")
             elif final_score < 9:
-                logger.info(f"[scanner] {symbol} entry missed by {deviation} — blocking (score {final_score})")
+                logger.info(f"[scanner] {symbol} entry missed — blocking (score {final_score})")
                 return None
             else:
-                logger.info(f"[scanner] {symbol} entry missed by {deviation} — score {final_score}/10 overrides entry check")
+                logger.info(f"[scanner] {symbol} entry missed by {deviation} — score {final_score}/10 overrides")
 
-        # TIER 4: RR check — hard block regardless of score
+        # OB-based RR hard check
         _min_sl = _min_sl_dist(symbol)
         if direction == "BUY":
-            if ob and ob.get("type") == "bullish_ob":
-                _sl_rr = round(ob["low"] - (ob["high"] - ob["low"]) * 0.1, 5)
-            elif fvg:
-                _sl_rr = round(fvg["bottom"] - (fvg["top"] - fvg["bottom"]) * 0.5, 5)
-            else:
-                _sl_rr = round(float(current_price) * 0.998, 5)
+            _sl_rr = (round(ob["low"] - (ob["high"] - ob["low"]) * 0.1, 5) if ob and ob.get("type") == "bullish_ob"
+                      else round(fvg["bottom"] - (fvg["top"] - fvg["bottom"]) * 0.5, 5) if fvg
+                      else round(float(current_price) * 0.998, 5))
             _sl_dist_rr = max(abs(float(entry_check) - _sl_rr), _min_sl)
-            _sl_rr = round(float(entry_check) - _sl_dist_rr, 5)
-            _tp1_rr = round(float(entry_check) + _sl_dist_rr * 1.5, 5)
+            _sl_rr   = round(float(entry_check) - _sl_dist_rr, 5)
+            _tp1_rr  = round(float(entry_check) + _sl_dist_rr * 1.5, 5)
         else:
-            if ob and ob.get("type") == "bearish_ob":
-                _sl_rr = round(ob["high"] + (ob["high"] - ob["low"]) * 0.1, 5)
-            elif fvg:
-                _sl_rr = round(fvg["top"] + (fvg["top"] - fvg["bottom"]) * 0.5, 5)
-            else:
-                _sl_rr = round(float(current_price) * 1.002, 5)
+            _sl_rr = (round(ob["high"] + (ob["high"] - ob["low"]) * 0.1, 5) if ob and ob.get("type") == "bearish_ob"
+                      else round(fvg["top"] + (fvg["top"] - fvg["bottom"]) * 0.5, 5) if fvg
+                      else round(float(current_price) * 1.002, 5))
             _sl_dist_rr = max(abs(_sl_rr - float(entry_check)), _min_sl)
-            _sl_rr = round(float(entry_check) + _sl_dist_rr, 5)
-            _tp1_rr = round(float(entry_check) - _sl_dist_rr * 1.5, 5)
+            _sl_rr   = round(float(entry_check) + _sl_dist_rr, 5)
+            _tp1_rr  = round(float(entry_check) - _sl_dist_rr * 1.5, 5)
 
         _rr_valid, _actual_rr = validate_risk_reward(float(entry_check), _sl_rr, _tp1_rr)
         if not _rr_valid:
             logger.info(f"[scanner] {symbol} blocked — TP1 RR {_actual_rr:.2f} below minimum 1.5")
             return None
 
-        # TIER 4: Correlation duplicate hard block
+        # Correlation check
         corr_warning = ""
         if active_signals:
             corr_ok, corr_reason, corr_warning = check_pair_correlation(symbol, direction, active_signals)
             if not corr_ok:
                 logger.info(f"[scanner] {symbol} correlation skip — {corr_reason}")
                 return None
-            if corr_warning:
-                logger.info(f"[scanner] {symbol} correlation warning — {corr_warning}")
+
+        # ── BUILD UNIFIED SIGNAL ───────────────────────────────────────────────
+        from claude import RISK_TIERS as _RISK_TIERS, _calculate_lot_size as _cals
+        _risk_pct = _RISK_TIERS.get(final_score, 0.005) * 100  # e.g. 0.50
+        _sl_dist_for_lots = abs(_sig_entry - _sig_sl) if _sig_sl else _min_sl
+        try:
+            _lot_full = _cals(_risk_pct, _sl_dist_for_lots, symbol)
+            _lot_str = _lot_full.split(" ")[0] if _lot_full else "0.10"
+        except Exception:
+            _lot_str = "0.10"
+
+        _unified_signal = format_unified_signal(
+            symbol=symbol,
+            direction=direction,
+            score=final_score,
+            entry=_sig_entry,
+            sl=_sig_sl,
+            tp1=_sig_tp1,
+            tp2=_sig_tp2,
+            ob=ob,
+            fvg=fvg,
+            structure=structure,
+            htf_bias=htf_bias or {},
+            swept_level=_swept_level,
+            is_trend_continuation=_is_trend_continuation,
+            kill_zone_label=_kz_label,
+            lot_str=_lot_str,
+        )
+        logger.info(f"[scanner] {symbol} {direction} {final_score}/10 — unified signal built, sending")
 
         return {
             "symbol": symbol,
             "score": final_score,
             "recommendation": score_data["recommendation"],
             "direction": direction,
-            "alert_text": alert_text,
+            "unified_signal": _unified_signal,
             "signal_key": signal_key,
             "auto_signal": auto_signal,
             "entry_valid": entry_valid,
@@ -1778,17 +1976,22 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             "correlation_warning": corr_warning,
             "bias_unknown": score_data.get("bias_unknown", False),
             "is_trend_continuation": _is_trend_continuation,
-            # TC market-order levels — bypasses OB-based SL from build_auto_signal
-            "tc_entry": _tc_entry if _is_trend_continuation else None,
-            "tc_sl":    _tc_sl    if _is_trend_continuation else None,
-            "tc_tp1":   _tc_tp1   if _is_trend_continuation else None,
-            "tc_tp2":   _tc_tp2   if _is_trend_continuation else None,
-            # Stored for fresh signal regeneration at grade time
+            "tc_entry": _tc_entry,
+            "tc_sl":    _tc_sl,
+            "tc_tp1":   _tc_tp1,
+            "tc_tp2":   _tc_tp2,
             "ob": ob,
             "fvg": fvg,
             "structure": structure,
             "htf_bias": htf_bias or {},
             "score_data": score_data,
+            # Parsed levels for YES/NO trade handler
+            "entry":    _sig_entry,
+            "sl":       _sig_sl,
+            "tp1":      _sig_tp1,
+            "tp2":      _sig_tp2,
+            "risk_pct": _risk_pct,
+            "swept_level": _swept_level,
         }
 
     except Exception as e:
@@ -2152,8 +2355,8 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
 
                 for chat_id in user_chat_ids:
                     try:
-                        # Filter alerts per user watchlist
-                        from database import get_user_by_chat_id, get_user_watchlist
+                        # Filter by user watchlist
+                        from database import get_user_by_chat_id, get_user_watchlist, log_trade, Trade
                         _chat_user = get_user_by_chat_id(str(chat_id))
                         if _chat_user:
                             _user_wl = get_user_watchlist(_chat_user.id)
@@ -2162,43 +2365,59 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                                 if symbol.upper() not in _user_symbols:
                                     logger.info(f"[scanner] Skipping {symbol} for {chat_id} — not in watchlist")
                                     continue
-                        # Auto-grade all signals at 9+. 7/8 show manual grade button only.
-                        _is_tc = result.get("is_trend_continuation", False)
-                        _should_auto_grade = score >= 9
-                        if _should_auto_grade:
-                            from database import get_user_by_chat_id
-                            user = get_user_by_chat_id(str(chat_id))
-                            if user and user.is_active:
-                                # Send alert first so they see what was found
-                                _grade_label = "⚡ *TREND CONTINUATION — Auto-grading now...*" if _is_tc else "⚡ *Score 9+/10 — Auto-grading now...*"
-                                await bot.send_message(
-                                    chat_id=chat_id,
-                                    text=result["alert_text"] + f"\n\n{_grade_label}",
-                                    parse_mode="Markdown"
-                                )
-                                # Then immediately grade and send report
-                                graded = await auto_grade_and_send(result, bot, chat_id, user)
-                                if graded:
-                                    _locked_until = _time.time() + 1800
-                                    _direction_lock[symbol] = {
-                                        "direction": direction,
-                                        "locked_until": _locked_until
-                                    }
-                                    logger.info(f"[direction_lock] {symbol} locked {direction} until {_locked_until:.0f} (+30 min)")
-                                if not graded:
-                                    # If auto-grade failed send manual button as fallback
-                                    grade_label = f"⚡ Grade This Signal ({symbol} {direction})"
-                                    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(grade_label, callback_data=f"autograde_{signal_key}")]])
-                                    await bot.send_message(chat_id=chat_id, text="Tap to grade manually:", reply_markup=keyboard)
-                            else:
-                                grade_label = f"⚡ Grade This Signal ({symbol} {direction})"
-                                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(grade_label, callback_data=f"autograde_{signal_key}")]])
-                                await bot.send_message(chat_id=chat_id, text=result["alert_text"], parse_mode="Markdown", reply_markup=keyboard)
-                        else:
-                            # Score 4-8 — show manual grade button
-                            grade_label = f"⚡ Grade This Signal ({symbol} {direction})"
-                            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(grade_label, callback_data=f"autograde_{signal_key}")]])
-                            await bot.send_message(chat_id=chat_id, text=result["alert_text"], parse_mode="Markdown", reply_markup=keyboard)
+
+                        user = get_user_by_chat_id(str(chat_id))
+                        if not user or not user.is_active:
+                            continue
+
+                        # Build minimal analysis dict for YES/NO trade handler
+                        _risk_pct_val = result.get("risk_pct", 0.50)
+                        _analysis = {
+                            "pair":          result["symbol"],
+                            "direction":     result["direction"],
+                            "entry_zone":    result.get("entry", 0),
+                            "stop_loss":     result.get("sl", 0),
+                            "tp1":           result.get("tp1", 0),
+                            "tp2":           result.get("tp2", 0),
+                            "risk_percent":  _risk_pct_val,
+                            "confidence":    score,
+                            "grade":         "A" if score == 10 else "B",
+                            "signal_source": "TNL Scanner",
+                        }
+
+                        # Log trade for tracking (confirmed when user taps YES)
+                        _trade_id = log_trade(Trade(
+                            user_id=user.id,
+                            pair=result["symbol"],
+                            direction=result["direction"],
+                            grade=_analysis["grade"],
+                            confidence=score,
+                            signal_source="TNL Scanner",
+                            risk_percent=_risk_pct_val,
+                            entry_zone=str(result.get("entry", "")),
+                            stop_loss=str(result.get("sl", "")),
+                        ))
+
+                        from bot import last_analysis, last_trade_id
+                        last_analysis[str(chat_id)] = _analysis
+                        if _trade_id:
+                            last_trade_id[str(chat_id)] = _trade_id
+
+                        keyboard = InlineKeyboardMarkup([[
+                            InlineKeyboardButton("✅ YES — Execute", callback_data="trade_yes"),
+                            InlineKeyboardButton("❌ NO — Skip",     callback_data="trade_no"),
+                        ]])
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=result["unified_signal"],
+                            reply_markup=keyboard,
+                        )
+
+                        # Lock direction for 30 min after a signal fires
+                        _locked_until = _time.time() + 1800
+                        _direction_lock[symbol] = {"direction": direction, "locked_until": _locked_until}
+                        logger.info(f"[direction_lock] {symbol} locked {direction} for 30 min")
+
                         alerts_sent += 1
                     except Exception as e:
                         logger.error(f"[scanner] Failed to send alert to {chat_id}: {e}")
