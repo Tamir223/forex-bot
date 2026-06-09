@@ -1647,8 +1647,10 @@ def get_trade_direction(symbol: str, candles_15m: list) -> tuple:
     elif bias == 'neutral' and structure == 'downtrend':
         return 'SELL', 'weak'
     elif bias == 'bullish' and structure == 'downtrend':
+        logger.info(f"[scanner] {symbol} Gate 2 fail — HTF bias conflicts with 15M structure — no trade")
         return None, 'conflict'
     elif bias == 'bearish' and structure == 'uptrend':
+        logger.info(f"[scanner] {symbol} Gate 2 fail — HTF bias conflicts with 15M structure — no trade")
         return None, 'conflict'
     else:
         return None, 'ranging'
