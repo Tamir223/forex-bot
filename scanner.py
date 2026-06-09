@@ -1783,6 +1783,11 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             "correlation_warning": corr_warning,
             "bias_unknown": score_data.get("bias_unknown", False),
             "is_trend_continuation": _is_trend_continuation,
+            # TC market-order levels — bypasses OB-based SL from build_auto_signal
+            "tc_entry": _tc_entry if _is_trend_continuation else None,
+            "tc_sl":    _tc_sl    if _is_trend_continuation else None,
+            "tc_tp1":   _tc_tp1   if _is_trend_continuation else None,
+            "tc_tp2":   _tc_tp2   if _is_trend_continuation else None,
             # Stored for fresh signal regeneration at grade time
             "ob": ob,
             "fvg": fvg,
@@ -1939,22 +1944,15 @@ async def auto_grade_and_send(result: dict, bot, chat_id: str, user):
             "score": _scanner_score,  # inject scanner score so analyze_signal uses it for risk tier
         }
 
-        # For TC signals, replace signal text with clean market-order context for Groq
+        # For TC signals, use scanner-calculated levels directly from result dict
         _tc_sl_f = _tc_tp1_f = _tc_tp2_f = None  # floats for post-grade override
         if _is_tc and _live_price is not None:
-            import re as _re_tc
-            _tc_sl_m   = _re_tc.search(r"Stop Loss:\s*([\d.]+)", signal_text)
-            _tc_tp1_m  = _re_tc.search(r"TP1:\s*([\d.]+)", signal_text)
-            _tc_tp2_m  = _re_tc.search(r"TP2:\s*([\d.]+)", signal_text)
-            _tc_sl     = _tc_sl_m.group(1)  if _tc_sl_m  else "N/A"
-            _tc_tp1    = _tc_tp1_m.group(1) if _tc_tp1_m else "N/A"
-            _tc_tp2    = _tc_tp2_m.group(1) if _tc_tp2_m else "N/A"
-            try:
-                _tc_sl_f  = float(_tc_sl)
-                _tc_tp1_f = float(_tc_tp1)
-                _tc_tp2_f = float(_tc_tp2) if _tc_tp2 != "N/A" else None
-            except (ValueError, TypeError):
-                pass
+            _tc_sl_f  = result.get("tc_sl")
+            _tc_tp1_f = result.get("tc_tp1")
+            _tc_tp2_f = result.get("tc_tp2")
+            _tc_sl  = str(_tc_sl_f)  if _tc_sl_f  is not None else "N/A"
+            _tc_tp1 = str(_tc_tp1_f) if _tc_tp1_f is not None else "N/A"
+            _tc_tp2 = str(_tc_tp2_f) if _tc_tp2_f is not None else "N/A"
             # Calculate SL distance in pips/points for Groq context
             if _tc_sl_f is not None:
                 _raw_dist = abs(_live_price - _tc_sl_f)
