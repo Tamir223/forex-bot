@@ -564,28 +564,30 @@ def _verify_activation_token(token: str):
 async def set_bot_commands(app):
     from telegram import BotCommand
     commands = [
-        BotCommand("start", "Get started with TNL Trader"),
-        BotCommand("help", "Show all available commands"),
-        BotCommand("setfirm", "Set your prop firm (e.g. /setfirm apex150)"),
-        BotCommand("firm", "Show your current firm profile"),
-        BotCommand("firmlist", "List all supported prop firms"),
-        BotCommand("challenge", "Start a new challenge tracker"),
-        BotCommand("status", "Check your challenge progress"),
-        BotCommand("logtrade", "Log a trade result (e.g. /logtrade WIN 500)"),
-        BotCommand("accounts", "View all active challenge accounts"),
-        BotCommand("insights", "Personal performance insights"),
-        BotCommand("performance", "Pair and session breakdown"),
-        BotCommand("besthours", "Your best trading hours"),
-        BotCommand("addaccount", "Add a new firm challenge"),
-        BotCommand("history", "View your last 10 trades"),
-        BotCommand("resetfirm", "Reset your challenge tracker"),
-        BotCommand("watch", "Set your scanner watchlist (e.g. /watch ES NQ XAUUSD)"),
-        BotCommand("scan", "Trigger an instant manual scan of your watchlist"),
-        BotCommand("bias", "Daily bias report for your watchlist pairs"),
+        BotCommand(command="start", description="Get started with TNL Trader"),
+        BotCommand(command="help", description="Show all available commands"),
+        BotCommand(command="setfirm", description="Set your prop firm (e.g. /setfirm apex150)"),
+        BotCommand(command="firm", description="Show your current firm profile"),
+        BotCommand(command="firmlist", description="List all supported prop firms"),
+        BotCommand(command="challenge", description="Start a new challenge tracker"),
+        BotCommand(command="status", description="Check your challenge progress"),
+        BotCommand(command="logtrade", description="Log a trade result (e.g. /logtrade WIN 500)"),
+        BotCommand(command="accounts", description="View all active challenge accounts"),
+        BotCommand(command="insights", description="Personal performance insights"),
+        BotCommand(command="performance", description="Pair and session breakdown"),
+        BotCommand(command="besthours", description="Your best trading hours"),
+        BotCommand(command="addaccount", description="Add a new firm challenge"),
+        BotCommand(command="history", description="View your last 10 trades"),
+        BotCommand(command="resetfirm", description="Reset your challenge tracker"),
+        BotCommand(command="watch", description="Set your scanner watchlist (e.g. /watch ES NQ XAUUSD)"),
+        BotCommand(command="scan", description="Trigger an instant manual scan of your watchlist"),
+        BotCommand(command="bias", description="Daily bias report for your watchlist pairs"),
         BotCommand(command="asia", description="Asia session highs and lows for all pairs"),
-        BotCommand("cancel", "Cancel current operation"),
+        BotCommand(command="cancel", description="Cancel current operation"),
     ]
+    logger.info(f"[bot] Registering {len(commands)} commands: {[c.command for c in commands]}")
     await app.bot.set_my_commands(commands)
+    logger.info("[bot] set_my_commands completed successfully")
 
 
 async def callback_trade_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -807,7 +809,6 @@ async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def start_bot():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    app.post_init = set_bot_commands
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("help", cmd_help))
@@ -841,6 +842,7 @@ async def start_bot():
     _scanner_task = asyncio.create_task(start_scanner(app.bot, get_all_active_users))
     async with app:
         await app.start()
+        await set_bot_commands(app)
         await app.updater.start_polling()
         await asyncio.sleep(float("inf"))
         await app.updater.stop()
