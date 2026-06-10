@@ -166,7 +166,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/addaccount — add a new firm\n\n"
         "📡 *Scanner:*\n"
         "/scan — instant market scan\n"
-        "/watch — set your watchlist\n\n"
+        "/watch — set your watchlist\n"
+        "/asia — Asia session high/low levels\n\n"
         "💬 *After a report:*\n"
         "YES — execute the trade\n"
         "NO — skip the trade\n"
@@ -243,6 +244,26 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "https://billing.stripe.com/p/login/fZu3cwesK8NEflccqOfjG00\n\n"
         "If you have any issues email support@tnltrader.com"
     )
+
+
+async def cmd_asia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from scanner import _asia_levels
+
+    lines = ["📊 ASIA SESSION LEVELS", "━━━━━━━━━━━━━━━━━━━━"]
+
+    pairs = ['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'NZDUSD', 'USDCHF']
+
+    for pair in pairs:
+        levels = _asia_levels.get(pair)
+        if levels:
+            lines.append(f"{pair}  H: {levels['high']:.5f}  L: {levels['low']:.5f}")
+        else:
+            lines.append(f"{pair}  — not set")
+
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
+    lines.append("🎯 Watch for price to sweep H or L then reverse")
+
+    await update.message.reply_text("\n".join(lines))
 
 
 async def process_signal_queue():
@@ -561,6 +582,7 @@ async def set_bot_commands(app):
         BotCommand("watch", "Set your scanner watchlist (e.g. /watch ES NQ XAUUSD)"),
         BotCommand("scan", "Trigger an instant manual scan of your watchlist"),
         BotCommand("bias", "Daily bias report for your watchlist pairs"),
+        BotCommand("asia", "Asia session high/low levels"),
         BotCommand("cancel", "Cancel current operation"),
     ]
     await app.bot.set_my_commands(commands)
@@ -802,6 +824,7 @@ async def start_bot():
     app.add_handler(CommandHandler("watch", cmd_watch))
     app.add_handler(CommandHandler("scan", cmd_scan))
     app.add_handler(CommandHandler("bias", cmd_bias))
+    app.add_handler(CommandHandler("asia", cmd_asia))
     app.add_handler(CallbackQueryHandler(callback_reset, pattern="^reset_"))
     app.add_handler(CallbackQueryHandler(callback_autograde, pattern="^autograde_"))
     app.add_handler(CommandHandler("accounts", cmd_accounts))
