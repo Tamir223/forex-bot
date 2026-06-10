@@ -897,9 +897,9 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         structure_1h = ms_1h.get('structure', 'ranging')
 
         if direction == 'SELL':
-            gate_2b = structure_1h in ('downtrend', 'ranging')
+            gate_2b = structure_1h == 'downtrend'
         elif direction == 'BUY':
-            gate_2b = structure_1h in ('uptrend', 'ranging')
+            gate_2b = structure_1h == 'uptrend'
         else:
             gate_2b = False
 
