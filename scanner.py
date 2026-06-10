@@ -919,7 +919,7 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     )
 
     # GATE 5 — OB or FVG present within range of price
-    gates['ob_fvg'] = ob is not None or fvg is not None
+    gates['ob_fvg'] = bool(ob) or bool(fvg)
     _disp_off = FUTURES_SPOT_OFFSET.get(_sym_upper, 0)
     _dp = 3 if _is_pts else 5
     if ob:
