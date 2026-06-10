@@ -173,9 +173,16 @@ def get_cached_score(key: str) -> int | None:
     return entry.get("score")
 
 
-def _update_asia_levels(symbol: str, candles: list) -> None:
+def _update_asia_levels(symbol: str, candles: list = None) -> None:
     """Track Asia session (00:00-07:00 UTC) high/low from today's 15M candles."""
     sym = symbol.upper()
+    if candles is None:
+        try:
+            bundle = fetch_all_timeframes(sym)
+            candles = bundle.get("candles_15m", [])
+        except Exception as e:
+            logger.warning(f"[asia] {sym} — could not fetch candles: {e}")
+            return
     today = datetime.now(timezone.utc).date()
     asia_candles = []
     for c in candles:
@@ -190,11 +197,14 @@ def _update_asia_levels(symbol: str, candles: list) -> None:
         except Exception:
             continue
     if asia_candles:
+        asia_high = max(c["high"] for c in asia_candles)
+        asia_low  = min(c["low"]  for c in asia_candles)
         _asia_levels[sym] = {
-            "high": max(c["high"] for c in asia_candles),
-            "low":  min(c["low"]  for c in asia_candles),
+            "high": asia_high,
+            "low":  asia_low,
             "date": str(today),
         }
+        logger.info(f"[asia] {sym} levels set — high={asia_high} low={asia_low}")
 
 
 def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> tuple:
@@ -1648,6 +1658,10 @@ async def start_scanner(bot, get_active_users_fn):
     logger.info("[scanner] Scanner started")
     _bias_sent_date = None  # track last date bias report was sent
     _last_cleanup_time: float = 0.0  # epoch — track hourly PENDING cleanup
+
+    # Populate Asia levels on startup
+    for sym in ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF']:
+        _update_asia_levels(sym)
 
     while True:
         try:
