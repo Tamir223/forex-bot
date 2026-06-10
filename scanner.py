@@ -625,7 +625,14 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
         return None
 
     try:
-        _disp_off = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0) if symbol else 0
+        _sym_u = symbol.upper() if symbol else ""
+        _disp_off = FUTURES_SPOT_OFFSET.get(_sym_u, 0)
+        if _sym_u == "XAUUSD" or _sym_u in YFINANCE_FUTURES_MAP:
+            _dp = 2
+        elif "JPY" in _sym_u:
+            _dp = 3
+        else:
+            _dp = 5
         for i in range(len(candles) - 2):
             c1 = candles[i+2]   # oldest of three
             c2 = candles[i+1]   # middle
@@ -640,8 +647,8 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
                     "type": "bullish_fvg",
                     "top": _top,
                     "bottom": _bot,
-                    "display_top": round(_top + _disp_off, 3),
-                    "display_bottom": round(_bot + _disp_off, 3),
+                    "display_top": round(_top + _disp_off, _dp),
+                    "display_bottom": round(_bot + _disp_off, _dp),
                     "mid": round((_top + _bot) / 2, 5),
                     "size": round(gap_size, 5),
                     "datetime": c2["datetime"],
@@ -656,8 +663,8 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
                     "type": "bearish_fvg",
                     "top": _top,
                     "bottom": _bot,
-                    "display_top": round(_top + _disp_off, 3),
-                    "display_bottom": round(_bot + _disp_off, 3),
+                    "display_top": round(_top + _disp_off, _dp),
+                    "display_bottom": round(_bot + _disp_off, _dp),
                     "mid": round((_top + _bot) / 2, 5),
                     "size": round(gap_size, 5),
                     "datetime": c2["datetime"],
