@@ -1661,7 +1661,11 @@ async def start_scanner(bot, get_active_users_fn):
 
     # Populate Asia levels on startup
     for sym in ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF']:
-        _update_asia_levels(sym)
+        try:
+            _update_asia_levels(sym)
+            logger.info(f"[startup] Asia levels initialized for {sym}")
+        except Exception as e:
+            logger.warning(f"[startup] Asia levels failed for {sym}: {e}")
 
     while True:
         try:

@@ -582,7 +582,7 @@ async def set_bot_commands(app):
         BotCommand("watch", "Set your scanner watchlist (e.g. /watch ES NQ XAUUSD)"),
         BotCommand("scan", "Trigger an instant manual scan of your watchlist"),
         BotCommand("bias", "Daily bias report for your watchlist pairs"),
-        BotCommand("asia", "Asia session high/low levels"),
+        BotCommand(command="asia", description="Asia session highs and lows for all pairs"),
         BotCommand("cancel", "Cancel current operation"),
     ]
     await app.bot.set_my_commands(commands)
