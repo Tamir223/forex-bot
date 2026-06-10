@@ -864,9 +864,10 @@ def detect_breakout(candles: list, direction: str) -> bool:
 
 def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
                     htf_bias: dict, market_structure: str, daily_bias: dict,
-                    atr_data: dict, direction: str, structure: dict, ms: dict) -> tuple:
+                    atr_data: dict, direction: str, structure: dict, ms: dict,
+                    data: dict = None) -> tuple:
     """
-    7 binary gates — all must pass for a signal to fire.
+    8 binary gates — all must pass for a signal to fire.
     Returns (all_passed, gates, gate_details, failed, kz_label, swept_level).
     """
     gates = {}
@@ -888,6 +889,25 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     _d1 = htf_bias.get("d1_trend", "unclear")
     _h4 = htf_bias.get("h4_trend", "unclear")
     gate_details['htf_bias'] = f"Daily/4H {_htf_dir}" if _htf_ok else f"D1={_d1} 4H={_h4} need={_htf_dir}"
+
+    # GATE 2B — 1H structure confirms direction
+    candles_1h = data.get('candles_1h', []) if data else []
+    if candles_1h:
+        ms_1h = analyze_market_structure(candles_1h)
+        structure_1h = ms_1h.get('structure', 'ranging')
+
+        if direction == 'SELL':
+            gate_2b = structure_1h in ('downtrend', 'ranging')
+        elif direction == 'BUY':
+            gate_2b = structure_1h in ('uptrend', 'ranging')
+        else:
+            gate_2b = False
+
+        gates['htf_1h'] = gate_2b
+        gate_details['htf_1h'] = f"1H structure: {structure_1h}"
+    else:
+        gates['htf_1h'] = True  # skip if no 1H data
+        gate_details['htf_1h'] = "1H: no data — skipped"
 
     # GATE 3 — Market structure confirmed (not ranging)
     gates['structure'] = market_structure in ('uptrend', 'downtrend')
@@ -1057,7 +1077,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         f"TP2: {tp2}\n"
         f"TP3: {tp3}\n"
         f"Trend: {trend_dir}\n"
-        f"Confirmation: Yes — all 7 institutional gates passed, {htf_str}"
+        f"Confirmation: Yes — all 8 institutional gates passed, {htf_str}"
     )
     return signal
 
@@ -1134,6 +1154,7 @@ def format_unified_signal(symbol: str, direction: str,
         _gate_lines = [
             f"✅ Kill zone: {gate_details.get('kill_zone', '')}",
             f"✅ HTF: {gate_details.get('htf_bias', '')}",
+            f"✅ 1H: {gate_details.get('htf_1h', '')}",
             f"✅ Structure: {gate_details.get('structure', '')}",
             f"✅ Sweep: {gate_details.get('sweep', '')}",
         ]
@@ -1152,7 +1173,7 @@ def format_unified_signal(symbol: str, direction: str,
         DIV,
         "🏆 TNL TRADER SIGNAL",
         DIV,
-        f"📊 {symbol} | {direction} | 7/7 Gates ✅ | {entry_tf}",
+        f"📊 {symbol} | {direction} | 8/8 Gates ✅ | {entry_tf}",
         f"📍 Entry:    {entry:.{_dp}f}",
         f"🛑 SL:       {sl:.{_dp}f}  ({_sl_display})",
         f"🎯 TP1:      {tp1:.{_dp}f}  (1.5R)",
@@ -1172,7 +1193,7 @@ def format_unified_signal(symbol: str, direction: str,
 async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
     """
     Run full scan on one symbol. Returns alert dict if setup found, None otherwise.
-    All 7 binary gates must pass — no scoring, no thresholds.
+    All 8 binary gates must pass — no scoring, no thresholds.
     """
     try:
         # ── UNIFIED DATA FETCH ───────────────────────────────────────────────
@@ -1251,17 +1272,17 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} direction locked {_lock['direction']} — blocking {direction} signal")
                 return None
 
-        # ── 7 BINARY GATES — ALL MUST PASS ─────────────────────────────────────
+        # ── 8 BINARY GATES — ALL MUST PASS ─────────────────────────────────────
         all_passed, gates, gate_details, failed_gates, _kz_label, _swept_level = check_tjr_gates(
             symbol, candles, ob, fvg, htf_bias, market_structure,
-            daily_bias, atr_data, direction, structure, ms
+            daily_bias, atr_data, direction, structure, ms, data=_data
         )
 
         if not all_passed:
             logger.info(f"[scanner] {symbol} — gates failed: {failed_gates} — silent skip")
             return None
 
-        logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed")
+        logger.info(f"[scanner] {symbol} {direction} — all 8 gates passed")
 
         # ── 5M ENTRY REFINEMENT ──────────────────────────────────────────────────
         candles_5m = _data.get("candles_5m", [])
@@ -1411,11 +1432,11 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             gate_details=gate_details,
             entry_tf=_entry_tf,
         )
-        logger.info(f"[scanner] {symbol} {direction} — all gates passed, unified signal built")
+        logger.info(f"[scanner] {symbol} {direction} — all 8 gates passed, unified signal built")
 
         return {
             "symbol": symbol,
-            "score": 10,  # all 7 gates passed = institutional quality
+            "score": 10,  # all 8 gates passed = institutional quality
             "recommendation": "STRONG",
             "direction": direction,
             "unified_signal": _unified_signal,
