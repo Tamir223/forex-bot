@@ -563,6 +563,48 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None, 
     return None
 
 
+def refine_entry_5m(symbol: str, candles_5m: list, direction: str, ob_15m: dict) -> dict | None:
+    """
+    Find the most recent 5M OB within the 15M OB zone for a tighter entry.
+    Candles are newest-first. Returns {entry, sl, timeframe} or None.
+
+    SELL: last bullish 5M candle before bearish displacement, within 15M OB zone.
+    BUY:  last bearish 5M candle before bullish displacement, within 15M OB zone.
+    """
+    if not candles_5m or len(candles_5m) < 3 or not ob_15m:
+        return None
+
+    ob_zone_high = ob_15m['high']
+    ob_zone_low  = ob_15m['low']
+
+    # i=1..n-1: candles_5m[i] is the OB candle (older), candles_5m[i-1] is the displacement (newer)
+    for i in range(1, len(candles_5m)):
+        candle      = candles_5m[i]
+        next_candle = candles_5m[i - 1]
+
+        if direction == 'SELL':
+            if (candle['close'] > candle['open'] and
+                    next_candle['close'] < next_candle['open'] and
+                    ob_zone_low <= candle['high'] <= ob_zone_high):
+                return {
+                    'entry':    candle['high'],
+                    'sl':       candle['high'] + _min_sl_dist(symbol),
+                    'timeframe': '5M',
+                }
+
+        if direction == 'BUY':
+            if (candle['close'] < candle['open'] and
+                    next_candle['close'] > next_candle['open'] and
+                    ob_zone_low <= candle['low'] <= ob_zone_high):
+                return {
+                    'entry':    candle['low'],
+                    'sl':       candle['low'] - _min_sl_dist(symbol),
+                    'timeframe': '5M',
+                }
+
+    return None
+
+
 def detect_fvg(candles: list, symbol: str = "") -> dict | None:
     """
     Detect Fair Value Gap (imbalance between candle 1 high and candle 3 low).
@@ -651,6 +693,7 @@ def fetch_all_timeframes(symbol: str) -> dict:
             })
         return result
 
+    candles_5m: list  = []
     candles_15m: list = []
     candles_1h: list  = []
     candles_4h: list  = []
@@ -661,6 +704,7 @@ def fetch_all_timeframes(symbol: str) -> dict:
     try:
         if yf_ticker:
             tk = yf.Ticker(yf_ticker)
+            candles_5m    = _to_candles(tk.history(period="5d",  interval="5m"))[:50]
             candles_15m   = _to_candles(tk.history(period="10d", interval="15m"))[:200]
             candles_1h    = _to_candles(tk.history(period="14d", interval="1h"))[:100]
             candles_4h    = _to_candles(tk.history(period="30d", interval="4h"))[:60]
@@ -694,6 +738,7 @@ def fetch_all_timeframes(symbol: str) -> dict:
     bundle = {
         "symbol": sym,
         "price": price,
+        "candles_5m": candles_5m,
         "candles_15m": candles_15m,
         "candles_1h": candles_1h,
         "candles_4h": candles_4h,
@@ -1013,7 +1058,8 @@ def format_unified_signal(symbol: str, direction: str,
                           ob: dict, fvg: dict, structure: dict, htf_bias: dict,
                           swept_level: float,
                           kill_zone_label: str, lot_str: str,
-                          gates: dict = None, gate_details: dict = None) -> str:
+                          gates: dict = None, gate_details: dict = None,
+                          entry_tf: str = "15M Entry") -> str:
     """Build the single clean TNL TRADER SIGNAL block — no scan alert, no grade step."""
     DIV = "━━━━━━━━━━━━━━━━━━━━"
     sym = symbol.upper()
@@ -1096,7 +1142,7 @@ def format_unified_signal(symbol: str, direction: str,
         DIV,
         "🏆 TNL TRADER SIGNAL",
         DIV,
-        f"📊 {symbol} | {direction} | 7/7 Gates ✅",
+        f"📊 {symbol} | {direction} | 7/7 Gates ✅ | {entry_tf}",
         f"📍 Entry:    {entry:.{_dp}f}",
         f"🛑 SL:       {sl:.{_dp}f}  ({_sl_display})",
         f"🎯 TP1:      {tp1:.{_dp}f}  (1.5R)",
@@ -1207,6 +1253,15 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed")
 
+        # ── 5M ENTRY REFINEMENT ──────────────────────────────────────────────────
+        candles_5m = _data.get("candles_5m", [])
+        _refinement_5m = refine_entry_5m(symbol, candles_5m, direction, ob) if (ob and candles_5m) else None
+        _entry_tf = "5M Entry" if _refinement_5m else "15M Entry"
+        if _refinement_5m:
+            logger.info(f"[scanner] {symbol} 5M OB found within 15M zone: entry={_refinement_5m['entry']} sl={_refinement_5m['sl']}")
+        else:
+            logger.info(f"[scanner] {symbol} no 5M OB in zone — falling back to 15M entry")
+
         # ── BUILD SIGNAL LEVELS ─────────────────────────────────────────────────
         current_price = price_data.get("price", 0) if price_data else 0
         _build_cp = float(current_price) - FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
@@ -1238,6 +1293,28 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _sig_tp1 = 0.0
 
         _sig_tp2 = float(_sig_tp2_m.group(1)) if _sig_tp2_m else 0.0
+
+        # ── APPLY 5M ENTRY OVERRIDE ───────────────────────────────────────────────
+        if _refinement_5m and _sig_entry_m:
+            _spot_offset_5m = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+            _is_pts_5m = symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP
+            _dp_5m = 3 if _is_pts_5m else 5
+            _sig_entry = round(_refinement_5m["entry"] + _spot_offset_5m, _dp_5m)
+            _raw_sl_5m = round(_refinement_5m["sl"] + _spot_offset_5m, _dp_5m)
+            _5m_sl_dist = max(abs(_sig_entry - _raw_sl_5m), _min_sl_dist(symbol))
+            _5m_sl_dist = min(_5m_sl_dist, _max_sl_dist(symbol))
+            if direction == "BUY":
+                _sig_sl  = round(_sig_entry - _5m_sl_dist, _dp_5m)
+                _sig_tp1 = round(_sig_entry + _5m_sl_dist * 1.5, _dp_5m)
+                _sig_tp2 = round(_sig_entry + _5m_sl_dist * 2.5, _dp_5m)
+            else:
+                _sig_sl  = round(_sig_entry + _5m_sl_dist, _dp_5m)
+                _sig_tp1 = round(_sig_entry - _5m_sl_dist * 1.5, _dp_5m)
+                _sig_tp2 = round(_sig_entry - _5m_sl_dist * 2.5, _dp_5m)
+            logger.info(
+                f"[scanner] {symbol} 5M levels applied: entry={_sig_entry} sl={_sig_sl} "
+                f"tp1={_sig_tp1} tp2={_sig_tp2}"
+            )
 
         # Entry direction validation
         if _sig_entry_m and current_price:
@@ -1322,6 +1399,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             lot_str=_lot_str,
             gates=gates,
             gate_details=gate_details,
+            entry_tf=_entry_tf,
         )
         logger.info(f"[scanner] {symbol} {direction} — all gates passed, unified signal built")
 
