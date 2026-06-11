@@ -1101,7 +1101,8 @@ def format_unified_signal(symbol: str, direction: str,
                           swept_level: float,
                           kill_zone_label: str, lot_str: str,
                           gates: dict = None, gate_details: dict = None,
-                          entry_tf: str = "15M Entry") -> str:
+                          entry_tf: str = "15M Entry",
+                          displacement: dict = None) -> str:
     """Build the single clean TNL TRADER SIGNAL block — no scan alert, no grade step."""
     DIV = "━━━━━━━━━━━━━━━━━━━━"
     sym = symbol.upper()
@@ -1189,23 +1190,37 @@ def format_unified_signal(symbol: str, direction: str,
             _gate_lines.append(f"✅ FVG: {gate_details.get('ob_fvg', '')}")
         elif gates and gates.get('ob_fvg'):
             _gate_lines.append(f"✅ OB/FVG: {gate_details.get('ob_fvg', 'Displacement retracement')}")
+            if displacement and displacement.get('ote_low') is not None:
+                _gate_lines.append(
+                    f"🎯 OTE Zone: {displacement['ote_low']:.{_dp}f}-{displacement['ote_high']:.{_dp}f}"
+                )
         _gate_lines.append(f"✅ BOS: {gate_details.get('bos', 'confirmed')}")
         _gate_lines.append(f"✅ Volatility: {gate_details.get('volatility', 'healthy')}")
     else:
         # Fallback when no gate data available
         _gate_lines = _cond_lines
 
+    _entry_label = "OTE midpoint" if (displacement and displacement.get('ote_mid') is not None and not ob and not fvg) else "Entry"
+    _ote_lines = []
+    if displacement and displacement.get('ote_low') is not None and not ob and not fvg:
+        _spot_off_ote = FUTURES_SPOT_OFFSET.get(sym, 0)
+        _ote_lines = [
+            f"🎯 OTE Zone: {round(displacement['ote_low'] + _spot_off_ote, _dp):.{_dp}f}"
+            f"-{round(displacement['ote_high'] + _spot_off_ote, _dp):.{_dp}f}",
+        ]
+
     lines = [
         DIV,
         "🏆 TNL TRADER SIGNAL",
         DIV,
         f"📊 {symbol} | {direction} | 7/7 Gates ✅ | {entry_tf}",
-        f"📍 Entry:    {entry:.{_dp}f}",
+        f"📍 {_entry_label.capitalize()}: {entry:.{_dp}f}",
         f"🛑 SL:       {sl:.{_dp}f}  ({_sl_display})",
         f"🎯 TP1:      {tp1:.{_dp}f}  (1.5R)",
         f"🎯 TP2:      {tp2:.{_dp}f}  (2.5R)",
         f"📦 Lots:     {lot_str}",
         f"⚡ Type:     {_type_str}",
+    ] + _ote_lines + [
         DIV,
     ] + _gate_lines + [
         DIV,
@@ -1382,14 +1397,16 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 f"tp1={_sig_tp1} tp2={_sig_tp2}"
             )
 
-        # ── DISPLACEMENT FVG ENTRY OVERRIDE (CE = FVG midpoint) ─────────────────
+        # ── DISPLACEMENT FVG ENTRY OVERRIDE (OTE midpoint) ──────────────────────
         _raw_candle_price = float(candles[0]["close"]) if candles else 0.0
         _has_displacement_fvg = displacement and is_price_in_displacement_fvg(_raw_candle_price, displacement)
         if _has_displacement_fvg and not ob and not fvg:
             _is_pts_d = symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP
             _dp_d = 3 if _is_pts_d else 5
             _spot_off_d = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
-            _sig_entry = round(displacement['fvg_mid'] + _spot_off_d, _dp_d)
+            # Use OTE midpoint (62-79% retracement) as entry; fall back to FVG mid (CE) if OTE absent
+            _ote_entry = displacement.get('ote_mid') or displacement['fvg_mid']
+            _sig_entry = round(_ote_entry + _spot_off_d, _dp_d)
             if direction == "BUY":
                 _sl_dist_d = max(abs(_sig_entry - round(displacement['fvg_bottom'] + _spot_off_d, _dp_d)), _min_sl_dist(symbol))
                 _sl_dist_d = min(_sl_dist_d, _max_sl_dist(symbol))
@@ -1403,7 +1420,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 _sig_tp1 = round(_sig_entry - _sl_dist_d * 1.5, _dp_d)
                 _sig_tp2 = round(_sig_entry - _sl_dist_d * 2.5, _dp_d)
             logger.info(
-                f"[displacement] {symbol} CE entry override: entry={_sig_entry} sl={_sig_sl} tp1={_sig_tp1}"
+                f"[displacement] {symbol} OTE entry override: entry={_sig_entry} sl={_sig_sl} tp1={_sig_tp1} "
+                f"ote_zone={round(displacement.get('ote_low', 0) + _spot_off_d, _dp_d)}"
+                f"-{round(displacement.get('ote_high', 0) + _spot_off_d, _dp_d)}"
             )
 
         # Entry direction validation
@@ -1490,6 +1509,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             gates=gates,
             gate_details=gate_details,
             entry_tf=_entry_tf,
+            displacement=displacement,
         )
         logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed, unified signal built")
 

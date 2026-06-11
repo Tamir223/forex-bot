@@ -1625,26 +1625,42 @@ def detect_displacement(candles: list, direction: str, symbol: str = "") -> dict
                 fvg_bottom = disp_candles[-1]['low']
                 fvg_top = disp_candles[0]['high']
                 if fvg_top > fvg_bottom:
+                    start_price = disp_candles[-1]['open']
+                    end_price   = disp_candles[0]['close']
+                    disp_range  = end_price - start_price
+                    ote_high = end_price - (disp_range * 0.62)
+                    ote_low  = end_price - (disp_range * 0.79)
                     return {
                         'direction': 'BUY',
-                        'start_price': disp_candles[-1]['open'],
-                        'end_price': disp_candles[0]['close'],
+                        'start_price': start_price,
+                        'end_price': end_price,
                         'fvg_top': fvg_top,
                         'fvg_bottom': fvg_bottom,
                         'fvg_mid': (fvg_top + fvg_bottom) / 2,
+                        'ote_high': ote_high,
+                        'ote_low': ote_low,
+                        'ote_mid': (ote_high + ote_low) / 2,
                         'candle_count': consecutive,
                     }
             else:
                 fvg_top = disp_candles[-1]['high']
                 fvg_bottom = disp_candles[0]['low']
                 if fvg_top > fvg_bottom:
+                    start_price = disp_candles[-1]['open']
+                    end_price   = disp_candles[0]['close']
+                    disp_range  = start_price - end_price
+                    ote_high = end_price + (disp_range * 0.79)
+                    ote_low  = end_price + (disp_range * 0.62)
                     return {
                         'direction': 'SELL',
-                        'start_price': disp_candles[-1]['open'],
-                        'end_price': disp_candles[0]['close'],
+                        'start_price': start_price,
+                        'end_price': end_price,
                         'fvg_top': fvg_top,
                         'fvg_bottom': fvg_bottom,
                         'fvg_mid': (fvg_top + fvg_bottom) / 2,
+                        'ote_high': ote_high,
+                        'ote_low': ote_low,
+                        'ote_mid': (ote_high + ote_low) / 2,
                         'candle_count': consecutive,
                     }
 
