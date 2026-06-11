@@ -951,7 +951,13 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     _disp_off = FUTURES_SPOT_OFFSET.get(_sym_upper, 0)
     _dp = 3 if _is_pts else 5
     if _has_displacement_fvg and not _has_ob and not _has_fvg:
-        gate_details['ob_fvg'] = f"Displacement retracement — CE at {round(displacement['fvg_mid'] + _disp_off, _dp)}"
+        gate_details['ob_fvg'] = (
+            f"Displacement FVG {round(displacement['fvg_bottom'] + _disp_off, _dp)}"
+            f"-{round(displacement['fvg_top'] + _disp_off, _dp)}"
+            f" | CE={round(displacement['fvg_mid'] + _disp_off, _dp)}"
+            f" | OTE={round(displacement.get('ote_low', 0) + _disp_off, _dp)}"
+            f"-{round(displacement.get('ote_high', 0) + _disp_off, _dp)}"
+        )
     elif ob:
         _ob_lo = round(ob['low']  + _disp_off, _dp)
         _ob_hi = round(ob['high'] + _disp_off, _dp)
@@ -1198,10 +1204,6 @@ def format_unified_signal(symbol: str, direction: str,
             _gate_lines.append(f"✅ FVG: {gate_details.get('ob_fvg', '')}")
         elif gates and gates.get('ob_fvg'):
             _gate_lines.append(f"✅ OB/FVG: {gate_details.get('ob_fvg', 'Displacement retracement')}")
-            if displacement and displacement.get('ote_low') is not None:
-                _gate_lines.append(
-                    f"🎯 OTE Zone: {displacement['ote_low']:.{_dp}f}-{displacement['ote_high']:.{_dp}f}"
-                )
         _gate_lines.append(f"✅ BOS: {gate_details.get('bos', 'confirmed')}")
         _gate_lines.append(f"✅ Volatility: {gate_details.get('volatility', 'healthy')}")
         if draw:
@@ -1213,21 +1215,17 @@ def format_unified_signal(symbol: str, direction: str,
         # Fallback when no gate data available
         _gate_lines = _cond_lines
 
-    _entry_label = "OTE midpoint" if (displacement and displacement.get('ote_mid') is not None and not ob and not fvg) else "Entry"
+    _is_ote_entry = bool(displacement and displacement.get('ote_mid') is not None and not ob and not fvg)
+    _entry_label = "Entry"
+    _entry_ote_suffix = " (OTE 62-79%)" if _is_ote_entry else ""
     _ote_lines = []
-    if displacement and displacement.get('ote_low') is not None and not ob and not fvg:
-        _spot_off_ote = FUTURES_SPOT_OFFSET.get(sym, 0)
-        _ote_lines = [
-            f"🎯 OTE Zone: {round(displacement['ote_low'] + _spot_off_ote, _dp):.{_dp}f}"
-            f"-{round(displacement['ote_high'] + _spot_off_ote, _dp):.{_dp}f}",
-        ]
 
     lines = [
         DIV,
         "🏆 TNL TRADER SIGNAL",
         DIV,
         f"📊 {symbol} | {direction} | 7/7 Gates ✅ | {entry_tf}",
-        f"📍 {_entry_label.capitalize()}: {entry:.{_dp}f}",
+        f"📍 Entry: {entry:.{_dp}f}{_entry_ote_suffix}",
         f"🛑 SL:       {sl:.{_dp}f}  ({_sl_display})",
         f"🎯 TP1:      {tp1:.{_dp}f}  (1.5R)",
         f"🎯 TP2:      {tp2:.{_dp}f}  (2.5R)",
