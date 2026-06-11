@@ -1672,3 +1672,104 @@ def is_price_in_displacement_fvg(current_price: float, displacement: dict) -> bo
     if not displacement:
         return False
     return displacement['fvg_bottom'] <= current_price <= displacement['fvg_top']
+
+
+# ─── 24. DRAW ON LIQUIDITY ────────────────────────────────────────────────────
+
+def get_draw_on_liquidity(symbol: str, candles: list, direction: str, asia_levels: dict) -> dict:
+    """
+    Identify the next draw on liquidity — where price is being pulled to.
+
+    For BUY: next liquidity above current price
+    - Asia High (if not yet swept)
+    - Previous session high
+    - Equal highs in last 20 candles
+
+    For SELL: next liquidity below current price
+    - Asia Low (if not yet swept)
+    - Previous session low
+    - Equal lows in last 20 candles
+
+    Returns dict with:
+    - level: price level of draw on liquidity
+    - type: 'asia_high', 'asia_low', 'equal_highs', 'equal_lows', 'session_high', 'session_low'
+    - distance_pips: how far price needs to travel
+    """
+    if not candles or not direction:
+        return {}
+
+    current_price = candles[0]['close']
+    pip_spec = PIP_SPECS.get(symbol.upper(), {})
+    pip_size = pip_spec.get('pip', 0.0001)
+
+    draws = []
+
+    if direction == 'BUY':
+        # Asia High as draw
+        if asia_levels and asia_levels.get('high', 0) > current_price:
+            draws.append({
+                'level': asia_levels['high'],
+                'type': 'asia_high',
+                'distance_pips': (asia_levels['high'] - current_price) / pip_size
+            })
+
+        # Equal highs in last 20 candles
+        highs = [c['high'] for c in candles[:20]]
+        for i in range(len(highs) - 1):
+            for j in range(i + 1, len(highs)):
+                if abs(highs[i] - highs[j]) < pip_size * 3:
+                    level = max(highs[i], highs[j])
+                    if level > current_price:
+                        draws.append({
+                            'level': level,
+                            'type': 'equal_highs',
+                            'distance_pips': (level - current_price) / pip_size
+                        })
+                        break
+
+        # Previous session high (last 96 candles = 24 hours on 15M)
+        session_high = max(c['high'] for c in candles[1:97]) if len(candles) > 97 else 0
+        if session_high > current_price:
+            draws.append({
+                'level': session_high,
+                'type': 'session_high',
+                'distance_pips': (session_high - current_price) / pip_size
+            })
+
+    else:  # SELL
+        # Asia Low as draw
+        if asia_levels and 0 < asia_levels.get('low', 0) < current_price:
+            draws.append({
+                'level': asia_levels['low'],
+                'type': 'asia_low',
+                'distance_pips': (current_price - asia_levels['low']) / pip_size
+            })
+
+        # Equal lows in last 20 candles
+        lows = [c['low'] for c in candles[:20]]
+        for i in range(len(lows) - 1):
+            for j in range(i + 1, len(lows)):
+                if abs(lows[i] - lows[j]) < pip_size * 3:
+                    level = min(lows[i], lows[j])
+                    if level < current_price:
+                        draws.append({
+                            'level': level,
+                            'type': 'equal_lows',
+                            'distance_pips': (current_price - level) / pip_size
+                        })
+                        break
+
+        # Previous session low
+        session_low = min(c['low'] for c in candles[1:97]) if len(candles) > 97 else 0
+        if 0 < session_low < current_price:
+            draws.append({
+                'level': session_low,
+                'type': 'session_low',
+                'distance_pips': (current_price - session_low) / pip_size
+            })
+
+    if draws:
+        nearest = min(draws, key=lambda x: x['distance_pips'])
+        return nearest
+
+    return {}

@@ -24,6 +24,7 @@ from scanner_improvements import (
     check_premium_discount_zone, is_kill_zone,
     analyze_market_structure, get_trade_direction,
     detect_displacement, is_price_in_displacement_fvg,
+    get_draw_on_liquidity,
 )
 import requests
 import yfinance as yf
@@ -882,7 +883,7 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
                     htf_bias: dict, market_structure: str, daily_bias: dict,
                     atr_data: dict, direction: str, structure: dict, ms: dict,
                     data: dict = None, displacement: dict = None,
-                    current_price: float = 0.0) -> tuple:
+                    current_price: float = 0.0, draw: dict = None) -> tuple:
     """
     7 binary gates — all must pass for a signal to fire.
     Returns (all_passed, gates, gate_details, failed, kz_label, swept_level).
@@ -930,9 +931,15 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     _sym_upper = symbol.upper()
     _is_pts = _sym_upper in ("XAUUSD", "US30", "NAS100") or _sym_upper in YFINANCE_FUTURES_MAP
     _swept_dp = 3 if _is_pts else 5
+    # Draw context: if draw on liquidity is confirmed, enrich sweep description with WHERE price is heading
+    _draw_detail = ""
+    if draw:
+        _draw_pips = draw.get('distance_pips', 0)
+        _draw_type = draw.get('type', '')
+        _draw_detail = f" → draw: {_draw_type} ({_draw_pips:.0f}p)"
     gate_details['sweep'] = (
-        f"swept at {_swept_level:.{_swept_dp}f}" if (_sweep_ok and _swept_level) else
-        "no liquidity sweep"
+        (f"swept at {_swept_level:.{_swept_dp}f}" + _draw_detail) if (_sweep_ok and _swept_level) else
+        f"no liquidity sweep{_draw_detail}"
     )
 
     # GATE 5 — OB or FVG present (including displacement FVG)
@@ -1102,7 +1109,8 @@ def format_unified_signal(symbol: str, direction: str,
                           kill_zone_label: str, lot_str: str,
                           gates: dict = None, gate_details: dict = None,
                           entry_tf: str = "15M Entry",
-                          displacement: dict = None) -> str:
+                          displacement: dict = None,
+                          draw: dict = None, tp3: float = None) -> str:
     """Build the single clean TNL TRADER SIGNAL block — no scan alert, no grade step."""
     DIV = "━━━━━━━━━━━━━━━━━━━━"
     sym = symbol.upper()
@@ -1196,6 +1204,11 @@ def format_unified_signal(symbol: str, direction: str,
                 )
         _gate_lines.append(f"✅ BOS: {gate_details.get('bos', 'confirmed')}")
         _gate_lines.append(f"✅ Volatility: {gate_details.get('volatility', 'healthy')}")
+        if draw:
+            _draw_level_disp = round(draw.get('level', 0) + FUTURES_SPOT_OFFSET.get(sym, 0), _dp)
+            _gate_lines.append(
+                f"🎯 Draw on Liquidity: {draw['type']} at {_draw_level_disp:.{_dp}f} ({draw['distance_pips']:.0f} pips)"
+            )
     else:
         # Fallback when no gate data available
         _gate_lines = _cond_lines
@@ -1218,6 +1231,7 @@ def format_unified_signal(symbol: str, direction: str,
         f"🛑 SL:       {sl:.{_dp}f}  ({_sl_display})",
         f"🎯 TP1:      {tp1:.{_dp}f}  (1.5R)",
         f"🎯 TP2:      {tp2:.{_dp}f}  (2.5R)",
+    ] + ([f"🎯 TP3:      {tp3:.{_dp}f}  (Draw)"] if tp3 else []) + [
         f"📦 Lots:     {lot_str}",
         f"⚡ Type:     {_type_str}",
     ] + _ote_lines + [
@@ -1306,6 +1320,12 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         )
         direction = _gt_direction
 
+        # ── DRAW ON LIQUIDITY ─────────────────────────────────────────────────
+        _update_asia_levels(symbol, candles)
+        draw = get_draw_on_liquidity(symbol, candles, direction, _asia_levels.get(symbol, {}))
+        if draw:
+            logger.info(f"[draw] {symbol} draw on liquidity: {draw['type']} at {draw['level']:.5f} ({draw['distance_pips']:.1f} pips)")
+
         displacement = detect_displacement(candles, direction, symbol)
         if displacement:
             logger.info(
@@ -1326,6 +1346,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             daily_bias, atr_data, direction, structure, ms, data=_data,
             displacement=displacement,
             current_price=float(candles[0]["close"]) if candles else 0.0,
+            draw=draw,
         )
 
         if not all_passed:
@@ -1374,6 +1395,14 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _sig_tp1 = 0.0
 
         _sig_tp2 = float(_sig_tp2_m.group(1)) if _sig_tp2_m else 0.0
+        _sig_tp3_m = _re_sig.search(r"TP3:\s*([\d.]+)", auto_signal)
+        _sig_tp3 = float(_sig_tp3_m.group(1)) if _sig_tp3_m else 0.0
+        if draw:
+            _spot_off_draw = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+            _is_pts_draw = symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP
+            _dp_draw = 3 if _is_pts_draw else 5
+            _sig_tp3 = round(draw['level'] + _spot_off_draw, _dp_draw)
+            logger.info(f"[draw] {symbol} TP3 set to draw level {_sig_tp3} ({draw['type']})")
 
         # ── APPLY 5M ENTRY OVERRIDE ───────────────────────────────────────────────
         if _refinement_5m and _sig_entry_m:
@@ -1510,6 +1539,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             gate_details=gate_details,
             entry_tf=_entry_tf,
             displacement=displacement,
+            draw=draw,
+            tp3=_sig_tp3 if _sig_tp3 else None,
         )
         logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed, unified signal built")
 
@@ -1533,6 +1564,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             "sl":       _sig_sl,
             "tp1":      _sig_tp1,
             "tp2":      _sig_tp2,
+            "tp3":      _sig_tp3,
+            "draw":     draw,
             "risk_pct": _risk_pct,
             "swept_level": _swept_level,
             "gates": gates,
