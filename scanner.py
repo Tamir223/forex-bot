@@ -200,12 +200,15 @@ def _update_asia_levels(symbol: str, candles: list = None) -> None:
     if asia_candles:
         asia_high = max(c["high"] for c in asia_candles)
         asia_low  = min(c["low"]  for c in asia_candles)
-        _asia_levels[sym] = {
-            "high": asia_high,
-            "low":  asia_low,
-            "date": str(today),
-        }
-        logger.info(f"[asia] {sym} levels set — high={asia_high} low={asia_low}")
+        if asia_high > 0 and asia_low > 0:
+            _asia_levels[sym] = {
+                "high": asia_high,
+                "low":  asia_low,
+                "date": str(today),
+            }
+            logger.info(f"[asia] {sym} levels set — high={asia_high} low={asia_low}")
+        else:
+            logger.warning(f"[asia] {sym} levels returned 0 — keeping existing")
 
 
 def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> tuple:
@@ -218,7 +221,9 @@ def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> 
     sym = symbol.upper()
     today = datetime.now(timezone.utc).date()
     asia = _asia_levels.get(sym, {})
-    if asia.get("date") == str(today) and asia.get("high") and asia.get("low"):
+    if (asia.get("date") == str(today)
+            and asia.get("high", 0) > 0
+            and asia.get("low", 0) > 0):
         asia_high = asia["high"]
         asia_low  = asia["low"]
         for c in candles[:15]:
@@ -226,6 +231,9 @@ def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> 
                 return True, round(asia_high + FUTURES_SPOT_OFFSET.get(sym, 0), 5)
             if direction == "BUY"  and c["low"]  < asia_low  and c["close"] > asia_low:
                 return True, round(asia_low  + FUTURES_SPOT_OFFSET.get(sym, 0), 5)
+    else:
+        if asia.get("high", 0) == 0 or asia.get("low", 0) == 0:
+            logger.warning(f"[asia] {sym} levels not set — sweep detection skipped, falling back to liquidity sweep")
     # Fallback to recent swing sweep
     return detect_liquidity_sweep(candles, direction, symbol)
 
