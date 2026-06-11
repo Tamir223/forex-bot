@@ -23,6 +23,7 @@ from scanner_improvements import (
     detect_equal_highs_lows, detect_market_structure_shift,
     check_premium_discount_zone, is_kill_zone,
     analyze_market_structure, get_trade_direction,
+    detect_displacement, is_price_in_displacement_fvg,
 )
 import requests
 import yfinance as yf
@@ -872,7 +873,8 @@ def detect_breakout(candles: list, direction: str) -> bool:
 def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
                     htf_bias: dict, market_structure: str, daily_bias: dict,
                     atr_data: dict, direction: str, structure: dict, ms: dict,
-                    data: dict = None) -> tuple:
+                    data: dict = None, displacement: dict = None,
+                    current_price: float = 0.0) -> tuple:
     """
     7 binary gates — all must pass for a signal to fire.
     Returns (all_passed, gates, gate_details, failed, kz_label, swept_level).
@@ -925,11 +927,17 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         "no liquidity sweep"
     )
 
-    # GATE 5 — OB or FVG present within range of price
-    gates['ob_fvg'] = bool(ob) or bool(fvg)
+    # GATE 5 — OB or FVG present (including displacement FVG)
+    _has_ob = bool(ob)
+    _has_fvg = bool(fvg)
+    _has_displacement_fvg = bool(displacement) and is_price_in_displacement_fvg(current_price, displacement)
+
+    gates['ob_fvg'] = _has_ob or _has_fvg or _has_displacement_fvg
     _disp_off = FUTURES_SPOT_OFFSET.get(_sym_upper, 0)
     _dp = 3 if _is_pts else 5
-    if ob:
+    if _has_displacement_fvg and not _has_ob and not _has_fvg:
+        gate_details['ob_fvg'] = f"Displacement retracement — CE at {round(displacement['fvg_mid'] + _disp_off, _dp)}"
+    elif ob:
         _ob_lo = round(ob['low']  + _disp_off, _dp)
         _ob_hi = round(ob['high'] + _disp_off, _dp)
         gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi}"
@@ -1106,6 +1114,8 @@ def format_unified_signal(symbol: str, direction: str,
         _type_str = "OB Retracement / LIMIT ORDER"
     elif fvg:
         _type_str = "FVG Fill / LIMIT ORDER"
+    elif gates and gates.get('ob_fvg'):
+        _type_str = "Displacement FVG / LIMIT ORDER"
     else:
         _type_str = "Structure Setup / LIMIT ORDER"
 
@@ -1169,6 +1179,8 @@ def format_unified_signal(symbol: str, direction: str,
             _gate_lines.append(f"✅ {_ob_label}: {gate_details.get('ob_fvg', '')}")
         elif fvg:
             _gate_lines.append(f"✅ FVG: {gate_details.get('ob_fvg', '')}")
+        elif gates and gates.get('ob_fvg'):
+            _gate_lines.append(f"✅ OB/FVG: {gate_details.get('ob_fvg', 'Displacement retracement')}")
         _gate_lines.append(f"✅ BOS: {gate_details.get('bos', 'confirmed')}")
         _gate_lines.append(f"✅ Volatility: {gate_details.get('volatility', 'healthy')}")
     else:
@@ -1271,6 +1283,13 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         )
         direction = _gt_direction
 
+        displacement = detect_displacement(candles, direction, symbol)
+        if displacement:
+            logger.info(
+                f"[displacement] {symbol} detected {displacement['candle_count']} candle displacement "
+                f"— FVG {displacement['fvg_bottom']:.5f}-{displacement['fvg_top']:.5f} | CE={displacement['fvg_mid']:.5f}"
+            )
+
         # ── DIRECTION LOCK ──────────────────────────────────────────────────────
         _lock = _direction_lock.get(symbol)
         if _lock and _time.time() < _lock["locked_until"]:
@@ -1281,7 +1300,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # ── 7 BINARY GATES — ALL MUST PASS ─────────────────────────────────────
         all_passed, gates, gate_details, failed_gates, _kz_label, _swept_level = check_tjr_gates(
             symbol, candles, ob, fvg, htf_bias, market_structure,
-            daily_bias, atr_data, direction, structure, ms, data=_data
+            daily_bias, atr_data, direction, structure, ms, data=_data,
+            displacement=displacement,
+            current_price=float(candles[0]["close"]) if candles else 0.0,
         )
 
         if not all_passed:
@@ -1351,6 +1372,30 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(
                 f"[scanner] {symbol} 5M levels applied: entry={_sig_entry} sl={_sig_sl} "
                 f"tp1={_sig_tp1} tp2={_sig_tp2}"
+            )
+
+        # ── DISPLACEMENT FVG ENTRY OVERRIDE (CE = FVG midpoint) ─────────────────
+        _raw_candle_price = float(candles[0]["close"]) if candles else 0.0
+        _has_displacement_fvg = displacement and is_price_in_displacement_fvg(_raw_candle_price, displacement)
+        if _has_displacement_fvg and not ob and not fvg:
+            _is_pts_d = symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP
+            _dp_d = 3 if _is_pts_d else 5
+            _spot_off_d = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+            _sig_entry = round(displacement['fvg_mid'] + _spot_off_d, _dp_d)
+            if direction == "BUY":
+                _sl_dist_d = max(abs(_sig_entry - round(displacement['fvg_bottom'] + _spot_off_d, _dp_d)), _min_sl_dist(symbol))
+                _sl_dist_d = min(_sl_dist_d, _max_sl_dist(symbol))
+                _sig_sl  = round(_sig_entry - _sl_dist_d, _dp_d)
+                _sig_tp1 = round(_sig_entry + _sl_dist_d * 1.5, _dp_d)
+                _sig_tp2 = round(_sig_entry + _sl_dist_d * 2.5, _dp_d)
+            else:
+                _sl_dist_d = max(abs(round(displacement['fvg_top'] + _spot_off_d, _dp_d) - _sig_entry), _min_sl_dist(symbol))
+                _sl_dist_d = min(_sl_dist_d, _max_sl_dist(symbol))
+                _sig_sl  = round(_sig_entry + _sl_dist_d, _dp_d)
+                _sig_tp1 = round(_sig_entry - _sl_dist_d * 1.5, _dp_d)
+                _sig_tp2 = round(_sig_entry - _sl_dist_d * 2.5, _dp_d)
+            logger.info(
+                f"[displacement] {symbol} CE entry override: entry={_sig_entry} sl={_sig_sl} tp1={_sig_tp1}"
             )
 
         # Entry direction validation

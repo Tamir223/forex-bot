@@ -1592,3 +1592,67 @@ def get_trade_direction(symbol: str, candles_15m: list) -> tuple:
         return None, 'conflict'
     else:
         return None, 'ranging'
+
+
+# ─── 23. DISPLACEMENT DETECTION ──────────────────────────────────────────────
+
+def detect_displacement(candles: list, direction: str, symbol: str = "") -> dict | None:
+    """
+    Detect a strong displacement move in the last 20 candles.
+    Displacement = 5+ consecutive same-direction candles, leaving an FVG behind.
+
+    Returns displacement dict with fvg_top, fvg_bottom, fvg_mid (CE level),
+    start_price, end_price, candle_count, direction. Returns None if not found.
+    """
+    if not candles or len(candles) < 10:
+        return None
+
+    for start_idx in range(0, min(15, len(candles) - 5)):
+        consecutive = 0
+        for i in range(start_idx, min(start_idx + 20, len(candles))):
+            c = candles[i]
+            if direction == 'BUY' and c['close'] > c['open']:
+                consecutive += 1
+            elif direction == 'SELL' and c['close'] < c['open']:
+                consecutive += 1
+            else:
+                break
+
+        if consecutive >= 5:
+            disp_candles = candles[start_idx:start_idx + consecutive]
+
+            if direction == 'BUY':
+                fvg_bottom = disp_candles[-1]['low']
+                fvg_top = disp_candles[0]['high']
+                if fvg_top > fvg_bottom:
+                    return {
+                        'direction': 'BUY',
+                        'start_price': disp_candles[-1]['open'],
+                        'end_price': disp_candles[0]['close'],
+                        'fvg_top': fvg_top,
+                        'fvg_bottom': fvg_bottom,
+                        'fvg_mid': (fvg_top + fvg_bottom) / 2,
+                        'candle_count': consecutive,
+                    }
+            else:
+                fvg_top = disp_candles[-1]['high']
+                fvg_bottom = disp_candles[0]['low']
+                if fvg_top > fvg_bottom:
+                    return {
+                        'direction': 'SELL',
+                        'start_price': disp_candles[-1]['open'],
+                        'end_price': disp_candles[0]['close'],
+                        'fvg_top': fvg_top,
+                        'fvg_bottom': fvg_bottom,
+                        'fvg_mid': (fvg_top + fvg_bottom) / 2,
+                        'candle_count': consecutive,
+                    }
+
+    return None
+
+
+def is_price_in_displacement_fvg(current_price: float, displacement: dict) -> bool:
+    """Check if price has retraced into the displacement FVG zone."""
+    if not displacement:
+        return False
+    return displacement['fvg_bottom'] <= current_price <= displacement['fvg_top']
