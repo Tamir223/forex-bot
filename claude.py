@@ -487,7 +487,7 @@ def _compute_sl_pts(entry_str, sl_str, pair) -> float | None:
 
 def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
                         account_size: float = 10000.0, max_contracts: int = None,
-                        user_id: int = None) -> str | None:
+                        user_id: int = None, current_price: float = 0.0) -> str | None:
     try:
         if sl_pts <= 0:
             return None
@@ -501,10 +501,14 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
 
         # Forex lot calculation — use user-specific pip values when available
         _user_pips = USER_PIP_VALUES.get(user_id, {}) if user_id else {}
-        pip_val = _user_pips.get(pair) or PIP_VALUES.get(pair, PIP_VALUES["default"])
+        # JPY pairs: pip value depends on current rate — compute dynamically when rate is available
+        if pair and "JPY" in pair.upper() and current_price > 0:
+            pip_val = (0.01 / current_price) * 100000
+        else:
+            pip_val = _user_pips.get(pair) or PIP_VALUES.get(pair, PIP_VALUES["default"])
         lot = round(risk_dollar / (sl_pts * pip_val), 2)
         acct_k = int(account_size / 1000)
-        logger.info(f"[lots] pair={pair} user={user_id} risk=${risk_dollar:.2f} sl={sl_pts} pip_val={pip_val} lots={lot}")
+        logger.info(f"[lots] pair={pair} user={user_id} risk=${risk_dollar:.2f} sl={sl_pts} pip_val={pip_val:.4f} lots={lot}")
         return f"{lot} lots on ${acct_k}k account"
     except Exception:
         return None

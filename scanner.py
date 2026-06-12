@@ -58,6 +58,8 @@ _asia_levels: dict = {}  # {symbol: {"high": float, "low": float, "date": str}}
 import time as _time
 _td_credits_exhausted_until: float = 0.0  # epoch seconds
 _direction_lock: dict = {}  # {symbol: {"direction": str, "locked_until": float}}
+_last_signal_time: dict = {}   # {symbol: datetime} — signal dedup cooldown
+_last_signal_entry: dict = {}  # {symbol: float}
 
 
 def _td_available() -> bool:
@@ -1452,6 +1454,23 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 f"-{round(displacement.get('ote_high', 0) + _spot_off_d, _dp_d)}"
             )
 
+        # TP3 ordering validation — draw level must be further than TP2, not behind entry
+        if _sig_tp3:
+            if direction == "BUY":
+                if _sig_tp3 <= _sig_entry:
+                    logger.info(f"[draw] {symbol} TP3 {_sig_tp3} <= entry {_sig_entry} for BUY — dropping TP3")
+                    _sig_tp3 = 0.0
+                elif _sig_tp2 and _sig_tp3 <= _sig_tp2:
+                    logger.info(f"[draw] {symbol} TP3 {_sig_tp3} <= TP2 {_sig_tp2} for BUY — dropping TP3")
+                    _sig_tp3 = 0.0
+            else:  # SELL
+                if _sig_tp3 >= _sig_entry:
+                    logger.info(f"[draw] {symbol} TP3 {_sig_tp3} >= entry {_sig_entry} for SELL — dropping TP3")
+                    _sig_tp3 = 0.0
+                elif _sig_tp2 and _sig_tp3 >= _sig_tp2:
+                    logger.info(f"[draw] {symbol} TP3 {_sig_tp3} >= TP2 {_sig_tp2} for SELL — dropping TP3")
+                    _sig_tp3 = 0.0
+
         # Entry direction validation
         if _sig_entry_m and current_price:
             _spot_entry_for_dir = float(_sig_entry_m.group(1))
@@ -1509,12 +1528,24 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} correlation skip — {corr_reason}")
                 return None
 
+        # Signal deduplication — suppress if a signal for this symbol fired < 30 min ago
+        if symbol in _last_signal_time:
+            _minutes_since = (datetime.utcnow() - _last_signal_time[symbol]).seconds / 60
+            if _minutes_since < 30:
+                logger.info(
+                    f"[scanner] {symbol} signal suppressed — cooldown active "
+                    f"({_minutes_since:.1f} min since last)"
+                )
+                return None
+
         # ── BUILD UNIFIED SIGNAL ────────────────────────────────────────────────
-        from claude import _calculate_lot_size as _cals
+        from claude import _calculate_lot_size as _cals, _PIP_SIZE as _lots_pip_size, _DEFAULT_PIP_SIZE as _lots_default_pip
         _risk_pct = 0.75  # Always 0.75% — all gate-passing signals are equal quality
-        _sl_dist_for_lots = abs(_sig_entry - _sig_sl) if _sig_sl else _min_sl
+        _sl_dist_raw = abs(_sig_entry - _sig_sl) if _sig_sl else _min_sl
+        _pip_size_lots = _lots_pip_size.get(symbol.upper(), _lots_default_pip)
+        _sl_dist_for_lots = _sl_dist_raw / _pip_size_lots  # convert raw price distance to pips
         try:
-            _lot_full = _cals(_risk_pct, _sl_dist_for_lots, symbol)
+            _lot_full = _cals(_risk_pct, _sl_dist_for_lots, symbol, current_price=float(_sig_entry))
             _lot_str = _lot_full.split(" ")[0] if _lot_full else "0.10"
         except Exception:
             _lot_str = "0.10"
@@ -1541,6 +1572,10 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             tp3=_sig_tp3 if _sig_tp3 else None,
         )
         logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed, unified signal built")
+
+        # Record signal time for dedup cooldown
+        _last_signal_time[symbol] = datetime.utcnow()
+        _last_signal_entry[symbol] = _sig_entry
 
         return {
             "symbol": symbol,

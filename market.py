@@ -1,16 +1,14 @@
 """
 TNL Trader Market Data Module
-Fetches live price and ATR from Twelve Data free tier API.
-Free tier: 800 requests/day, 8 requests/minute.
+Fetches live price and ATR via Yahoo Finance (forex/futures) and Coinbase (XAUUSD).
 """
 
 import logging
 import datetime as _dt
 import requests
 import yfinance as yf
-from config import TWELVE_DATA_API_KEY
 
-# yFinance forex tickers — used as fallback when Twelve Data is rate-limited
+# yFinance forex tickers
 YFINANCE_FOREX_MAP = {
     "EURUSD": "EURUSD=X",
     "GBPUSD": "GBPUSD=X",
@@ -39,8 +37,6 @@ _FUTURES_SPOT_OFFSET = {
 }
 
 logger = logging.getLogger(__name__)
-
-BASE_URL = "https://api.twelvedata.com"
 
 # Per-symbol cache for Yahoo Finance direct API — avoids yfinance internal request cache
 # {ticker: {"price": float, "ts": float}}
@@ -71,7 +67,7 @@ def _get_yahoo_direct_price(yf_ticker: str) -> float | None:
     except Exception:
         return None
 
-# Map common signal pair names to Twelve Data symbols
+# Map common signal pair names to canonical symbols (used by scanner)
 SYMBOL_MAP = {
     "XAUUSD": "XAU/USD",
     "GBPUSD": "GBP/USD",
@@ -104,7 +100,7 @@ SYMBOL_MAP = {
 
 
 def normalize_symbol(pair: str) -> str:
-    """Convert signal pair name to Twelve Data symbol"""
+    """Convert signal pair name to canonical symbol"""
     if not pair:
         return None
     upper = pair.upper().strip()
@@ -145,7 +141,7 @@ def _get_live_price_yfinance(pair: str) -> dict | None:
 def get_live_price(pair: str) -> dict:
     """
     Get current price for a pair.
-    Tries Twelve Data first; falls back to yFinance on failure or rate limit.
+    Forex: Yahoo Direct primary, yFinance fallback. XAUUSD: Coinbase. Futures: yFinance.
     Returns: { price, symbol } or None
     """
     if not pair:
@@ -153,7 +149,7 @@ def get_live_price(pair: str) -> dict:
 
     upper = pair.upper()
 
-    # XAUUSD and futures always use yFinance — no Twelve Data credits
+    # XAUUSD: Coinbase spot. Futures: yFinance.
     if upper == "XAUUSD" or upper in YFINANCE_FUTURES_MAP:
         yf_ticker = "GC=F" if upper == "XAUUSD" else YFINANCE_FUTURES_MAP[upper]
         try:
@@ -214,20 +210,7 @@ def get_live_price(pair: str) -> dict:
             logger.error(f"yFinance price error for {pair}: {e}")
         return None
 
-    # Forex — use yFinance directly
-    # (Twelve Data removed — rate-limited on free tier)
-    # if TWELVE_DATA_API_KEY:
-    #     symbol = normalize_symbol(pair)
-    #     if symbol:
-    #         try:
-    #             resp = requests.get(f"{BASE_URL}/price",
-    #                 params={"symbol": symbol, "apikey": TWELVE_DATA_API_KEY}, timeout=5)
-    #             data = resp.json()
-    #             if data.get("status") != "error" and "price" in data:
-    #                 return {"price": float(data["price"]), "symbol": symbol}
-    #             logger.warning(f"Price fetch failed for {symbol}: {data.get('message', 'unknown error')}")
-    #         except Exception as e:
-    #             logger.error(f"Live price error for {pair}: {e}")
+    # Forex — Yahoo Direct primary, yFinance fallback
     return _get_live_price_yfinance(pair)
 
 
@@ -270,28 +253,14 @@ def get_atr(pair: str, interval: str = "1h", period: int = 14) -> dict:
 
     upper = pair.upper()
 
-    # Use yFinance (free) for XAUUSD and all futures — no Twelve Data credits consumed
     if upper == "XAUUSD":
         return _get_atr_yfinance(pair, _XAUUSD_YF_TICKER, interval, period)
     if upper in YFINANCE_FUTURES_MAP:
         return _get_atr_yfinance(pair, YFINANCE_FUTURES_MAP[upper], interval, period)
 
-    # Forex — use yFinance directly
     if upper in YFINANCE_FOREX_MAP:
         return _get_atr_yfinance(pair, YFINANCE_FOREX_MAP[upper], interval, period)
     return None
-    # (Twelve Data removed — rate-limited on free tier)
-    # if not TWELVE_DATA_API_KEY:
-    #     if upper in YFINANCE_FOREX_MAP:
-    #         return _get_atr_yfinance(pair, YFINANCE_FOREX_MAP[upper], interval, period)
-    #     return None
-    # symbol = normalize_symbol(pair)
-    # ATR_MINIMUMS = { "XAU/USD": 3.0, "GBP/USD": 0.0008, ... }
-    # try:
-    #     resp = requests.get(f"{BASE_URL}/atr", params={...}, timeout=5)
-    #     ...
-    # except Exception as e:
-    #     logger.error(f"ATR error for {pair}: {e}")
 
 
 def check_entry_validity(pair: str, entry_zone: str, stop_loss: str, direction: str) -> dict:
