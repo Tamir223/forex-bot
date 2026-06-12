@@ -1700,7 +1700,12 @@ def get_draw_on_liquidity(symbol: str, candles: list, direction: str, asia_level
 
     current_price = candles[0]['close']
     pip_spec = PIP_SPECS.get(symbol.upper(), {})
-    pip_size = pip_spec.get('pip', 0.0001)
+    if symbol.upper() == 'XAUUSD':
+        pip_size = 1.0  # gold measured in points, not pips
+    elif 'JPY' in symbol.upper():
+        pip_size = 0.01
+    else:
+        pip_size = pip_spec.get('pip', 0.0001)
 
     # Minimum distance — draws closer than this are noise, not meaningful liquidity targets
     _MIN_DRAW_PIPS = {'USDJPY': 20, 'XAUUSD': 50}

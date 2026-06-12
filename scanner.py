@@ -1210,8 +1210,9 @@ def format_unified_signal(symbol: str, direction: str,
         _gate_lines.append(f"✅ Volatility: {gate_details.get('volatility', 'healthy')}")
         if draw:
             _draw_level_disp = round(draw.get('level', 0) + FUTURES_SPOT_OFFSET.get(sym, 0), _dp)
+            _draw_unit = "pts" if sym.upper() == "XAUUSD" else "pips"
             _gate_lines.append(
-                f"🎯 Draw on Liquidity: {draw['type']} at {_draw_level_disp:.{_dp}f} ({draw['distance_pips']:.0f} pips)"
+                f"🎯 Draw on Liquidity: {draw['type']} at {_draw_level_disp:.{_dp}f} ({draw['distance_pips']:.1f} {_draw_unit})"
             )
     else:
         # Fallback when no gate data available
@@ -1324,7 +1325,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         _update_asia_levels(symbol, candles)
         draw = get_draw_on_liquidity(symbol, candles, direction, _asia_levels.get(symbol, {}))
         if draw:
-            logger.info(f"[draw] {symbol} draw on liquidity: {draw['type']} at {draw['level']:.5f} ({draw['distance_pips']:.1f} pips)")
+            _draw_unit = "pts" if symbol.upper() == "XAUUSD" else "pips"
+            logger.info(f"[draw] {symbol} draw on liquidity: {draw['type']} at {draw['level']:.5f} ({draw['distance_pips']:.1f} {_draw_unit})")
 
         displacement = detect_displacement(candles, direction, symbol)
         if displacement:
