@@ -31,6 +31,8 @@ PIP_SPECS = {
     "GBPJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.10},
     "XAUUSD": {"pip": 0.01,   "min_sl": 12.0,   "min_atr": 3.0},     # 12 points — gold needs room
     "XAGUSD": {"pip": 0.001,  "min_sl": 0.05,   "min_atr": 0.03},
+    "US100":  {"pip": 1.0, "min_sl": 80.0,  "min_atr": 30.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 80,  "max_sl_pips": 300, "digits": 2, "unit": "pts"},
+    "US30":   {"pip": 1.0, "min_sl": 60.0,  "min_atr": 25.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 60,  "max_sl_pips": 250, "digits": 2, "unit": "pts"},
 }
 
 _FOREX_PIP_SPEC_PAIRS = {k for k, v in PIP_SPECS.items() if v["pip"] <= 0.01 and k not in ("XAUUSD", "XAGUSD")}
@@ -104,6 +106,7 @@ _SYMBOL_CURRENCIES: dict = {
     'XAGUSD': {'USD'}, 'GC': {'USD'}, 'MGC': {'USD'},
     'ES': {'USD'}, 'MES': {'USD'}, 'NQ': {'USD'}, 'MNQ': {'USD'},
     'RTY': {'USD'}, 'YM': {'USD'}, 'CL': {'USD'}, 'MCL': {'USD'},
+    'US100': {'USD'}, 'US30': {'USD'},
 }
 
 
@@ -339,7 +342,7 @@ def validate_entry(symbol: str, entry_price: float, current_price: float) -> tup
 
     if sym in ("XAUUSD", "GC", "MGC", "XAGUSD"):
         max_dev = ENTRY_MAX_POINTS_GOLD
-    elif sym in ("ES", "MES", "NQ", "MNQ", "RTY", "YM", "CL", "MCL", "NG"):
+    elif sym in ("ES", "MES", "NQ", "MNQ", "RTY", "YM", "CL", "MCL", "NG", "US100", "US30"):
         max_dev = ENTRY_MAX_POINTS_FUTURES
     else:
         # Forex (standard and JPY) — use pip spec so JPY pairs get correct scaling
@@ -874,6 +877,7 @@ _MTF_FUTURES_MAP = {
     'ES': 'ES=F', 'MES': 'MES=F', 'NQ': 'NQ=F', 'MNQ': 'MNQ=F',
     'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
     'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F',
+    'US100': 'NQ=F', 'US30': 'YM=F',
 }
 
 
@@ -1054,6 +1058,7 @@ _DAILY_BIAS_FUTURES_MAP = {
     'ES': 'ES=F', 'MES': 'MES=F', 'NQ': 'NQ=F', 'MNQ': 'MNQ=F',
     'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
     'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F', 'XAUUSD': 'GC=F',
+    'US100': 'NQ=F', 'US30': 'YM=F',
 }
 
 _FOREX_YFINANCE_MAP = {
@@ -1425,6 +1430,8 @@ _PAIR_KILL_ZONES = {
     'NZDUSD':  ['asian',  'london', 'ny_open'],
     'USDCAD':  ['london', 'ny_open'],
     'USDCHF':  ['london', 'ny_open'],
+    'US100':   ['london', 'ny_open'],
+    'US30':    ['london', 'ny_open'],
 }
 
 _KILL_ZONE_LABELS = {
@@ -1700,15 +1707,15 @@ def get_draw_on_liquidity(symbol: str, candles: list, direction: str, asia_level
 
     current_price = candles[0]['close']
     pip_spec = PIP_SPECS.get(symbol.upper(), {})
-    if symbol.upper() == 'XAUUSD':
-        pip_size = 1.0  # gold measured in points, not pips
+    if symbol.upper() in ('XAUUSD', 'US100', 'US30'):
+        pip_size = 1.0  # gold and index CFDs measured in points
     elif 'JPY' in symbol.upper():
         pip_size = 0.01
     else:
         pip_size = pip_spec.get('pip', 0.0001)
 
     # Minimum distance — draws closer than this are noise, not meaningful liquidity targets
-    _MIN_DRAW_PIPS = {'USDJPY': 20, 'XAUUSD': 50}
+    _MIN_DRAW_PIPS = {'USDJPY': 20, 'XAUUSD': 50, 'US100': 150, 'US30': 100}
     _min_draw_pips = _MIN_DRAW_PIPS.get(symbol.upper(), 15)
 
     draws = []

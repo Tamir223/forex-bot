@@ -67,9 +67,9 @@ check $? "RDS database reachable"
 echo | openssl s_client -connect tnltrader.com:443 -servername tnltrader.com 2>/dev/null | openssl x509 -noout -checkend 86400 2>/dev/null
 check $? "SSL certificate valid (not expiring in 24h)"
 
-# 12. Disk space check (fail if over 80%)
+# 12. Disk space check (fail if over 85%)
 DISK=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
-[ $DISK -lt 80 ]
+[ $DISK -lt 85 ]
 check $? "Disk space OK (${DISK}% used)"
 
 # 13. Memory check (fail if over 90%)

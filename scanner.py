@@ -41,6 +41,7 @@ YFINANCE_FUTURES_MAP = {
     'ES': 'ES=F', 'MES': 'MES=F', 'NQ': 'NQ=F', 'MNQ': 'MNQ=F',
     'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
     'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F',
+    'US100': 'NQ=F', 'US30': 'YM=F',
 }
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,8 @@ _scan_rotation_index = 0
 
 MIN_SL_DISTANCE = {
     "XAUUSD":        12.0,   # gold needs more room
-    "US30":          25.0,
+    "US100":         80.0,   # NQ equivalent — 80 pts minimum
+    "US30":          60.0,   # YM equivalent — 60 pts minimum
     "NAS100":        20.0,
     "GBPUSD":        0.0015, # 15 pips — most volatile forex
     "EURUSD":        0.0012, # 12 pips
@@ -104,6 +106,8 @@ MIN_SL_DISTANCE = {
 
 MAX_SL_DISTANCE = {
     "XAUUSD":        20.0,   # max 20 points
+    "US100":         300.0,  # max 300 pts
+    "US30":          250.0,  # max 250 pts
     "GBPUSD":        0.0020, # max 20 pips
     "EURUSD":        0.0020, # max 20 pips
     "USDJPY":        0.20,   # max 20 pips JPY
@@ -243,8 +247,14 @@ def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> 
 
 BASE_URL = "https://api.twelvedata.com"
 
+SYMBOLS = [
+    'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY',
+    'AUDUSD', 'USDCAD', 'NZDUSD', 'USDCHF',
+    'US100', 'US30',
+]
+
 # Default watchlist — users can customize with /watch command
-DEFAULT_WATCHLIST = ["XAUUSD", "EURUSD", "GBPUSD"]  # Forex default
+DEFAULT_WATCHLIST = ["XAUUSD", "EURUSD", "GBPUSD", "US100", "US30"]
 
 # Scan interval in seconds
 SCAN_INTERVAL = 900  # 15 minutes
@@ -1015,7 +1025,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         sl_dist = abs(entry - sl)
         sl_dist = max(sl_dist, _min_sl_dist(symbol))  # floor — never too tight
         sl_dist = min(sl_dist, _max_sl_dist(symbol))  # ceiling — never too wide
-        _use_3dp = spec or symbol.upper() in ("XAUUSD", "US30", "NAS100")
+        _use_3dp = spec or symbol.upper() in ("XAUUSD", "US100", "US30", "NAS100")
         sl = round(entry - sl_dist, 3) if _use_3dp else round(entry - sl_dist, 5)
         tp1 = round(entry + sl_dist * 1.5, 3 if _use_3dp else 5)
         tp2 = round(entry + sl_dist * 2.5, 3 if _use_3dp else 5)
@@ -1037,7 +1047,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         sl_dist = abs(sl - entry)
         sl_dist = max(sl_dist, _min_sl_dist(symbol))  # floor — never too tight
         sl_dist = min(sl_dist, _max_sl_dist(symbol))  # ceiling — never too wide
-        _use_3dp = spec or symbol.upper() in ("XAUUSD", "US30", "NAS100")
+        _use_3dp = spec or symbol.upper() in ("XAUUSD", "US100", "US30", "NAS100")
         sl = round(entry + sl_dist, 3) if _use_3dp else round(entry + sl_dist, 5)
         tp1 = round(entry - sl_dist * 1.5, 3 if _use_3dp else 5)
         tp2 = round(entry - sl_dist * 2.5, 3 if _use_3dp else 5)
@@ -1082,7 +1092,7 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         adjusted = float(v) + _spot_offset
         if spec:
             return round(adjusted, 3)  # futures
-        elif symbol.upper() in ("XAUUSD", "US30", "NAS100"):
+        elif symbol.upper() in ("XAUUSD", "US100", "US30", "NAS100"):
             return round(adjusted, 3)  # gold and indices use 3dp
         else:
             return round(adjusted, 5)  # forex pairs use 5dp
@@ -1210,7 +1220,7 @@ def format_unified_signal(symbol: str, direction: str,
         _gate_lines.append(f"✅ Volatility: {gate_details.get('volatility', 'healthy')}")
         if draw:
             _draw_level_disp = round(draw.get('level', 0) + FUTURES_SPOT_OFFSET.get(sym, 0), _dp)
-            _draw_unit = "pts" if sym.upper() == "XAUUSD" else "pips"
+            _draw_unit = "pts" if _is_pts else "pips"
             _gate_lines.append(
                 f"🎯 Draw on Liquidity: {draw['type']} at {_draw_level_disp:.{_dp}f} ({draw['distance_pips']:.1f} {_draw_unit})"
             )
@@ -1325,7 +1335,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         _update_asia_levels(symbol, candles)
         draw = get_draw_on_liquidity(symbol, candles, direction, _asia_levels.get(symbol, {}))
         if draw:
-            _draw_unit = "pts" if symbol.upper() == "XAUUSD" else "pips"
+            _draw_unit = "pts" if symbol.upper() in ("XAUUSD", "US100", "US30") or symbol.upper() in YFINANCE_FUTURES_MAP else "pips"
             logger.info(f"[draw] {symbol} draw on liquidity: {draw['type']} at {draw['level']:.5f} ({draw['distance_pips']:.1f} {_draw_unit})")
 
         displacement = detect_displacement(candles, direction, symbol)
@@ -1626,21 +1636,20 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
         logger.info("[scanner] Outside scan window — skipping")
         return
 
-    # Rebuild the symbol set from each user's actual DB watchlist so only symbols
-    # explicitly added by these users drive the scan (same DB fetch as per-alert filtering)
+    # Always seed with the full symbol list (SYMBOLS) so new pairs like US100/US30 are
+    # scanned even before users add them to personal watchlists; then union with each
+    # user's DB watchlist so custom additions are picked up too.
     from database import get_user_by_chat_id, get_user_watchlist as _get_user_wl
-    _user_symbol_union: set = set()
+    _user_symbol_union: set = set(s.upper() for s in watchlist)
     for _cid in user_chat_ids:
         _u = get_user_by_chat_id(str(_cid))
         if _u:
             _wl_str = _get_user_wl(_u.id)
             if _wl_str:
                 _user_symbol_union.update(s.strip().upper() for s in _wl_str.split(","))
-    if not _user_symbol_union:
-        _user_symbol_union = {s.upper() for s in watchlist}
 
     # Scan all pairs every cycle — XAUUSD always first, then remaining in preferred order
-    _preferred_order = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF"]
+    _preferred_order = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF", "US100", "US30"]
     pairs_this_cycle = [s for s in _preferred_order if s in _user_symbol_union]
     pairs_this_cycle += [s for s in _user_symbol_union if s not in _preferred_order]
 
@@ -1828,7 +1837,7 @@ async def start_scanner(bot, get_active_users_fn):
     _last_cleanup_time: float = 0.0  # epoch — track hourly PENDING cleanup
 
     # Populate Asia levels on startup
-    for sym in ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF']:
+    for sym in ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','US100','US30']:
         try:
             _update_asia_levels(sym)
             logger.info(f"[startup] Asia levels initialized for {sym}")
@@ -1873,7 +1882,8 @@ async def start_scanner(bot, get_active_users_fn):
                 continue
 
             # Get all unique symbols across all user watchlists
-            all_symbols = set()
+            # Seed with full SYMBOLS list so all 10 pairs always get scanned
+            all_symbols = set(SYMBOLS)
             user_chat_ids = []
 
             for user in users:
