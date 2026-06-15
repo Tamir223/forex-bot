@@ -300,7 +300,7 @@ async def cmd_bias(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`PAIR      BIAS        STRUCTURE     ACTION`",
     ]
 
-    for sym in watchlist[:8]:
+    for sym in watchlist:
         try:
             data = fetch_all_timeframes(sym)
             candles = data.get("candles_15m", [])
