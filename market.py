@@ -28,6 +28,7 @@ YFINANCE_FUTURES_MAP = {
     'ES': 'ES=F', 'MES': 'MES=F', 'NQ': 'NQ=F', 'MNQ': 'MNQ=F',
     'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
     'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F',
+    'US100': 'NQ=F', 'US30': 'YM=F',
 }
 # XAUUSD is handled via yFinance using the gold futures ticker
 _XAUUSD_YF_TICKER = "GC=F"
@@ -220,6 +221,7 @@ def _get_atr_yfinance(pair: str, yf_ticker: str, interval: str = "1h", period: i
         "GC=F": 3.0,   # XAUUSD / GC
         "ES=F": 8.0, "MES=F": 8.0,
         "NQ=F": 30.0, "MNQ=F": 30.0,
+        "YM=F": 80.0,
         "CL=F": 0.4,
     }
     try:
