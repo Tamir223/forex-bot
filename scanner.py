@@ -337,20 +337,16 @@ def is_scan_window() -> bool:
 def get_session_interval() -> int:
     """
     Return scan interval in seconds based on current session.
-    21:00-00:00 UTC — Asian open (AUDUSD, NZDUSD, USDJPY) = 1 minute
-    00:00-02:00 UTC — late Asian = 2 minutes
-    02:00-07:00 UTC — dead hours = 15 minutes
-    07:00-21:00 UTC — London + NY = 30 seconds
+    02:00-07:00 UTC — dead hours = 15 minutes (no liquid pairs active)
+    All other hours  — 30 seconds (London, NY, Asian open, late Asian)
+
+    30s sleep + ~29s scan cycle (12 pairs) = ~59s end-to-end. Acceptable.
+    120s was too slow — signals fired 2+ minutes late causing missed fills.
     """
     hour = datetime.now(timezone.utc).hour
-    if 7 <= hour < 21:
-        return 30    # London + NY — fastest
-    elif hour < 2:
-        return 120   # late Asian — slower
-    elif hour < 7:
-        return 900   # dead hours — slowest
-    else:
-        return 60    # 21:00-00:00 Asian open — medium
+    if 2 <= hour < 7:
+        return 900   # dead hours — no liquid pairs, no point scanning
+    return 30        # 30s floor for all active windows
 
 
 def get_current_session() -> str:
