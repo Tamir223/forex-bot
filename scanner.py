@@ -55,6 +55,12 @@ MAX_CACHE_SIZE = 200
 # Asia session high/low tracking per symbol (Power of 3 sweep detection)
 _asia_levels: dict = {}  # {symbol: {"high": float, "low": float, "date": str}}
 
+# Equity indices that close overnight and have no meaningful Asian session data.
+# For these symbols _update_asia_levels() uses the previous day's D1 high/low
+# instead of today's 00:00-07:00 UTC candles, which are empty (GER40) or very
+# thin overnight-futures prints (US100, US30, US500).
+_EQUITY_INDEX_SYMBOLS = {'GER40', 'US100', 'US30', 'US500'}
+
 # Twelve Data circuit breaker — once daily credits are exhausted, skip TD calls
 # until the next UTC midnight rather than hitting the API on every scan cycle.
 import time as _time
@@ -187,8 +193,48 @@ def get_cached_score(key: str) -> int | None:
 
 
 def _update_asia_levels(symbol: str, candles: list = None) -> None:
-    """Track Asia session (00:00-07:00 UTC) high/low from today's 15M candles."""
+    """
+    Set reference levels used for liquidity-sweep detection.
+
+    Forex / XAUUSD  — Asia session (00:00-07:00 UTC) high/low from today's 15M candles.
+    Equity indices (GER40, US100, US30, US500) — previous day's D1 high/low.
+      GER40 is closed during Asian hours; US indices have only thin overnight-futures
+      prints, making the prev-day session high/low a far more meaningful sweep reference.
+    """
     sym = symbol.upper()
+    today = datetime.now(timezone.utc).date()
+
+    # ── EQUITY INDICES: prev-day D1 high/low ─────────────────────────────────
+    if sym in _EQUITY_INDEX_SYMBOLS:
+        existing = _asia_levels.get(sym, {})
+        # Within one trading day, skip the refetch once levels are populated.
+        if (existing.get("source") == "prev_day"
+                and existing.get("date") == str(today)
+                and existing.get("high", 0) > 0):
+            return
+        try:
+            bundle = fetch_all_timeframes(sym)
+            d1 = bundle.get("candles_daily", [])  # newest-first; [0]=today partial, [1]=yesterday
+            if len(d1) >= 2:
+                prev = d1[1]
+                ph = prev.get("high", 0)
+                pl = prev.get("low",  0)
+                if ph > 0 and pl > 0:
+                    _asia_levels[sym] = {
+                        "high":   ph,
+                        "low":    pl,
+                        "date":   str(today),
+                        "source": "prev_day",
+                    }
+                    logger.info(f"[asia] {sym} prev_day levels — high={ph} low={pl}")
+                    return
+                logger.warning(f"[asia] {sym} prev_day D1 returned zeros — falling back to 15M")
+            else:
+                logger.warning(f"[asia] {sym} insufficient D1 data ({len(d1)} candles) — falling back to 15M")
+        except Exception as e:
+            logger.warning(f"[asia] {sym} prev_day fetch failed: {e} — falling back to 15M")
+
+    # ── FOREX / XAUUSD: Asia session 00:00-07:00 UTC ─────────────────────────
     if candles is None:
         try:
             bundle = fetch_all_timeframes(sym)
@@ -196,7 +242,6 @@ def _update_asia_levels(symbol: str, candles: list = None) -> None:
         except Exception as e:
             logger.warning(f"[asia] {sym} — could not fetch candles: {e}")
             return
-    today = datetime.now(timezone.utc).date()
     asia_candles = []
     for c in candles:
         try:
