@@ -29,6 +29,7 @@ YFINANCE_FUTURES_MAP = {
     'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
     'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F',
     'US100': 'NQ=F', 'US30': 'YM=F',
+    'GER40': '^GDAXI', 'US500': 'ES=F',
 }
 # XAUUSD is handled via yFinance using the gold futures ticker
 _XAUUSD_YF_TICKER = "GC=F"

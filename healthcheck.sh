@@ -170,6 +170,28 @@ for sym, ticker in [('EURUSD','EURUSD=X'),('GBPUSD','GBPUSD=X'),('XAUUSD','GC=F'
 " 2>/dev/null
 check $? "Phase 3 yFinance — EURUSD GBPUSD XAUUSD data feeds working"
 
+# 22b. GER40 price feed (^GDAXI)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import yfinance as yf
+h = yf.Ticker('^GDAXI').history(period='5d', interval='15m')
+assert not h.empty, 'GER40 ^GDAXI returned no data'
+price = float(h['Close'].iloc[-1])
+assert price > 1000, f'GER40 price out of range: {price}'
+print(f'[CHECK] GER40 price feed (^GDAXI): {price:.0f}')
+" 2>/dev/null
+check $? "[CHECK] GER40 price feed (^GDAXI)"
+
+# 22c. US500 price feed (ES=F)
+cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
+import yfinance as yf
+h = yf.Ticker('ES=F').history(period='5d', interval='15m')
+assert not h.empty, 'US500 ES=F returned no data'
+price = float(h['Close'].iloc[-1])
+assert 3000 <= price <= 10000, f'US500 price out of range: {price}'
+print(f'[CHECK] US500 price feed (ES=F): {price:.0f}')
+" 2>/dev/null
+check $? "[CHECK] US500 price feed (ES=F)"
+
 # ── CONFIGURATION CHECKS ──────────────────────────────────────────────────────
 
 # 23. MAX_LIVE_EXPOSURE = 3.0
