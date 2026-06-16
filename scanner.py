@@ -42,7 +42,7 @@ YFINANCE_FUTURES_MAP = {
     'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
     'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F',
     'US100': 'NQ=F', 'US30': 'YM=F',
-    'GER40': '^GDAXI', 'US500': 'ES=F',
+    'US500': 'ES=F',
 }
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ _asia_levels: dict = {}  # {symbol: {"high": float, "low": float, "date": str}}
 # For these symbols _update_asia_levels() uses the previous day's D1 high/low
 # instead of today's 00:00-07:00 UTC candles, which are empty (GER40) or very
 # thin overnight-futures prints (US100, US30, US500).
-_EQUITY_INDEX_SYMBOLS = {'GER40', 'US100', 'US30', 'US500'}
+_EQUITY_INDEX_SYMBOLS = {'US100', 'US30', 'US500'}
 
 # Twelve Data circuit breaker — once daily credits are exhausted, skip TD calls
 # until the next UTC midnight rather than hitting the API on every scan cycle.
@@ -98,7 +98,6 @@ MIN_SL_DISTANCE = {
     "XAUUSD":        12.0,   # gold needs more room
     "US100":         80.0,   # NQ equivalent — 80 pts minimum
     "US30":          60.0,   # YM equivalent — 60 pts minimum
-    "GER40":         60.0,   # DAX — 60 pts minimum
     "US500":          2.0,   # S&P500 CFD — 20 pips * 0.1 pip_size
     "NAS100":        20.0,
     "GBPUSD":        0.0015, # 15 pips — most volatile forex
@@ -117,7 +116,6 @@ MAX_SL_DISTANCE = {
     "XAUUSD":        20.0,   # max 20 points
     "US100":         300.0,  # max 300 pts
     "US30":          250.0,  # max 250 pts
-    "GER40":         300.0,  # max 300 pts
     "US500":          15.0,  # max 150 pips * 0.1 pip_size
     "GBPUSD":        0.0020, # max 20 pips
     "EURUSD":        0.0020, # max 20 pips
@@ -300,7 +298,7 @@ BASE_URL = "https://api.twelvedata.com"
 SYMBOLS = [
     'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY',
     'AUDUSD', 'USDCAD', 'NZDUSD', 'USDCHF',
-    'US100', 'US30', 'GER40', 'US500',
+    'US100', 'US30', 'US500',
 ]
 
 # Default watchlist — users can customize with /watch command
@@ -1695,7 +1693,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                 _user_symbol_union.update(s.strip().upper() for s in _wl_str.split(","))
 
     # Scan all pairs every cycle — XAUUSD always first, then remaining in preferred order
-    _preferred_order = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF", "US100", "US30", "GER40", "US500"]
+    _preferred_order = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF", "US100", "US30", "US500"]
     pairs_this_cycle = [s for s in _preferred_order if s in _user_symbol_union]
     pairs_this_cycle += [s for s in _user_symbol_union if s not in _preferred_order]
 
@@ -1883,7 +1881,7 @@ async def start_scanner(bot, get_active_users_fn):
     _last_cleanup_time: float = 0.0  # epoch — track hourly PENDING cleanup
 
     # Populate Asia levels on startup
-    for sym in ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','US100','US30','GER40','US500']:
+    for sym in ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','US100','US30','US500']:
         try:
             _update_asia_levels(sym)
             logger.info(f"[startup] Asia levels initialized for {sym}")

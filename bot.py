@@ -251,7 +251,7 @@ async def cmd_asia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lines = ["📊 ASIA SESSION LEVELS", "━━━━━━━━━━━━━━━━━━━━"]
 
-    pairs = ['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'NZDUSD', 'USDCHF', 'US100', 'US30', 'GER40', 'US500']
+    pairs = ['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'NZDUSD', 'USDCHF', 'US100', 'US30', 'US500']
 
     for pair in pairs:
         levels = _asia_levels.get(pair)

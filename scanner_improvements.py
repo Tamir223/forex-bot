@@ -33,7 +33,6 @@ PIP_SPECS = {
     "XAGUSD": {"pip": 0.001,  "min_sl": 0.05,   "min_atr": 0.03},
     "US100":  {"pip": 1.0, "min_sl": 80.0,  "min_atr": 30.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 80,  "max_sl_pips": 300, "digits": 2, "unit": "pts"},
     "US30":   {"pip": 1.0, "min_sl": 60.0,  "min_atr": 25.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 60,  "max_sl_pips": 250, "digits": 2, "unit": "pts"},
-    "GER40":  {"pip": 1.0, "min_sl": 60.0,  "min_atr": 20.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 60,  "max_sl_pips": 300, "digits": 2, "unit": "pts"},
     "US500":  {"pip": 0.1, "min_sl":  2.0,  "min_atr":  1.0, "pip_size": 0.1, "pip_value": 0.5, "min_sl_pips": 20,  "max_sl_pips": 150, "digits": 2, "unit": "pts"},
 }
 
@@ -109,7 +108,7 @@ _SYMBOL_CURRENCIES: dict = {
     'ES': {'USD'}, 'MES': {'USD'}, 'NQ': {'USD'}, 'MNQ': {'USD'},
     'RTY': {'USD'}, 'YM': {'USD'}, 'CL': {'USD'}, 'MCL': {'USD'},
     'US100': {'USD'}, 'US30': {'USD'},
-    'GER40': {'EUR'}, 'US500': {'USD'},
+    'US500': {'USD'},
 }
 
 
@@ -881,7 +880,7 @@ _MTF_FUTURES_MAP = {
     'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
     'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F',
     'US100': 'NQ=F', 'US30': 'YM=F',
-    'GER40': '^GDAXI', 'US500': 'ES=F',
+    'US500': 'ES=F',
 }
 
 
@@ -1063,7 +1062,7 @@ _DAILY_BIAS_FUTURES_MAP = {
     'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
     'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F', 'XAUUSD': 'GC=F',
     'US100': 'NQ=F', 'US30': 'YM=F',
-    'GER40': '^GDAXI', 'US500': 'ES=F',
+    'US500': 'ES=F',
 }
 
 _FOREX_YFINANCE_MAP = {
@@ -1437,7 +1436,6 @@ _PAIR_KILL_ZONES = {
     'USDCHF':  ['london', 'ny_open'],
     'US100':   ['london', 'ny_open'],
     'US30':    ['london', 'ny_open'],
-    'GER40':   ['london', 'ny_open'],
     'US500':   ['london', 'ny_open'],
 }
 
@@ -1714,7 +1712,7 @@ def get_draw_on_liquidity(symbol: str, candles: list, direction: str, asia_level
 
     current_price = candles[0]['close']
     pip_spec = PIP_SPECS.get(symbol.upper(), {})
-    if symbol.upper() in ('XAUUSD', 'US100', 'US30', 'GER40', 'US500'):
+    if symbol.upper() in ('XAUUSD', 'US100', 'US30', 'US500'):
         pip_size = 1.0  # gold and index CFDs measured in points
     elif 'JPY' in symbol.upper():
         pip_size = 0.01
@@ -1722,7 +1720,7 @@ def get_draw_on_liquidity(symbol: str, candles: list, direction: str, asia_level
         pip_size = pip_spec.get('pip', 0.0001)
 
     # Minimum distance — draws closer than this are noise, not meaningful liquidity targets
-    _MIN_DRAW_PIPS = {'USDJPY': 20, 'XAUUSD': 50, 'US100': 150, 'US30': 100, 'GER40': 150, 'US500': 30}
+    _MIN_DRAW_PIPS = {'USDJPY': 20, 'XAUUSD': 50, 'US100': 150, 'US30': 100, 'US500': 30}
     _min_draw_pips = _MIN_DRAW_PIPS.get(symbol.upper(), 15)
 
     draws = []
