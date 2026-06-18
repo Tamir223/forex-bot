@@ -507,6 +507,8 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
         else:
             pip_val = _user_pips.get(pair) or PIP_VALUES.get(pair, PIP_VALUES["default"])
         lot = round(risk_dollar / (sl_pts * pip_val), 2)
+        if pair and pair.upper() == "USDJPY":
+            lot = min(lot, 0.50)
         acct_k = int(account_size / 1000)
         logger.info(f"[lots] pair={pair} user={user_id} risk=${risk_dollar:.2f} sl={sl_pts} pip_val={pip_val:.4f} lots={lot}")
         return f"{lot} lots on ${acct_k}k account"
