@@ -1423,15 +1423,16 @@ _KILL_ZONES = {
     'london':       (7,  10),  # 07:00-10:00 UTC — EUR, GBP, XAUUSD
     'ny_open':      (12, 15),  # 12:00-15:00 UTC — all pairs
     'london_close': (15, 16),  # 15:00-16:00 UTC — EUR, GBP bonus window
+    'evening':      (19, 22),  # 19:00-22:00 UTC — post-FOMC Asia-correlated pairs
 }
 
 _PAIR_KILL_ZONES = {
     'EURUSD':  ['london', 'ny_open', 'london_close'],
     'GBPUSD':  ['london', 'ny_open', 'london_close'],
     'XAUUSD':  ['london', 'ny_open', 'london_close'],
-    'USDJPY':  ['asian',  'london', 'ny_open'],
-    'AUDUSD':  ['asian',  'london', 'ny_open'],
-    'NZDUSD':  ['asian',  'london', 'ny_open'],
+    'USDJPY':  ['asian',  'london', 'ny_open', 'evening'],
+    'AUDUSD':  ['asian',  'london', 'ny_open', 'evening'],
+    'NZDUSD':  ['asian',  'london', 'ny_open', 'evening'],
     'USDCAD':  ['london', 'ny_open'],
     'USDCHF':  ['london', 'ny_open'],
     'US100':   ['london', 'ny_open'],
@@ -1444,6 +1445,7 @@ _KILL_ZONE_LABELS = {
     'london':       "London Open",
     'ny_open':      "NY Open",
     'london_close': "London Close",
+    'evening':      "Evening Session",
 }
 
 def is_kill_zone(symbol: str) -> tuple[bool, str]:
