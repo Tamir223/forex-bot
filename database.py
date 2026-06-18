@@ -37,6 +37,7 @@ class User:
     stripe_subscription_id: Optional[str] = None
     firm_code: str = "ftmo"
     watchlist: str = "XAUUSD,EURUSD,GBPUSD"
+    auto_execute: bool = False
 
 
 @dataclass
@@ -84,6 +85,7 @@ CREATE TABLE IF NOT EXISTS users (
     is_active               BOOLEAN NOT NULL DEFAULT FALSE,
     stripe_customer_id      TEXT UNIQUE,
     stripe_subscription_id  TEXT UNIQUE,
+    auto_execute            BOOLEAN NOT NULL DEFAULT FALSE,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -151,6 +153,7 @@ def init_db():
             cur.execute("ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_start_balance FLOAT DEFAULT 10000.0")
             cur.execute("ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_pnl FLOAT DEFAULT 0.0")
             cur.execute("ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_start_date DATE")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_execute BOOLEAN DEFAULT FALSE")
         conn.commit()
     logger.info("Database initialized")
 
@@ -671,4 +674,26 @@ def get_user_watchlist(user_id: int) -> str:
     except Exception as e:
         logger.error(f"get_user_watchlist error: {e}")
         return None
+
+def get_auto_execute(user_id: int) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT auto_execute FROM users WHERE id = %s", (user_id,))
+                row = cur.fetchone()
+                return bool(row['auto_execute']) if row else False
+    except Exception as e:
+        logger.error(f"get_auto_execute error: {e}")
+        return False
+
+def set_auto_execute(user_id: int, enabled: bool) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE users SET auto_execute = %s WHERE id = %s", (enabled, user_id))
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"set_auto_execute error: {e}")
+        return False
 

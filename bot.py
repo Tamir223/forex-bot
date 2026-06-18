@@ -16,7 +16,7 @@ from database import (
     log_trade_opened, log_trade_win, log_trade_loss,
     get_provider_stats, update_provider_result,
     log_trade, get_user_trades, Trade, get_user_firm,
-    update_trade_result
+    update_trade_result, get_auto_execute, set_auto_execute
 )
 from prop_firm_profiles import get_profile
 from notifications import send_subscription_confirmed
@@ -167,7 +167,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📡 *Scanner:*\n"
         "/scan — instant market scan\n"
         "/watch — set your watchlist\n"
-        "/asia — Asia session high/low levels\n\n"
+        "/asia — Asia session high/low levels\n"
+        "/autoexecute on|off — EA auto-execution toggle\n\n"
         "💬 *After a report:*\n"
         "YES — execute the trade\n"
         "NO — skip the trade\n"
@@ -264,6 +265,41 @@ async def cmd_asia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append("🎯 Watch for price to sweep H or L then reverse")
 
     await update.message.reply_text("\n".join(lines))
+
+
+async def cmd_autoexecute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.message.chat_id)
+    user = get_user_by_chat_id(chat_id)
+    if not user or not user.is_active:
+        await update.message.reply_text(not_subscribed_message())
+        return
+
+    args = context.args
+    if not args or args[0].lower() not in ("on", "off"):
+        current = get_auto_execute(user.id)
+        status = "ON — EA places trades automatically" if current else "OFF — Telegram signal only, you place manually"
+        await update.message.reply_text(
+            f"⚡ Auto Execute is currently: {status}\n\n"
+            "/autoexecute on  — EA places trades automatically\n"
+            "/autoexecute off — Telegram signal only (default)"
+        )
+        return
+
+    enable = args[0].lower() == "on"
+    set_auto_execute(user.id, enable)
+
+    if enable:
+        await update.message.reply_text(
+            "✅ Auto Execute ON\n\n"
+            "When a signal fires, it will be written to the EA signal file automatically.\n"
+            "The EA will place the order — no manual action needed."
+        )
+    else:
+        await update.message.reply_text(
+            "✅ Auto Execute OFF\n\n"
+            "Signals will be sent to Telegram only.\n"
+            "You place the trade manually."
+        )
 
 
 async def process_signal_queue():
@@ -584,6 +620,7 @@ async def set_bot_commands(app):
         BotCommand(command="bias", description="Daily bias report for your watchlist pairs"),
         BotCommand(command="asia", description="Asia session highs and lows for all pairs"),
         BotCommand(command="cancel", description="Cancel current operation"),
+        BotCommand(command="autoexecute", description="Toggle EA auto-execution (on/off)"),
     ]
     logger.info(f"[bot] Registering {len(commands)} commands: {[c.command for c in commands]}")
     await app.bot.set_my_commands(commands)
@@ -826,6 +863,7 @@ async def start_bot():
     app.add_handler(CommandHandler("scan", cmd_scan))
     app.add_handler(CommandHandler("bias", cmd_bias))
     app.add_handler(CommandHandler("asia", cmd_asia))
+    app.add_handler(CommandHandler("autoexecute", cmd_autoexecute))
     app.add_handler(CallbackQueryHandler(callback_reset, pattern="^reset_"))
     app.add_handler(CallbackQueryHandler(callback_autograde, pattern="^autograde_"))
     app.add_handler(CommandHandler("accounts", cmd_accounts))

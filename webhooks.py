@@ -3,10 +3,11 @@ TNL Trader Stripe Webhook Handler
 """
 
 import os
+import json
 import logging
 import stripe
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse, JSONResponse
 from database import (
     get_user_by_email, get_user_by_stripe_customer,
     create_user, set_user_active
@@ -263,3 +264,20 @@ async def sitemap():
   </url>
 </urlset>"""
     return Response(content=content, media_type="application/xml")
+
+
+EA_API_KEY = os.getenv("TNL_EA_API_KEY", "TNL_EA_2026")
+SIGNAL_FILE = "/tmp/tnl_signal.json"
+
+
+@app.get("/api/v1/signal/latest")
+async def get_latest_signal(request: Request):
+    if request.headers.get("X-API-Key") != EA_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        with open(SIGNAL_FILE) as f:
+            return JSONResponse(content=json.load(f))
+    except FileNotFoundError:
+        return JSONResponse(content={"fired": False})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -1716,6 +1716,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                     "symbol": result.get("symbol", symbol),
                     "direction": result.get("direction", ""),
                 })
+
                 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                 signal_key = result.get("signal_key", "")
                 score = result.get("score", 0)
@@ -1738,6 +1739,13 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         user = get_user_by_chat_id(str(chat_id))
                         if not user or not user.is_active:
                             continue
+
+                        # EA auto-execution — write signal file if user opted in
+                        try:
+                            from signal_bridge import write_signal
+                            write_signal(result, user.id)
+                        except Exception as _sb_err:
+                            logger.error(f"[signal_bridge] {symbol} write failed for user {user.id}: {_sb_err}")
 
                         # Build minimal analysis dict for YES/NO trade handler
                         _risk_pct_val = result.get("risk_pct", 0.50)
