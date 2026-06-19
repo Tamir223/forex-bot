@@ -20,20 +20,20 @@ logger = logging.getLogger(__name__)
 # All functions that need pair-specific tolerances should call get_pip_spec().
 
 PIP_SPECS = {
-    "EURUSD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.0005},  # 12 pips
-    "GBPUSD": {"pip": 0.0001, "min_sl": 0.0015, "min_atr": 0.0006},  # 15 pips — most volatile forex
-    "AUDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0005},  # 10 pips
-    "NZDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0005},  # 10 pips
-    "USDCAD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.0007},  # 12 pips
-    "USDCHF": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0007},  # 10 pips
-    "USDJPY": {"pip": 0.01,   "min_sl": 0.12,   "min_atr": 0.05, "max_lots": 0.50},    # 12 pips JPY
+    "EURUSD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.00035},  # 12 pips
+    "GBPUSD": {"pip": 0.0001, "min_sl": 0.0015, "min_atr": 0.00042},  # 15 pips — most volatile forex
+    "AUDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.00035},  # 10 pips
+    "NZDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.00035},  # 10 pips
+    "USDCAD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.00049},  # 12 pips
+    "USDCHF": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.00049},  # 10 pips
+    "USDJPY": {"pip": 0.01,   "min_sl": 0.12,   "min_atr": 0.035, "max_lots": 0.50},    # 12 pips JPY
     "EURJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.08},
     "GBPJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.10},
-    "XAUUSD": {"pip": 0.01,   "min_sl": 12.0,   "min_atr": 3.0},     # 12 points — gold needs room
+    "XAUUSD": {"pip": 0.01,   "min_sl": 12.0,   "min_atr": 2.0},     # 12 points — gold needs room
     "XAGUSD": {"pip": 0.001,  "min_sl": 0.05,   "min_atr": 0.03},
-    "US100":  {"pip": 1.0, "min_sl": 80.0,  "min_atr": 30.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 80,  "max_sl_pips": 300, "digits": 2, "unit": "pts"},
-    "US30":   {"pip": 1.0, "min_sl": 60.0,  "min_atr": 25.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 60,  "max_sl_pips": 250, "digits": 2, "unit": "pts"},
-    "US500":  {"pip": 0.1, "min_sl":  2.0,  "min_atr":  1.0, "pip_size": 0.1, "pip_value": 0.5, "min_sl_pips": 20,  "max_sl_pips": 150, "digits": 2, "unit": "pts"},
+    "US100":  {"pip": 1.0, "min_sl": 80.0,  "min_atr": 20.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 80,  "max_sl_pips": 300, "digits": 2, "unit": "pts"},
+    "US30":   {"pip": 1.0, "min_sl": 60.0,  "min_atr": 17.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 60,  "max_sl_pips": 250, "digits": 2, "unit": "pts"},
+    "US500":  {"pip": 0.1, "min_sl":  2.0,  "min_atr":  0.7, "pip_size": 0.1, "pip_value": 0.5, "min_sl_pips": 20,  "max_sl_pips": 150, "digits": 2, "unit": "pts"},
 }
 
 _FOREX_PIP_SPEC_PAIRS = {k for k, v in PIP_SPECS.items() if v["pip"] <= 0.01 and k not in ("XAUUSD", "XAGUSD")}
@@ -540,9 +540,9 @@ def run_pre_scan_checks(symbol: str, entry_price: float,
 
 def detect_liquidity_sweep(candles: list, direction: str, symbol: str = "") -> tuple[bool, float]:
     """
-    Check last 5 candles for a liquidity sweep.
-    BUY: candle low pierced below previous 3-candle low but closed back above it.
-    SELL: candle high pierced above previous 3-candle high but closed back below it.
+    Check last 8 candles for a liquidity sweep.
+    BUY: candle low pierced below previous 5-candle low but closed back above it.
+    SELL: candle high pierced above previous 5-candle high but closed back below it.
     Returns (sweep_detected, swept_level).
     """
     if not candles or len(candles) < 6:
@@ -552,20 +552,22 @@ def detect_liquidity_sweep(candles: list, direction: str, symbol: str = "") -> t
     sym = symbol.upper() if symbol else ""
     min_pierce = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
 
-    recent = candles[:5]
+    recent = candles[:8]
 
     if direction == "BUY":
         for i, c in enumerate(recent):
-            if i + 3 >= len(candles):
+            if i + 5 >= len(candles):
                 break
-            prev_low = min(candles[i+1]["low"], candles[i+2]["low"], candles[i+3]["low"])
+            prev_low = min(candles[i+1]["low"], candles[i+2]["low"], candles[i+3]["low"],
+                           candles[i+4]["low"], candles[i+5]["low"])
             if c["low"] < prev_low - min_pierce and c["close"] > prev_low:
                 return True, round(prev_low, 5)
     else:  # SELL
         for i, c in enumerate(recent):
-            if i + 3 >= len(candles):
+            if i + 5 >= len(candles):
                 break
-            prev_high = max(candles[i+1]["high"], candles[i+2]["high"], candles[i+3]["high"])
+            prev_high = max(candles[i+1]["high"], candles[i+2]["high"], candles[i+3]["high"],
+                            candles[i+4]["high"], candles[i+5]["high"])
             if c["high"] > prev_high + min_pierce and c["close"] < prev_high:
                 return True, round(prev_high, 5)
 
@@ -1524,11 +1526,18 @@ def analyze_market_structure(candles: list) -> dict:
                 chron[i]['low'] < chron[i+2]['low']):
             swing_lows.append(chron[i]['low'])
 
-    if len(swing_highs) < 2 or len(swing_lows) < 2:
+    if len(swing_highs) < 1 or len(swing_lows) < 1:
         return _default
 
-    last_highs = swing_highs[-2:]
-    last_lows = swing_lows[-2:]
+    if len(swing_highs) >= 2:
+        last_highs = swing_highs[-2:]
+    else:
+        last_highs = [swing_highs[0], swing_highs[0]]
+
+    if len(swing_lows) >= 2:
+        last_lows = swing_lows[-2:]
+    else:
+        last_lows = [swing_lows[0], swing_lows[0]]
     current_close = chron[-1]['close']
 
     higher_highs = last_highs[1] > last_highs[0]
@@ -1554,10 +1563,13 @@ def analyze_market_structure(candles: list) -> dict:
 
     # BOS — Break of Structure (trend continuation: price extends beyond last swing)
     bos = False
-    if structure == "uptrend" and current_close > last_highs[-1]:
-        bos = True
-    elif structure == "downtrend" and current_close < last_lows[-1]:
-        bos = True
+    recent_closes = [c['close'] for c in candles[:5]]
+    if structure == "uptrend":
+        if any(c > last_highs[-1] for c in recent_closes):
+            bos = True
+    elif structure == "downtrend":
+        if any(c < last_lows[-1] for c in recent_closes):
+            bos = True
 
     return {
         "structure": structure,
