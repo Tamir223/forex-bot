@@ -117,32 +117,112 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user or not user.is_active:
         await update.message.reply_text(not_subscribed_message())
         return
-    plan = user.plan_tier
-    if plan == "basic":
-        trades = _get_recent_trades(user.id, days=30, limit=10)
-    else:
-        trades = get_user_trades(user.id, limit=10)
-    if not trades:
+
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT UPPER(pair) AS pair, direction, result, pnl_amount, created_at "
+                    "FROM trades "
+                    "WHERE user_id = %s "
+                    "  AND UPPER(COALESCE(result, '')) NOT IN ('BLOCKED', 'SKIPPED', '') "
+                    "ORDER BY created_at DESC",
+                    (user.id,)
+                )
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                # Active trades: result IS NULL or PENDING
+                cur.execute(
+                    "SELECT COUNT(*) FROM trades "
+                    "WHERE user_id = %s "
+                    "  AND (result IS NULL OR UPPER(result) = 'PENDING')",
+                    (user.id,)
+                )
+                active_count = cur.fetchone()["count"]
+    except Exception as e:
+        logger.error(f"[stats] DB query failed: {e}")
+        await update.message.reply_text("Could not load stats. Try again later.")
+        return
+
+    if not rows:
         await update.message.reply_text("No trades logged yet. Start forwarding signals.")
         return
-    lines = ["📊 RECENT TRADES\n"]
-    for t in trades:
-        result_emoji = {"WIN": "✅", "LOSS": "❌", "PENDING": "⏳", "SKIPPED": "⏭"}.get(t["result"], "")
-        lines.append(f"{result_emoji} {t['pair']} {t['direction']} | {t['grade']} | {t['confidence']}/10 | {t['signal_source']}")
-    if plan in ("pro", "elite"):
-        providers = list({t["signal_source"] for t in trades
-                          if t.get("signal_source") and t["signal_source"] != "UNKNOWN"})
-        if providers:
-            lines.append("\n📈 PROVIDER PERFORMANCE\n")
-            for p in sorted(providers):
-                stats = get_provider_stats(user.id, p)
-                if stats.get("total_trades", 0) > 0:
-                    lines.append(f"{p}: {stats.get('win_rate', 0)}% WR | {stats.get('total_trades', 0)} trades")
-    else:
-        lines.append(
-            "\n📊 Provider performance stats are available on Pro and Elite plans. "
-            "Upgrade at tnltrader.com"
-        )
+
+    wins   = [t for t in rows if str(t.get("result", "")).upper() == "WIN"]
+    losses = [t for t in rows if str(t.get("result", "")).upper() == "LOSS"]
+    total  = len(rows)
+    win_rate = round(len(wins) / total * 100) if total else 0
+
+    def _pnl(t):
+        try:
+            return float(t["pnl_amount"] or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    win_pnls  = [_pnl(t) for t in wins]
+    loss_pnls = [abs(_pnl(t)) for t in losses]
+    total_pnl = sum(win_pnls) - sum(loss_pnls)
+    avg_win   = (sum(win_pnls)  / len(win_pnls))  if win_pnls  else 0.0
+    avg_loss  = (sum(loss_pnls) / len(loss_pnls)) if loss_pnls else 0.0
+    pf        = round(sum(win_pnls) / sum(loss_pnls), 2) if sum(loss_pnls) > 0 else float("inf")
+    pf_str    = f"{pf:.2f}" if pf != float("inf") else "∞"
+
+    # Per-pair breakdown
+    from collections import defaultdict
+    pair_trades: dict = defaultdict(list)
+    for t in rows:
+        if t.get("pair"):
+            pair_trades[t["pair"]].append(t)
+
+    pair_stats = []
+    for pair, pts in pair_trades.items():
+        p_wins  = sum(1 for t in pts if str(t.get("result", "")).upper() == "WIN")
+        p_total = len(pts)
+        p_wr    = round(p_wins / p_total * 100) if p_total else 0
+        p_pnl   = sum(_pnl(t) for t in pts if str(t.get("result","")).upper()=="WIN") \
+                - sum(abs(_pnl(t)) for t in pts if str(t.get("result","")).upper()=="LOSS")
+        pair_stats.append((pair, p_total, p_wr, p_pnl))
+
+    pair_stats.sort(key=lambda x: x[2], reverse=True)
+    pair_lines = []
+    for pair, p_total, p_wr, p_pnl in pair_stats:
+        sign = "+" if p_pnl >= 0 else "-"
+        pair_lines.append(f"{pair}: {p_total} trades | {p_wr}% | {sign}${abs(p_pnl):.2f}")
+
+    qualified  = [s for s in pair_stats if s[1] >= 3]
+    best_pair  = qualified[0][0]  if qualified else "N/A"
+    worst_pair = qualified[-1][0] if qualified else "N/A"
+
+    # Per-direction breakdown
+    buys  = [t for t in rows if str(t.get("direction","")).upper() == "BUY"]
+    sells = [t for t in rows if str(t.get("direction","")).upper() == "SELL"]
+    buy_wr  = round(sum(1 for t in buys  if str(t.get("result","")).upper()=="WIN") / len(buys)  * 100) if buys  else 0
+    sell_wr = round(sum(1 for t in sells if str(t.get("result","")).upper()=="WIN") / len(sells) * 100) if sells else 0
+
+    sep = "━━━━━━━━━━━━━━━━━━━━"
+    lines = [
+        sep,
+        "📊 TNL TRADER STATS",
+        sep,
+        f"Total Trades: {total}",
+        f"Active Trades: {active_count}",
+        f"Win Rate: {win_rate}%",
+        f"Profit Factor: {pf_str}",
+        f"Total PnL: ${total_pnl:+.2f}",
+        "",
+        f"Avg Win:  ${avg_win:.2f}",
+        f"Avg Loss: ${avg_loss:.2f}",
+        "",
+        "BY PAIR:",
+    ] + pair_lines + [
+        "",
+        "BY DIRECTION:",
+        f"BUY:  {len(buys)} trades | {buy_wr}%",
+        f"SELL: {len(sells)} trades | {sell_wr}%",
+        sep,
+    ]
+
     await update.message.reply_text("\n".join(lines))
 
 
@@ -150,6 +230,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 *TNL Trader Commands*\n\n"
         "📊 *Challenge:*\n"
+        "/stats — your full trading stats & P&L\n"
         "/status — challenge P&L and drawdown\n"
         "/challenge — start a new challenge\n"
         "/setfirm — set your prop firm\n"
@@ -602,6 +683,7 @@ async def set_bot_commands(app):
     commands = [
         BotCommand(command="start", description="Get started with TNL Trader"),
         BotCommand(command="help", description="Show all available commands"),
+        BotCommand(command="stats", description="Your full trading stats and P&L breakdown"),
         BotCommand(command="setfirm", description="Set your prop firm (e.g. /setfirm apex150)"),
         BotCommand(command="firm", description="Show your current firm profile"),
         BotCommand(command="firmlist", description="List all supported prop firms"),
