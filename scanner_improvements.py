@@ -1421,17 +1421,19 @@ def check_premium_discount_zone(candles: list, entry: float, direction: str) -> 
 # ─── 20. KILL ZONE TIMING BONUS ──────────────────────────────────────────────
 
 _KILL_ZONES = {
-    'asian':        (0,  2),   # 00:00-02:00 UTC — JPY, AUD, NZD only
-    'london':       (7,  10),  # 07:00-10:00 UTC — EUR, GBP, XAUUSD
-    'ny_open':      (12, 15),  # 12:00-15:00 UTC — all pairs
-    'london_close': (15, 16),  # 15:00-16:00 UTC — EUR, GBP bonus window
-    'evening':      (19, 22),  # 19:00-22:00 UTC — post-FOMC Asia-correlated pairs
+    'asian':               (23,  2),  # 23:00-02:00 UTC wraps midnight — JPY, AUD, NZD only
+    'london':              (6,  10),  # 06:00-10:00 UTC covers summer (6-9) and winter (7-10)
+    'ny_open':             (12, 15),  # 12:00-15:00 UTC — all pairs
+    'london_close':        (15, 16),  # 15:00-16:00 UTC — EUR, GBP bonus window
+    'evening':             (19, 22),  # 19:00-22:00 UTC — post-FOMC Asia-correlated pairs
+    'silver_bullet_london': (7,  8),  # 07:00-08:00 UTC — ICT Silver Bullet
+    'silver_bullet_ny':    (14, 15),  # 14:00-15:00 UTC — ICT Silver Bullet
 }
 
 _PAIR_KILL_ZONES = {
-    'EURUSD':  ['london', 'ny_open', 'london_close'],
-    'GBPUSD':  ['london', 'ny_open', 'london_close'],
-    'XAUUSD':  ['london', 'ny_open', 'london_close'],
+    'EURUSD':  ['london', 'ny_open', 'london_close', 'silver_bullet_london', 'silver_bullet_ny'],
+    'GBPUSD':  ['london', 'ny_open', 'london_close', 'silver_bullet_london', 'silver_bullet_ny'],
+    'XAUUSD':  ['london', 'ny_open', 'london_close', 'silver_bullet_london', 'silver_bullet_ny'],
     'USDJPY':  ['asian',  'london', 'ny_open', 'evening'],
     'AUDUSD':  ['asian',  'london', 'ny_open', 'evening'],
     'NZDUSD':  ['asian',  'london', 'ny_open', 'evening'],
@@ -1443,11 +1445,13 @@ _PAIR_KILL_ZONES = {
 }
 
 _KILL_ZONE_LABELS = {
-    'asian':        "Asian Open",
-    'london':       "London Open",
-    'ny_open':      "NY Open",
-    'london_close': "London Close",
-    'evening':      "Evening Session",
+    'asian':               "Asian Open",
+    'london':              "London Open",
+    'ny_open':             "NY Open",
+    'london_close':        "London Close",
+    'evening':             "Evening Session",
+    'silver_bullet_london': "⭐ London Silver Bullet",
+    'silver_bullet_ny':    "⭐ NY Silver Bullet",
 }
 
 def is_kill_zone(symbol: str) -> tuple[bool, str]:
@@ -1459,7 +1463,11 @@ def is_kill_zone(symbol: str) -> tuple[bool, str]:
     valid_zones = _PAIR_KILL_ZONES.get(symbol.upper(), ['london', 'ny_open'])
     for zone in valid_zones:
         start, end = _KILL_ZONES[zone]
-        if start <= hour < end:
+        if start > end:  # wraps midnight (e.g. asian: 23-02)
+            in_zone = hour >= start or hour < end
+        else:
+            in_zone = start <= hour < end
+        if in_zone:
             label = _KILL_ZONE_LABELS[zone]
             return True, f"Kill zone active — {label} — peak institutional activity"
     return False, ""

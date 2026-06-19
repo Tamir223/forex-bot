@@ -1025,6 +1025,23 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     else:
         gate_details['ob_fvg'] = "no OB or FVG found"
 
+    # INFORMATIONAL — Premium/Discount zone (does not block signal)
+    _d1_candles = (data.get("candles_daily") or []) if data else []
+    if _d1_candles and current_price:
+        _pd_ok, _pd_msg = check_premium_discount_zone(_d1_candles, current_price, direction)
+        if _pd_ok:
+            _pd_label = "✅ Discount zone" if direction == "BUY" else "✅ Premium zone"
+        else:
+            _pd_label = "⚠️ Premium zone (caution)" if direction == "BUY" else "⚠️ Discount zone (caution)"
+        gate_details['premium_discount'] = _pd_label
+        if not _pd_ok:
+            import logging as _log
+            _log.getLogger("scanner").warning(
+                "[premium_discount] %s %s — %s", symbol, direction, _pd_msg
+            )
+    else:
+        gate_details['premium_discount'] = ""
+
     # GATE 6 — BOS confirmed after sweep
     _bos_ok = bool(structure.get('bos') or ms.get('bos'))
     gates['bos'] = _bos_ok
@@ -1262,6 +1279,9 @@ def format_unified_signal(symbol: str, direction: str,
             _gate_lines.append(f"✅ OB/FVG: {gate_details.get('ob_fvg', 'Displacement retracement')}")
         _gate_lines.append(f"✅ BOS: {gate_details.get('bos', 'confirmed')}")
         _gate_lines.append(f"✅ Volatility: {gate_details.get('volatility', 'healthy')}")
+        _pd = gate_details.get('premium_discount', '')
+        if _pd:
+            _gate_lines.append(_pd)
         if draw:
             _draw_level_disp = round(draw.get('level', 0) + FUTURES_SPOT_OFFSET.get(sym, 0), _dp)
             _draw_unit = "pts" if _is_pts else "pips"
