@@ -126,15 +126,16 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "SELECT UPPER(pair) AS pair, direction, result, pnl_amount, created_at "
                     "FROM trades "
                     "WHERE user_id = %s "
-                    "  AND UPPER(COALESCE(result, '')) NOT IN ('BLOCKED', 'SKIPPED', '') "
+                    "  AND result IS NOT NULL "
+                    "  AND UPPER(result) NOT IN ('BLOCKED','SKIPPED','EXPIRED','CANCELLED') "
                     "ORDER BY created_at DESC",
                     (user.id,)
                 )
-                cols = [d[0] for d in cur.description]
-                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                rows = [dict(r) for r in cur.fetchall()]
+                logger.info(f"[stats] raw sample (first 3): {rows[:3]}")
                 # Active trades: result IS NULL or PENDING
                 cur.execute(
-                    "SELECT COUNT(*) FROM trades "
+                    "SELECT COUNT(*) as count FROM trades "
                     "WHERE user_id = %s "
                     "  AND (result IS NULL OR UPPER(result) = 'PENDING')",
                     (user.id,)
@@ -149,16 +150,34 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No trades logged yet. Start forwarding signals.")
         return
 
-    wins   = [t for t in rows if str(t.get("result", "")).upper() == "WIN"]
-    losses = [t for t in rows if str(t.get("result", "")).upper() == "LOSS"]
-    total  = len(rows)
-    win_rate = round(len(wins) / total * 100) if total else 0
+    EST_WIN  =  112.50  # 1.5R on $75 risk
+    EST_LOSS =  -75.00
 
     def _pnl(t):
         try:
-            return float(t["pnl_amount"] or 0)
+            raw = float(t["pnl_amount"] or 0)
         except (TypeError, ValueError):
-            return 0.0
+            raw = 0.0
+        if raw != 0:
+            return raw
+        r = str(t.get("result", "")).upper()
+        if r == "WIN":
+            return EST_WIN
+        if r == "LOSS":
+            return EST_LOSS
+        return 0.0
+
+    def _is_win(t):
+        return str(t.get("result", "")).upper() == "WIN"
+
+    def _is_loss(t):
+        return str(t.get("result", "")).upper() == "LOSS"
+
+    wins   = [t for t in rows if _is_win(t)]
+    losses = [t for t in rows if _is_loss(t)]
+    logger.info(f"[stats] total={len(rows)} wins={len(wins)} losses={len(losses)}")
+    total  = len(rows)
+    win_rate = round(len(wins) / total * 100) if total else 0
 
     win_pnls  = [_pnl(t) for t in wins]
     loss_pnls = [abs(_pnl(t)) for t in losses]
@@ -177,11 +196,11 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     pair_stats = []
     for pair, pts in pair_trades.items():
-        p_wins  = sum(1 for t in pts if str(t.get("result", "")).upper() == "WIN")
+        p_wins  = sum(1 for t in pts if _is_win(t))
         p_total = len(pts)
         p_wr    = round(p_wins / p_total * 100) if p_total else 0
-        p_pnl   = sum(_pnl(t) for t in pts if str(t.get("result","")).upper()=="WIN") \
-                - sum(abs(_pnl(t)) for t in pts if str(t.get("result","")).upper()=="LOSS")
+        p_pnl   = sum(_pnl(t) for t in pts if _is_win(t)) \
+                + sum(_pnl(t) for t in pts if _is_loss(t))
         pair_stats.append((pair, p_total, p_wr, p_pnl))
 
     pair_stats.sort(key=lambda x: x[2], reverse=True)
@@ -197,8 +216,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Per-direction breakdown
     buys  = [t for t in rows if str(t.get("direction","")).upper() == "BUY"]
     sells = [t for t in rows if str(t.get("direction","")).upper() == "SELL"]
-    buy_wr  = round(sum(1 for t in buys  if str(t.get("result","")).upper()=="WIN") / len(buys)  * 100) if buys  else 0
-    sell_wr = round(sum(1 for t in sells if str(t.get("result","")).upper()=="WIN") / len(sells) * 100) if sells else 0
+    buy_wr  = round(sum(1 for t in buys  if _is_win(t)) / len(buys)  * 100) if buys  else 0
+    sell_wr = round(sum(1 for t in sells if _is_win(t)) / len(sells) * 100) if sells else 0
 
     sep = "━━━━━━━━━━━━━━━━━━━━"
     lines = [
