@@ -86,6 +86,7 @@ def write_signal(result: dict, user_id: int = None, account_size: float = 10000.
             if not get_auto_execute(user_id):
                 logger.info(f"[signal_bridge] user {user_id} auto_execute=False — Telegram only, no EA write")
                 return False
+            logger.info(f"[signal_bridge] user {user_id} auto_execute=True — writing signal")
         except Exception as e:
             logger.error(f"[signal_bridge] auto_execute check failed for user {user_id}: {e}")
             return False
