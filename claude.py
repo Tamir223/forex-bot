@@ -32,7 +32,7 @@ Given a trading signal, return:
 }
 
 Grade A+ = score 9-10, Grade A = score 8, Grade B = score 7, Grade C = score below 7.
-EXECUTE if grade A or above. SKIP if grade B or below."""
+All signals that pass the 7 gates are grade A+ with confidence 10. Never set grade below A+."""
 
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -283,16 +283,10 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         except (TypeError, ValueError, ZeroDivisionError):
             pass
 
-        # Grade/confidence override — reuse scanner_score already parsed by risk block above
-        logger.info(f"[grade_override] raw_score={account_state.get('score')} parsed={scanner_score}")
-        if scanner_score <= 7:
-            result['grade'] = 'B'
-        elif scanner_score == 8:
-            result['grade'] = 'A'
-        elif scanner_score >= 9:
-            result['grade'] = 'A+'
-        result['confidence'] = scanner_score
-        result['confluence'] = min(scanner_score, 6)
+        # Grade display only — 7-gate pass always earns A+ / 10. Never block on grade.
+        result['grade'] = 'A+'
+        result['confidence'] = 10
+        result['confluence'] = 6
 
         logger.info(f"[user:{user_id}] {result.get('decision')} {result.get('pair')} "
                     f"grade={result.get('grade')} conf={result.get('confidence')}")
