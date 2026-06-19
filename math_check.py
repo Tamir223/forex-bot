@@ -117,6 +117,17 @@ if IMPORTS_OK:
     except Exception as e:
         fail("USDJPY lot size calculation", str(e))
 
+    # USDJPY: 0.75% of $10k = $75 risk, 12pip SL → 75/(12×9.30) = 0.67 → capped at 0.50
+    try:
+        result = _calculate_lot_size(0.75, 12, "USDJPY", 10000.0)
+        lot = float(result.split()[0]) if result else None
+        if lot is not None and lot == 0.50:
+            ok(f"USDJPY 0.75% 12pip: capped at 0.50 lots (MT5 margin protection)")
+        else:
+            fail(f"USDJPY 0.75% 12pip cap", f"expected 0.50 (cap), got {lot}")
+    except Exception as e:
+        fail("USDJPY lot cap test", str(e))
+
 
 # ── RR CALCULATIONS ───────────────────────────────────────────────────────────
 section("RR CALCULATIONS:")

@@ -184,7 +184,7 @@ def get_live_price(pair: str) -> dict:
                         logger.info(f"[market] XAUUSD yf download: {raw1m} age={age:.0f}s")
                         if age < 300:
                             price = round(raw1m + _FUTURES_SPOT_OFFSET.get(upper, 0), 2)
-                            return {"price": price, "symbol": pair}
+                            return {"price": price, "symbol": pair, "source": "yahoo"}
                         logger.warning(f"[market] XAUUSD yf download stale ({age:.0f}s) — trying fast_info")
                 except Exception as _e1:
                     logger.warning(f"[market] XAUUSD yf download failed: {_e1} — trying fast_info")
@@ -193,7 +193,7 @@ def get_live_price(pair: str) -> dict:
                 try:
                     raw = float(t.fast_info['last_price'])
                     price = round(raw + _FUTURES_SPOT_OFFSET.get(upper, 0), 2)
-                    return {"price": price, "symbol": pair}
+                    return {"price": price, "symbol": pair, "source": "yahoo"}
                 except Exception as _e2:
                     logger.error(f"[market] XAUUSD all methods failed: {_e2}")
                     return None
@@ -207,7 +207,7 @@ def get_live_price(pair: str) -> dict:
                     return None
                 raw = float(hist['Close'].iloc[-1])
             price = round(raw + _FUTURES_SPOT_OFFSET.get(upper, 0), 2)
-            return {"price": price, "symbol": pair}
+            return {"price": price, "symbol": pair, "source": "yahoo"}
         except Exception as e:
             logger.error(f"yFinance price error for {pair}: {e}")
         return None

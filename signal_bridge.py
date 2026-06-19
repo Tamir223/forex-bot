@@ -45,6 +45,8 @@ def _calc_lots(symbol: str, entry: float, sl: float,
         # JPY: pip_val varies with rate — approximate with standard value (close enough for lot sizing)
         lot = round(risk_dollar / (sl_pips * pip_val), 2)
         if symbol.upper() == "USDJPY":
+            if lot > 0.50:
+                logger.warning(f"[signal_bridge] USDJPY lot cap applied: {lot:.2f} → 0.50 (prevents MT5 margin rejection)")
             lot = min(lot, 0.50)
         return max(lot, 0.01)
     except Exception:
@@ -52,7 +54,13 @@ def _calc_lots(symbol: str, entry: float, sl: float,
 
 
 async def _clear_signal():
-    """Overwrite signal file with fired=false after TTL expires."""
+    """
+    Auto-expire signal after SIGNAL_TTL (300s = 5 minutes).
+    After 5 minutes the EA polls and sees fired=False, preventing stale execution
+    of signals that were never filled (e.g. price moved away from limit entry).
+    The asyncio.create_task() in write_signal() schedules this concurrently so
+    the bot loop is never blocked.
+    """
     await asyncio.sleep(SIGNAL_TTL)
     try:
         with open(SIGNAL_FILE, "w") as f:

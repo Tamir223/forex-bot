@@ -10,7 +10,7 @@ Sends proactive alerts to subscribed users via Telegram.
 import logging
 import asyncio
 from datetime import datetime, timezone, timedelta
-from market import get_live_price, get_atr, normalize_symbol
+from market import normalize_symbol
 from config import TWELVE_DATA_API_KEY
 from scanner_improvements import (
     is_news_window, get_session_score_bonus, validate_entry,
@@ -28,7 +28,6 @@ from scanner_improvements import (
 )
 import requests
 import yfinance as yf
-import pandas as pd
 
 # GC=F and similar futures trade above spot — subtract to approximate MT5 spot price
 FUTURES_SPOT_OFFSET = {
@@ -257,9 +256,10 @@ def _update_asia_levels(symbol: str, candles: list = None) -> None:
         asia_low  = min(c["low"]  for c in asia_candles)
         if asia_high > 0 and asia_low > 0:
             _asia_levels[sym] = {
-                "high": asia_high,
-                "low":  asia_low,
-                "date": str(today),
+                "high":   asia_high,
+                "low":    asia_low,
+                "date":   str(today),
+                "source": "asia_session",
             }
             logger.info(f"[asia] {sym} levels set — high={asia_high} low={asia_low}")
         else:

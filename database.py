@@ -597,6 +597,9 @@ def get_user_firm(user_id: int) -> str:
         return "ftmo"
 
 def save_challenge_state(user_id: int, firm_code: str, state_json: str) -> bool:
+    # challenge_state stores all challenge data as a single JSON text blob in the
+    # state_json column — there are no individual balance/pnl columns in this table.
+    # Use drawdown_tracker.state_to_json() / state_from_json() to serialize/deserialize.
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
