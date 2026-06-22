@@ -675,6 +675,69 @@ def detect_liquidity_sweep(candles: list, direction: str, symbol: str = "") -> t
     return False, 0.0
 
 
+def detect_liquidity_run(candles: list, direction: str, symbol: str = "") -> tuple[bool, float]:
+    """
+    Detect a liquidity run (trend continuation) in the last 12 candles.
+    BUY: candle closes ABOVE prev 7-candle swing high with a strong bullish body.
+    SELL: candle closes BELOW prev 7-candle swing low with a strong bearish body.
+    Unlike a sweep, price does NOT close back — it continues through the level.
+    Returns (run_detected, level).
+    """
+    if not candles or len(candles) < 8:
+        return False, 0.0
+
+    sym = symbol.upper() if symbol else ""
+    min_pierce = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+
+    recent = candles[:12]
+
+    def _is_strong_candle(c: dict) -> bool:
+        total_range = c["high"] - c["low"]
+        if total_range == 0:
+            return False
+        body = abs(c["close"] - c["open"])
+        return body / total_range >= 0.5
+
+    if direction == "BUY":
+        for i, c in enumerate(recent):
+            if i + 7 >= len(candles):
+                break
+            prev_high = max(
+                candles[i+1]["high"], candles[i+2]["high"], candles[i+3]["high"],
+                candles[i+4]["high"], candles[i+5]["high"],
+                candles[i+6]["high"], candles[i+7]["high"],
+            )
+            if (c["close"] > prev_high + min_pierce and
+                    c["close"] > c["open"] and _is_strong_candle(c)):
+                return True, round(prev_high, 5)
+        if len(candles) >= 20:
+            swing_high = max(c["high"] for c in candles[1:21])
+            for c in recent:
+                if (c["close"] > swing_high + min_pierce and
+                        c["close"] > c["open"] and _is_strong_candle(c)):
+                    return True, round(swing_high, 5)
+    else:  # SELL
+        for i, c in enumerate(recent):
+            if i + 7 >= len(candles):
+                break
+            prev_low = min(
+                candles[i+1]["low"], candles[i+2]["low"], candles[i+3]["low"],
+                candles[i+4]["low"], candles[i+5]["low"],
+                candles[i+6]["low"], candles[i+7]["low"],
+            )
+            if (c["close"] < prev_low - min_pierce and
+                    c["close"] < c["open"] and _is_strong_candle(c)):
+                return True, round(prev_low, 5)
+        if len(candles) >= 20:
+            swing_low = min(c["low"] for c in candles[1:21])
+            for c in recent:
+                if (c["close"] < swing_low - min_pierce and
+                        c["close"] < c["open"] and _is_strong_candle(c)):
+                    return True, round(swing_low, 5)
+
+    return False, 0.0
+
+
 # ─── 8. REJECTION CANDLE DETECTION ───────────────────────────────────────────
 
 def detect_rejection_candle(candles: list, direction: str, ob_zone_mid: float, symbol: str = "") -> tuple[bool, str]:
@@ -1929,3 +1992,177 @@ def get_draw_on_liquidity(symbol: str, candles: list, direction: str, asia_level
         return nearest
 
     return {}
+
+
+# ─── 25. WEEKLY HIGH/LOW SWEEP LEVELS ────────────────────────────────────────
+
+_weekly_levels: dict = {}  # {symbol: {"high": float, "low": float, "fetched_at": float}}
+_WEEKLY_LEVELS_TTL = 3600 * 6  # refresh every 6 hours
+
+_WEEKLY_FUTURES_MAP = {
+    'US100': 'NQ=F', 'US30': 'YM=F', 'US500': 'ES=F',
+    'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F',
+}
+_WEEKLY_FOREX_MAP = {
+    'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
+    'AUDUSD': 'AUDUSD=X', 'NZDUSD': 'NZDUSD=X', 'USDCAD': 'USDCAD=X',
+    'USDCHF': 'USDCHF=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
+}
+
+
+def get_weekly_levels(symbol: str) -> dict:
+    """
+    Fetch previous week's high/low via yFinance weekly candles.
+    Returns {"high": float, "low": float} or empty dict on failure.
+    Cached for 6 hours.
+    """
+    import time as _t
+    sym = symbol.upper()
+    cached = _weekly_levels.get(sym)
+    if cached and (_t.time() - cached.get("fetched_at", 0)) < _WEEKLY_LEVELS_TTL:
+        return cached
+
+    try:
+        import yfinance as yf
+        ticker = _WEEKLY_FUTURES_MAP.get(sym) or _WEEKLY_FOREX_MAP.get(sym)
+        if not ticker:
+            return {}
+        hist = yf.Ticker(ticker).history(period="1mo", interval="1wk")
+        if hist is None or len(hist) < 2:
+            return {}
+        prev_week = hist.iloc[-2]
+        result = {
+            "high": float(prev_week["High"]),
+            "low": float(prev_week["Low"]),
+            "fetched_at": _t.time(),
+        }
+        _weekly_levels[sym] = result
+        logger.debug(f"[weekly_levels] {sym} prev week H={result['high']} L={result['low']}")
+        return result
+    except Exception as e:
+        logger.debug(f"[weekly_levels] {symbol} fetch error: {e}")
+        return {}
+
+
+def detect_weekly_level_sweep(candles: list, direction: str, symbol: str = "") -> tuple[bool, float, str]:
+    """
+    Check if a liquidity sweep has occurred against the previous week's high or low.
+    BUY: wick pierced below prev week low but closed back above it.
+    SELL: wick pierced above prev week high but closed back below it.
+    Higher-timeframe sweep = higher probability, larger stops triggered.
+    Returns (detected, level, description).
+    """
+    if not candles or len(candles) < 3:
+        return False, 0.0, ""
+
+    sym = symbol.upper() if symbol else ""
+    weekly = get_weekly_levels(sym)
+    if not weekly:
+        return False, 0.0, ""
+
+    min_pierce = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+    recent = candles[:12]
+
+    if direction == "BUY":
+        level = weekly["low"]
+        for c in recent:
+            if c["low"] < level - min_pierce and c["close"] > level:
+                return True, round(level, 5), f"Weekly low sweep at {round(level, 5)}"
+    else:  # SELL
+        level = weekly["high"]
+        for c in recent:
+            if c["high"] > level + min_pierce and c["close"] < level:
+                return True, round(level, 5), f"Weekly high sweep at {round(level, 5)}"
+
+    return False, 0.0, ""
+
+
+# ─── 26. ROUND NUMBER SWEEP ───────────────────────────────────────────────────
+
+_ROUND_NUMBER_INTERVALS = {
+    "EURUSD": 0.0050,   # 50 pip intervals: 1.1400, 1.1450, 1.1500
+    "GBPUSD": 0.0050,
+    "AUDUSD": 0.0050,
+    "NZDUSD": 0.0050,
+    "USDCAD": 0.0050,
+    "USDCHF": 0.0050,
+    "USDJPY": 0.50,     # 50 pip intervals: 161.00, 161.50
+    "EURJPY": 0.50,
+    "GBPJPY": 0.50,
+    "XAUUSD": 50.0,     # 50 point intervals: 4150, 4200, 4250
+    "XAGUSD": 0.50,
+    "US100":  50.0,     # 50 point intervals: 21000, 21050
+    "US30":   50.0,
+    "US500":  50.0,
+}
+
+
+def get_nearest_round_numbers(symbol: str, price: float, count: int = 5) -> list:
+    """Return round number levels above and below price for a symbol."""
+    sym = symbol.upper()
+    interval = _ROUND_NUMBER_INTERVALS.get(sym, 0.0050)
+    base = round(price / interval) * interval
+    return [round(base + interval * i, 8) for i in range(-count, count + 1)]
+
+
+def detect_round_number_sweep(candles: list, direction: str, symbol: str = "") -> tuple[bool, float, str]:
+    """
+    Check if a sweep has occurred at a round number level.
+    BUY: wick pierces below a round number but candle closes back above it.
+    SELL: wick pierces above a round number but candle closes back below it.
+    Round number touch = bonus sweep confirmation, higher signal strength.
+    Returns (detected, round_level, description).
+    """
+    if not candles or len(candles) < 3:
+        return False, 0.0, ""
+
+    sym = symbol.upper() if symbol else ""
+    interval = _ROUND_NUMBER_INTERVALS.get(sym, 0.0050)
+    tolerance = interval * 0.10  # within 10% of interval counts as "touching"
+    min_pierce = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+
+    current_price = candles[0]["close"]
+    round_levels = get_nearest_round_numbers(sym, current_price, count=5)
+    recent = candles[:12]
+
+    for c in recent:
+        if direction == "BUY":
+            for level in round_levels:
+                if (c["low"] <= level + tolerance and
+                        c["low"] >= level - interval * 0.5 - min_pierce and
+                        c["close"] > level):
+                    return True, round(level, 8), f"Round number sweep at {round(level, 5)}"
+        else:  # SELL
+            for level in round_levels:
+                if (c["high"] >= level - tolerance and
+                        c["high"] <= level + interval * 0.5 + min_pierce and
+                        c["close"] < level):
+                    return True, round(level, 8), f"Round number sweep at {round(level, 5)}"
+
+    return False, 0.0, ""
+
+
+# ─── 27. BOS DISPLACEMENT QUALITY SCORE ──────────────────────────────────────
+
+def score_bos_quality(candles: list, direction: str) -> tuple[str, int, str]:
+    """
+    Assess BOS displacement quality by counting consecutive candles in the BOS direction.
+    3+ consecutive same-direction candles = strong displacement.
+    1-2 candles = weak displacement (still valid, noted in signal).
+    Returns (quality, count, signal_label) where signal_label is Telegram-ready.
+    """
+    if not candles or len(candles) < 2:
+        return "weak", 0, "⚠️ BOS: confirmed (weak displacement)"
+
+    expected_bullish = direction.upper() == "BUY"
+    consecutive = 0
+    for c in candles[:10]:
+        is_bull = c["close"] > c["open"]
+        if is_bull == expected_bullish:
+            consecutive += 1
+        else:
+            break
+
+    if consecutive >= 3:
+        return "strong", consecutive, "✅ BOS: confirmed (strong displacement)"
+    return "weak", consecutive, "⚠️ BOS: confirmed (weak displacement)"
