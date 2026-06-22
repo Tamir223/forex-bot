@@ -29,6 +29,11 @@ from scanner_improvements import (
     is_fvg_mitigated, mark_fvg_mitigated,
     is_ob_mitigated, mark_ob_mitigated,
     clear_daily_mitigation_state,
+    detect_liquidity_run,
+    detect_weekly_level_sweep,
+    detect_round_number_sweep,
+    score_bos_quality,
+    get_weekly_levels,
 )
 import requests
 import yfinance as yf
@@ -301,7 +306,26 @@ def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> 
     else:
         if asia.get("high", 0) == 0 or asia.get("low", 0) == 0:
             logger.warning(f"[asia] {sym} levels not set — sweep detection skipped, falling back to liquidity sweep")
-    # Fallback to recent swing sweep
+
+    # Weekly level sweep — HTF sweep carries more weight than intraday
+    weekly_swept, weekly_level, weekly_label = detect_weekly_level_sweep(candles, direction, symbol)
+    if weekly_swept:
+        logger.info(f"[sweep] {sym} {weekly_label}")
+        return True, weekly_level
+
+    # Round number sweep — institutional clusters at key price levels
+    round_swept, round_level, round_label = detect_round_number_sweep(candles, direction, symbol)
+    if round_swept:
+        logger.info(f"[sweep] {sym} {round_label}")
+        return True, round_level
+
+    # Liquidity run — trend continuation through swing level
+    run_detected, run_level = detect_liquidity_run(candles, direction, symbol)
+    if run_detected:
+        logger.info(f"[sweep] {sym} liquidity run through {run_level:.5f}")
+        return True, run_level
+
+    # Final fallback — standard recent-swing sweep
     return detect_liquidity_sweep(candles, direction, symbol)
 
 
@@ -1061,7 +1085,11 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     # GATE 6 — BOS confirmed after sweep
     _bos_ok = bool(structure.get('bos') or ms.get('bos'))
     gates['bos'] = _bos_ok
-    gate_details['bos'] = "confirmed" if _bos_ok else "not confirmed"
+    if _bos_ok:
+        _bos_quality, _bos_count, _bos_desc = score_bos_quality(candles, direction)
+        gate_details['bos'] = f"confirmed ({_bos_quality} displacement)"
+    else:
+        gate_details['bos'] = "not confirmed"
 
     # GATE 7 — Volatility adequate (not low vol)
     _vol_ok = not atr_data.get('is_low_volatility', False) if atr_data else True

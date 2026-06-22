@@ -29,10 +29,6 @@ from report import (
 from trading_calendar import is_friday_close_warning
 from trade_monitor import trade_monitor
 import os
-from bot_commands_phase4 import (
-    cmd_accounts, cmd_insights, cmd_best_hours,
-    cmd_addaccount, cmd_performance
-)
 from bot_commands_phase1 import (
     cmd_firmlist, cmd_setfirm, cmd_firm,
     cmd_challenge, cmd_status, cmd_logtrade,
@@ -257,12 +253,6 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/logtrade — log a trade manually\n"
         "/history — last 10 trades\n"
         "/resetfirm — reset challenge tracker\n\n"
-        "📈 *Phase 4 — Insights:*\n"
-        "/accounts — all active challenges\n"
-        "/insights — performance analysis\n"
-        "/performance — pair and session stats\n"
-        "/besthours — your best trading hours\n"
-        "/addaccount — add a new firm\n\n"
         "📡 *Scanner:*\n"
         "/scan — instant market scan\n"
         "/watch — set your watchlist\n"
@@ -900,11 +890,6 @@ async def start_bot():
     app.add_handler(CommandHandler("autoexecute", cmd_autoexecute))
     app.add_handler(CallbackQueryHandler(callback_reset, pattern="^reset_"))
     app.add_handler(CallbackQueryHandler(callback_autograde, pattern="^autograde_"))
-    app.add_handler(CommandHandler("accounts", cmd_accounts))
-    app.add_handler(CommandHandler("insights", cmd_insights))
-    app.add_handler(CommandHandler("besthours", cmd_best_hours))
-    app.add_handler(CommandHandler("addaccount", cmd_addaccount))
-    app.add_handler(CommandHandler("performance", cmd_performance))
     app.add_handler(CallbackQueryHandler(callback_trade_button, pattern="^trade_(yes|no|limit_not_filled|cancel_limit)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("TNL Trader multi-user bot started")
