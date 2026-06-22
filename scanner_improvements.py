@@ -112,29 +112,101 @@ _SYMBOL_CURRENCIES: dict = {
 }
 
 
+def _fetch_forexfactory_json() -> list:
+    """
+    Fetch today's high/medium impact events from ForexFactory weekly JSON feed.
+    Returns list of dicts: {time_utc, currency, event, impact}.
+    Times in the feed are Eastern Time — converted to UTC here.
+    """
+    now = datetime.now(timezone.utc)
+    et_offset = 4 if 3 <= now.month <= 11 else 5  # EDT/EST
+    events: list = []
+    try:
+        resp = requests.get(
+            "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+            timeout=5,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        for item in resp.json():
+            impact_raw = (item.get("impact") or "").lower()
+            if impact_raw not in ("high", "medium"):
+                continue
+            currency = (item.get("currency") or item.get("country") or "").upper()
+            if currency not in _TRADEABLE_CURRENCIES:
+                continue
+            date_str = (item.get("date") or "").strip()
+            time_str = (item.get("time") or "").strip()
+            if not time_str or time_str.lower() in ("all day", "tentative", ""):
+                continue
+            try:
+                event_date = datetime.strptime(date_str, "%b %d, %Y").date()
+                if event_date != now.date():
+                    continue
+                t = datetime.strptime(time_str.upper(), "%I:%M%p")
+                time_utc = now.replace(
+                    hour=(t.hour + et_offset) % 24,
+                    minute=t.minute, second=0, microsecond=0,
+                )
+            except Exception:
+                continue
+            events.append({
+                "time_utc": time_utc,
+                "currency": currency,
+                "impact": impact_raw,
+                "event": item.get("title", ""),
+            })
+        logger.info(f"[news] ForexFactory backup: {len(events)} events today")
+    except Exception as e:
+        logger.warning(f"[news] ForexFactory JSON failed: {e}")
+    return events
+
+
+def _inject_monday_block(events: list, now: datetime) -> list:
+    """Add static Monday 8:30 AM ET block if today is Monday and not already present."""
+    if now.weekday() != 0:
+        return events
+    if any(e.get("event") == "Monday US/CAD Data Window" for e in events):
+        return events
+    et_offset = 4 if 3 <= now.month <= 11 else 5
+    utc_h = (8 + et_offset) % 24  # 12 UTC in EDT, 13 UTC in EST
+    events.append({
+        "time_utc": now.replace(hour=utc_h, minute=30, second=0, microsecond=0),
+        "currency": "USD",
+        "event": "Monday US/CAD Data Window",
+        "impact": "high",
+    })
+    logger.info(f"[news] Static Monday block: {utc_h:02d}:30 UTC — US/CAD data window added")
+    return events
+
+
 def _smart_hardcoded_fallback() -> list:
-    """NFP and FOMC only — last resort when Finnhub is unavailable."""
+    """Try ForexFactory, then fall back to NFP/FOMC hardcoded events."""
     import time as _t
     now = datetime.now(timezone.utc)
-    events: list = []
-    today_iso = now.date().isoformat()
-    if is_nfp_friday():
-        nfp_utc_h = 12 if (3 <= now.month <= 11) else 13
-        events.append({
-            "time_utc": now.replace(hour=nfp_utc_h, minute=30, second=0, microsecond=0),
-            "currency": "USD",
-            "event": "Non-Farm Payrolls",
-            "impact": "high",
-        })
-        logger.info(f"[news] Hardcoded: NFP Friday detected — blocking {nfp_utc_h}:30 UTC")
-    if today_iso in _FOMC_DATES_2026:
-        events.append({
-            "time_utc": now.replace(hour=18, minute=0, second=0, microsecond=0),
-            "currency": "USD",
-            "event": "FOMC Rate Decision",
-            "impact": "high",
-        })
-        logger.info("[news] Hardcoded: FOMC date detected — blocking 18:00 UTC")
+
+    events = _fetch_forexfactory_json()
+
+    if not events:
+        today_iso = now.date().isoformat()
+        if is_nfp_friday():
+            nfp_utc_h = 12 if (3 <= now.month <= 11) else 13
+            events.append({
+                "time_utc": now.replace(hour=nfp_utc_h, minute=30, second=0, microsecond=0),
+                "currency": "USD",
+                "event": "Non-Farm Payrolls",
+                "impact": "high",
+            })
+            logger.info(f"[news] Hardcoded: NFP Friday detected — blocking {nfp_utc_h}:30 UTC")
+        if today_iso in _FOMC_DATES_2026:
+            events.append({
+                "time_utc": now.replace(hour=18, minute=0, second=0, microsecond=0),
+                "currency": "USD",
+                "event": "FOMC Rate Decision",
+                "impact": "high",
+            })
+            logger.info("[news] Hardcoded: FOMC date detected — blocking 18:00 UTC")
+
+    events = _inject_monday_block(events, now)
     _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
     return events
 
@@ -202,11 +274,23 @@ def fetch_forexfactory_today() -> list:
         high_count = sum(1 for e in events if e['impact'] == 'high')
         med_count = sum(1 for e in events if e['impact'] == 'medium')
         logger.info(f"[news] Finnhub calendar: {high_count} high, {med_count} medium impact events today")
+
+        if high_count == 0:
+            logger.info("[news] Finnhub returned 0 high-impact events — trying ForexFactory backup")
+            ff_events = _fetch_forexfactory_json()
+            if ff_events:
+                existing_keys = {(e['currency'], e['event']) for e in events}
+                for fe in ff_events:
+                    if (fe['currency'], fe['event']) not in existing_keys:
+                        events.append(fe)
+                        existing_keys.add((fe['currency'], fe['event']))
+
+        events = _inject_monday_block(events, now)
         _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
         return events
 
     except Exception as e:
-        logger.warning(f"[news] Finnhub failed: {e} — using smart hardcoded fallback")
+        logger.warning(f"[news] Finnhub failed: {e} — using ForexFactory/hardcoded fallback")
         return _smart_hardcoded_fallback()
 
 
@@ -540,36 +624,53 @@ def run_pre_scan_checks(symbol: str, entry_price: float,
 
 def detect_liquidity_sweep(candles: list, direction: str, symbol: str = "") -> tuple[bool, float]:
     """
-    Check last 8 candles for a liquidity sweep.
-    BUY: candle low pierced below previous 5-candle low but closed back above it.
-    SELL: candle high pierced above previous 5-candle high but closed back below it.
+    Check last 12 candles for a liquidity sweep.
+    BUY: candle low pierced below previous 7-candle low but closed back above it.
+    SELL: candle high pierced above previous 7-candle high but closed back below it.
+    Also checks 20-candle swing high/low as sweep targets.
     Returns (sweep_detected, swept_level).
     """
-    if not candles or len(candles) < 6:
+    if not candles or len(candles) < 8:
         return False, 0.0
 
     # Minimum pierce distance — 1 pip in the pair's units — filters wicks that barely graze the level
     sym = symbol.upper() if symbol else ""
     min_pierce = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
 
-    recent = candles[:8]
+    recent = candles[:12]
 
     if direction == "BUY":
+        # Check rolling 7-candle low sweep
         for i, c in enumerate(recent):
-            if i + 5 >= len(candles):
+            if i + 7 >= len(candles):
                 break
             prev_low = min(candles[i+1]["low"], candles[i+2]["low"], candles[i+3]["low"],
-                           candles[i+4]["low"], candles[i+5]["low"])
+                           candles[i+4]["low"], candles[i+5]["low"],
+                           candles[i+6]["low"], candles[i+7]["low"])
             if c["low"] < prev_low - min_pierce and c["close"] > prev_low:
                 return True, round(prev_low, 5)
+        # Check 20-candle swing low as sweep target
+        if len(candles) >= 20:
+            swing_low = min(c["low"] for c in candles[1:21])
+            for c in recent:
+                if c["low"] < swing_low - min_pierce and c["close"] > swing_low:
+                    return True, round(swing_low, 5)
     else:  # SELL
+        # Check rolling 7-candle high sweep
         for i, c in enumerate(recent):
-            if i + 5 >= len(candles):
+            if i + 7 >= len(candles):
                 break
             prev_high = max(candles[i+1]["high"], candles[i+2]["high"], candles[i+3]["high"],
-                            candles[i+4]["high"], candles[i+5]["high"])
+                            candles[i+4]["high"], candles[i+5]["high"],
+                            candles[i+6]["high"], candles[i+7]["high"])
             if c["high"] > prev_high + min_pierce and c["close"] < prev_high:
                 return True, round(prev_high, 5)
+        # Check 20-candle swing high as sweep target
+        if len(candles) >= 20:
+            swing_high = max(c["high"] for c in candles[1:21])
+            for c in recent:
+                if c["high"] > swing_high + min_pierce and c["close"] < swing_high:
+                    return True, round(swing_high, 5)
 
     return False, 0.0
 
@@ -1571,7 +1672,7 @@ def analyze_market_structure(candles: list) -> dict:
 
     # BOS — Break of Structure (trend continuation: price extends beyond last swing)
     bos = False
-    recent_closes = [c['close'] for c in candles[:5]]
+    recent_closes = [c['close'] for c in candles[:10]]
     if structure == "uptrend":
         if any(c > last_highs[-1] for c in recent_closes):
             bos = True
