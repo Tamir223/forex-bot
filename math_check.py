@@ -34,7 +34,7 @@ def section(title):
 try:
     from claude import _calculate_lot_size, PIP_VALUES
     from scanner import MIN_SL_DISTANCE, FUTURES_SPOT_OFFSET
-    from config import MAX_LIVE_EXPOSURE
+    from config import MAX_WEEKLY_LOSSES
     from drawdown_tracker import DrawdownTracker, _resume_overrides
     IMPORTS_OK = True
 except Exception as e:
@@ -287,12 +287,12 @@ if IMPORTS_OK:
         fail("Signal pause thresholds", str(e))
 
     try:
-        if MAX_LIVE_EXPOSURE == 3.0:
-            ok(f"Live exposure limit: {MAX_LIVE_EXPOSURE}%")
+        if MAX_WEEKLY_LOSSES == 4:
+            ok(f"Weekly loss limit: {MAX_WEEKLY_LOSSES}")
         else:
-            fail("Live exposure limit", f"expected 3.0, got {MAX_LIVE_EXPOSURE}")
+            fail("Weekly loss limit", f"expected 4, got {MAX_WEEKLY_LOSSES}")
     except Exception as e:
-        fail("MAX_LIVE_EXPOSURE", str(e))
+        fail("MAX_WEEKLY_LOSSES", str(e))
 
     try:
         # Signal cache TTL from scanner.py source

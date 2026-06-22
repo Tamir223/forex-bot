@@ -20,10 +20,9 @@ from database import (
 )
 from prop_firm_profiles import get_profile
 from notifications import send_subscription_confirmed
-from filter import is_signal_message, is_approval_message, run_fast_gates, run_enforcement_filter
 from claude import analyze_signal
 from report import (
-    execute_report, blocked_report, fast_gate_blocked,
+    execute_report, blocked_report,
     trade_executed, trade_skipped, trade_logged_win,
     trade_logged_loss, not_subscribed_message, status_report
 )
@@ -454,24 +453,18 @@ async def process_signal_queue():
                 if trade_id:
                     update_trade_result(trade_id, "BLOCKED")
             else:
-                passed, enforce_reason = run_enforcement_filter(analysis)
-                if not passed:
-                    await bot.send_message(chat_id=int(chat_id), text=blocked_report(analysis, enforce_reason))
-                    if trade_id:
-                        update_trade_result(trade_id, "BLOCKED")
-                else:
-                    report = execute_report(analysis)
-                    if user.plan_tier == "elite":
-                        report = priority_header + report
-                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                    _grade_keyboard = InlineKeyboardMarkup([
-                        [
-                            InlineKeyboardButton("✅ YES — Execute", callback_data="trade_yes"),
-                            InlineKeyboardButton("❌ NO — Skip", callback_data="trade_no"),
-                        ],
-                        [InlineKeyboardButton("❌ Limit Not Filled", callback_data="trade_limit_not_filled")],
-                    ])
-                    await bot.send_message(chat_id=int(chat_id), text=report, reply_markup=_grade_keyboard)
+                report = execute_report(analysis)
+                if user.plan_tier == "elite":
+                    report = priority_header + report
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                _grade_keyboard = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ YES — Execute", callback_data="trade_yes"),
+                        InlineKeyboardButton("❌ NO — Skip", callback_data="trade_no"),
+                    ],
+                    [InlineKeyboardButton("❌ Limit Not Filled", callback_data="trade_limit_not_filled")],
+                ])
+                await bot.send_message(chat_id=int(chat_id), text=report, reply_markup=_grade_keyboard)
         except Exception as e:
             logger.error(f"Signal queue worker error: {e}")
         finally:
@@ -488,7 +481,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user or not user.is_active:
         await update.message.reply_text(not_subscribed_message())
         return
-    if is_approval_message(text):
+    if text.strip().upper() in {"YES", "NO", "WIN", "LOSS", "BREAKEVEN", "LIMIT NOT FILLED", "LIMIT_NOT_FILLED"}:
         reply = text.upper()
         analysis = last_analysis.get(chat_id, {})
         risk = analysis.get("risk_percent", 0.35)
@@ -506,25 +499,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 update_trade_result(trade_id, "SKIPPED")
             await send(context, chat_id, trade_skipped())
         elif reply == "WIN":
-            # Phase 4 self-learning
-            try:
-                from phase4_learning import log_trade_insight, get_session
-                import datetime
-                analysis = last_analysis.get(chat_id, {})
-                if analysis:
-                    log_trade_insight(user.id, {
-                        'pair': analysis.get('pair', ''),
-                        'direction': analysis.get('direction', ''),
-                        'setup_type': analysis.get('setup_type', ''),
-                        'session': get_session(datetime.datetime.utcnow().hour),
-                        'score': analysis.get('confidence', 0),
-                        'grade': analysis.get('grade', ''),
-                        'result': 'WIN',
-                        'pnl': risk * 100,
-                        'firm_code': get_user_firm(user.id) or 'ftmo',
-                    })
-            except Exception as e:
-                logger.error(f"Phase4 WIN log error: {e}")
             log_trade_win(user.id, risk)
             update_provider_result(user.id, provider, won=True)
             trade_monitor.remove_trade(user.id)
@@ -546,25 +520,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await send(context, chat_id, w)
             await send(context, chat_id, trade_logged_win())
         elif reply == "LOSS":
-            # Phase 4 self-learning
-            try:
-                from phase4_learning import log_trade_insight, get_session
-                import datetime
-                analysis = last_analysis.get(chat_id, {})
-                if analysis:
-                    log_trade_insight(user.id, {
-                        'pair': analysis.get('pair', ''),
-                        'direction': analysis.get('direction', ''),
-                        'setup_type': analysis.get('setup_type', ''),
-                        'session': get_session(datetime.datetime.utcnow().hour),
-                        'score': analysis.get('confidence', 0),
-                        'grade': analysis.get('grade', ''),
-                        'result': 'LOSS',
-                        'pnl': -(risk * 100),
-                        'firm_code': get_user_firm(user.id) or 'ftmo',
-                    })
-            except Exception as e:
-                logger.error(f"Phase4 LOSS log error: {e}")
             log_trade_loss(user.id, risk)
             # Consecutive loss protection
             try:
@@ -602,17 +557,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif reply in ("LIMIT NOT FILLED", "LIMIT_NOT_FILLED"):
             await _cancel_limit_not_filled(user.id, chat_id, context.bot)
         return
-    if not is_signal_message(text):
+    if not any(kw in text for kw in ("BUY", "buy", "SELL", "sell", "ENTRY ZONE", "entry zone", "TYPE:")):
         return
     plan_limits = {"basic": 10, "pro": 999, "elite": 999}
     state = get_state(user.id)
     daily_limit = plan_limits.get(user.plan_tier, 10)
     if state.trades_today >= daily_limit:
         await send(context, chat_id, f"Daily signal limit reached for your {user.plan_tier} plan.\nUpgrade at tnltrader.com for more signals.")
-        return
-    passed, gate_reason = run_fast_gates(state.__dict__ if hasattr(state, "__dict__") else state)
-    if not passed:
-        await send(context, chat_id, fast_gate_blocked(gate_reason))
         return
     firm_code = get_user_firm(user.id)
     profile = get_profile(firm_code)
@@ -877,12 +828,6 @@ async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE)
             priority_header = f"⚡ ELITE PRIORITY ANALYSIS\n🏆 {profile.name} MODE ACTIVE — Risk capped at {analysis.get('risk_percent', 1.0)}%\n"
         else:
             priority_header = "⚡ ELITE PRIORITY ANALYSIS\n"
-
-        # Check fast gates
-        passed, gate_reason = run_fast_gates(state.__dict__ if hasattr(state, "__dict__") else state)
-        if not passed:
-            await context.bot.send_message(chat_id=chat_id, text=fast_gate_blocked(gate_reason))
-            return
 
         # Build and send report
         from report import execute_report, blocked_report

@@ -32,11 +32,6 @@ STRIPE_PRICE_ELITE = os.getenv("STRIPE_PRICE_ELITE")
 # App
 ONBOARDING_URL = os.getenv("ONBOARDING_URL", "https://tnltrader.com/setup")
 
-# Risk Gate Defaults (users can override per plan)
-CONFIDENCE_THRESHOLD = int(os.getenv("CONFIDENCE_THRESHOLD", "6"))
-MIN_CONFLUENCE = int(os.getenv("MIN_CONFLUENCE", "4"))
-MAX_LIVE_EXPOSURE = float(os.getenv("MAX_LIVE_EXPOSURE", "3.0"))
-MAX_SESSION_LOSSES = int(os.getenv("MAX_SESSION_LOSSES", "2"))
 MAX_WEEKLY_LOSSES = int(os.getenv("MAX_WEEKLY_LOSSES", "4"))
 SESSION_START_HOUR = int(os.getenv("SESSION_START_HOUR", "0"))
 SESSION_END_HOUR = int(os.getenv("SESSION_END_HOUR", "23"))

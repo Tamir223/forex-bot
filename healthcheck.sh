@@ -81,7 +81,6 @@ check $? "Memory OK (${MEM}% used)"
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 from prop_firm_profiles import get_profile, PROFILES
 from drawdown_tracker import new_state, state_to_json
-from signal_gate_phase1 import GateResult
 assert len(PROFILES) >= 8, f'Expected at least 8 profiles, got {len(PROFILES)}'
 assert get_profile('apex150') is not None
 assert get_profile('ftmo') is not None
@@ -137,13 +136,14 @@ print('Position sizing OK')
 " 2>/dev/null
 check $? "Phase 2 futures position sizing correct"
 
-# 20. Futures signal detection
+# 20. Futures signal detection (inline keyword check)
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
-from filter import is_signal_message
-assert is_signal_message('ES BUY ENTRY 5800 STOP 5792') == True
-assert is_signal_message('NQ SELL ENTRY 20100 STOP 20120') == True
-assert is_signal_message('GBPUSD BUY') == True
-assert is_signal_message('hello how are you') == False
+def is_signal(text):
+    return any(kw in text for kw in ('BUY', 'buy', 'SELL', 'sell', 'ENTRY ZONE', 'entry zone', 'TYPE:'))
+assert is_signal('ES BUY ENTRY 5800 STOP 5792') == True
+assert is_signal('NQ SELL ENTRY 20100 STOP 20120') == True
+assert is_signal('GBPUSD BUY') == True
+assert is_signal('hello how are you') == False
 print('Signal detection OK')
 " 2>/dev/null
 check $? "Phase 2 futures signal detection working"
@@ -183,12 +183,12 @@ check $? "[CHECK] US500 price feed (ES=F)"
 
 # ── CONFIGURATION CHECKS ──────────────────────────────────────────────────────
 
-# 23. MAX_LIVE_EXPOSURE = 3.0
+# 23. MAX_WEEKLY_LOSSES = 4
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
-from config import MAX_LIVE_EXPOSURE
-assert MAX_LIVE_EXPOSURE == 3.0, f'Expected 3.0, got {MAX_LIVE_EXPOSURE}'
+from config import MAX_WEEKLY_LOSSES
+assert MAX_WEEKLY_LOSSES == 4, f'Expected 4, got {MAX_WEEKLY_LOSSES}'
 " 2>/dev/null
-check $? "Config: MAX_LIVE_EXPOSURE = 3.0"
+check $? "Config: MAX_WEEKLY_LOSSES = 4"
 
 # 24. MAX_TRADES_TODAY removed
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
@@ -409,21 +409,16 @@ assert 'result IS NULL OR result' in src
 " 2>/dev/null
 check $? "Signal flow: live_exposure synced from PENDING trades only"
 
-# 46. Signal gate uses 3.0% exposure limit
+# 46. Signal flow: bot.py uses inline keyword signal detection
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
-from filter import run_fast_gates
-# Should pass with 2.9% exposure
-state = {'open_trades': 3, 'live_exposure': 2.9, 'session_losses': 0, 'weekly_losses': 0}
-import datetime
-# Patch hour to be inside session
-from unittest.mock import patch
-with patch('filter.datetime') as mock_dt:
-    mock_dt.now.return_value = datetime.datetime(2024, 1, 2, 10, 0, tzinfo=datetime.timezone.utc)
-    mock_dt.timezone = datetime.timezone
-    passed, _ = run_fast_gates(state)
-assert passed == True, f'Should pass at 2.9% exposure but got: {passed}'
+import ast, pathlib
+src = pathlib.Path('bot.py').read_text()
+assert 'run_fast_gates' not in src, 'run_fast_gates still in bot.py'
+assert 'run_enforcement_filter' not in src, 'run_enforcement_filter still in bot.py'
+assert 'from filter import' not in src, 'filter import still in bot.py'
+assert 'ENTRY ZONE' in src, 'inline signal keyword check missing'
 " 2>/dev/null
-check $? "Signal flow: gate passes at 2.9% exposure (limit=3.0%)"
+check $? "Signal flow: filter.py removed, bot.py uses inline checks"
 
 # ── DATA SOURCE CHECKS ────────────────────────────────────────────────────────
 

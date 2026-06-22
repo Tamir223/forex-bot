@@ -2,7 +2,16 @@
 TNL Trader Report Module - SaaS version
 """
 
-from filter import calculate_confluence
+def calculate_confluence(analysis: dict) -> int:
+    factors = [
+        analysis.get("confirmation", False),
+        analysis.get("structure", False),
+        analysis.get("zone", False),
+        analysis.get("liquidity", False),
+        analysis.get("retracement_valid", False),
+        analysis.get("session_valid", False),
+    ]
+    return sum(1 for f in factors if f is True)
 
 
 def fmt(value, fallback="--"):
