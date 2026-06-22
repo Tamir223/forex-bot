@@ -1592,20 +1592,22 @@ _KILL_ZONES = {
     'evening':             (19, 22),  # 19:00-22:00 UTC — post-FOMC Asia-correlated pairs
     'silver_bullet_london': (7,  8),  # 07:00-08:00 UTC — ICT Silver Bullet
     'silver_bullet_ny':    (14, 15),  # 14:00-15:00 UTC — ICT Silver Bullet
+    'london_fix':          (9,  10),  # 09:00-10:00 UTC — Gold institutional fix
+    'ny_indices':          (13, 16),  # 13:00-16:00 UTC — 8:30-11 AM EDT cash open
 }
 
 _PAIR_KILL_ZONES = {
     'EURUSD':  ['london', 'ny_open', 'london_close', 'silver_bullet_london', 'silver_bullet_ny'],
     'GBPUSD':  ['london', 'ny_open', 'london_close', 'silver_bullet_london', 'silver_bullet_ny'],
-    'XAUUSD':  ['london', 'ny_open', 'london_close', 'silver_bullet_london', 'silver_bullet_ny'],
+    'XAUUSD':  ['london', 'ny_open', 'london_close', 'london_fix', 'silver_bullet_london', 'silver_bullet_ny'],
     'USDJPY':  ['asian',  'london', 'ny_open', 'evening'],
     'AUDUSD':  ['asian',  'london', 'ny_open', 'evening'],
     'NZDUSD':  ['asian',  'london', 'ny_open', 'evening'],
     'USDCAD':  ['london', 'ny_open'],
     'USDCHF':  ['london', 'ny_open'],
-    'US100':   ['london', 'ny_open'],
-    'US30':    ['london', 'ny_open'],
-    'US500':   ['london', 'ny_open'],
+    'US100':   ['ny_open', 'ny_indices'],
+    'US30':    ['ny_open', 'ny_indices'],
+    'US500':   ['ny_open', 'ny_indices'],
 }
 
 _KILL_ZONE_LABELS = {
@@ -1616,6 +1618,8 @@ _KILL_ZONE_LABELS = {
     'evening':             "Evening Session",
     'silver_bullet_london': "⭐ London Silver Bullet",
     'silver_bullet_ny':    "⭐ NY Silver Bullet",
+    'london_fix':          "🏅 London Gold Fix",
+    'ny_indices':          "NY Indices Open",
 }
 
 def is_kill_zone(symbol: str) -> tuple[bool, str]:
