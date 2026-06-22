@@ -163,24 +163,6 @@ async def cmd_logtrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"[logtrade] Saved {result} {pair} pnl=${amount} for user {user.id}")
         except Exception as e:
             logger.error(f"[logtrade] DB insert error: {e}")
-    # Phase 4 — log with pair if provided
-    if pair and result in ("WIN", "LOSS"):
-        try:
-            from phase4_learning import log_trade_insight, get_session
-            import datetime
-            log_trade_insight(user.id, {
-                'pair': pair,
-                'direction': '',
-                'setup_type': 'OB FVG',
-                'session': get_session(datetime.datetime.utcnow().hour),
-                'score': 9,
-                'grade': 'A+',
-                'result': result,
-                'pnl': pnl,
-                'firm_code': state.firm_code or 'ftmo',
-            })
-        except Exception as e:
-            logger.error(f"Phase4 log error in /logtrade: {e}")
     # Stop trade monitoring when WIN or LOSS is logged via /logtrade
     if result in ("WIN", "LOSS"):
         try:

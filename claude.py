@@ -11,7 +11,6 @@ import anthropic
 import groq
 from google import genai as google_genai
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS
-from phase4_learning import get_confidence_modifier, get_session, log_trade_insight
 from market import get_live_price, get_atr, check_entry_validity
 from trading_calendar import check_news_window
 
@@ -209,15 +208,6 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
 
         # Apply provider modifier
         modifier = market_ctx.get("provider_modifier", 0)
-        
-        # Apply personal performance modifier (Phase 4 self-learning)
-        if user_id and pair:
-            hour_utc = __import__('datetime').datetime.utcnow().hour
-            session = get_session(hour_utc)
-            personal_modifier = get_confidence_modifier(user_id, pair, session)
-            if personal_modifier != 0:
-                modifier += personal_modifier
-                logger.info(f"[phase4] Personal modifier for {pair}: {personal_modifier:+.1f}")
         if modifier and "confidence" in result:
             result["confidence"] = max(1, min(10, result["confidence"] + modifier))
 

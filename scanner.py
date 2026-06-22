@@ -1604,10 +1604,10 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} correlation skip — {corr_reason}")
                 return None
 
-        # Signal deduplication — suppress if a signal for this symbol fired < 30 min ago
+        # Signal deduplication — suppress if a signal for this symbol fired < 10 min ago
         if symbol in _last_signal_time:
             _minutes_since = (datetime.utcnow() - _last_signal_time[symbol]).seconds / 60
-            if _minutes_since < 30:
+            if _minutes_since < 10:
                 logger.info(
                     f"[scanner] {symbol} signal suppressed — cooldown active "
                     f"({_minutes_since:.1f} min since last)"

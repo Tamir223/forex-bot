@@ -471,14 +471,20 @@ def log_trade(trade: Trade) -> Optional[int]:
     return None
 
 
-def update_trade_result(trade_id: int, result: str):
+def update_trade_result(trade_id: int, result: str, pnl_amount: float = None):
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE trades SET result = %s WHERE id = %s",
-                    (result, trade_id)
-                )
+                if pnl_amount is not None:
+                    cur.execute(
+                        "UPDATE trades SET result = %s, pnl_amount = %s WHERE id = %s",
+                        (result, pnl_amount, trade_id)
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE trades SET result = %s WHERE id = %s",
+                        (result, trade_id)
+                    )
             conn.commit()
     except Exception as e:
         logger.error(f"update_trade_result error: {e}")

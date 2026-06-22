@@ -128,6 +128,25 @@ def write_signal(result: dict, user_id: int = None, account_size: float = 10000.
             f"entry={entry} sl={sl} tp1={tp1} lots={lots}"
         )
 
+        # Update challenge state so /status reflects the open trade immediately
+        if user_id is not None:
+            try:
+                from database import log_trade_opened, load_challenge_state, save_challenge_state
+                from prop_firm_profiles import get_profile as _gp
+                from drawdown_tracker import state_from_json, state_to_json, record_trade as _record_trade
+                log_trade_opened(user_id, risk_pct)
+                _cs_json = load_challenge_state(user_id)
+                if _cs_json:
+                    _state = state_from_json(_cs_json)
+                    _profile = _gp(_state.firm_code)
+                    if _profile:
+                        est_pnl = round(risk_pct / 100 * account_size * 1.5, 2)
+                        _state, _ = _record_trade(_state, _profile, est_pnl)
+                        save_challenge_state(user_id, _state.firm_code, state_to_json(_state))
+                        logger.info(f"[signal_bridge] challenge_state updated est_pnl=+${est_pnl:.2f} user={user_id}")
+            except Exception as e:
+                logger.error(f"[signal_bridge] challenge_state update error: {e}")
+
         # Schedule auto-clear (runs in the existing asyncio event loop)
         asyncio.create_task(_clear_signal())
 
