@@ -1313,7 +1313,7 @@ def get_daily_bias(symbol: str, candles: list = None) -> dict:
                 except Exception:
                     return _default
 
-        if len(raw_candles) < 3:
+        if len(raw_candles) < 5:
             return _default
 
         def _candle_dir(c):
@@ -1327,9 +1327,11 @@ def get_daily_bias(symbol: str, candles: list = None) -> dict:
             return 1 if c["close"] > c["open"] else -1
 
         # raw_candles are oldest→newest; last entry is today
-        today       = raw_candles[-1]
-        yesterday   = raw_candles[-2]
-        two_days    = raw_candles[-3]
+        today = raw_candles[-1]
+        d1    = raw_candles[-2]
+        d2    = raw_candles[-3]
+        d3    = raw_candles[-4]
+        d4    = raw_candles[-5]
 
         today_dir   = _candle_dir(today)
         today_ratio = _body_ratio(today)
@@ -1337,46 +1339,70 @@ def get_daily_bias(symbol: str, candles: list = None) -> dict:
         intraday_move_pct = ((today["close"] - today["open"]) / today["open"] * 100) if today["open"] else 0.0
         intraday_override = today_ratio > 0.6
 
-        # Strong today candle overrides everything
-        if today_ratio > 0.7:
+        # Weighted score: today×5, d1×4, d2×3, d3×2, d4×1 — max ±15
+        weighted = (
+            _score(today) * 5 +
+            _score(d1)    * 4 +
+            _score(d2)    * 3 +
+            _score(d3)    * 2 +
+            _score(d4)    * 1
+        )
+
+        if weighted >= 5:
+            bias = "bullish"
+        elif weighted >= 2:
+            bias = "bullish"
+        elif weighted <= -5:
+            bias = "bearish"
+        elif weighted <= -2:
+            bias = "bearish"
+        else:
+            bias = "neutral"
+
+        confirmed = abs(weighted) >= 7
+
+        # Strength
+        if today_ratio > 0.6 and _candle_dir(today) == bias:
+            strength = "strong"
+        elif abs(weighted) >= 5:
+            strength = "moderate"
+        else:
+            strength = "weak"
+
+        # Strong today candle override — only confirm if history agrees
+        if today_ratio > 0.7 and weighted >= 3:
+            # Institutional conviction: strong candle + history aligned
             bias      = today_dir
             strength  = "strong"
             confirmed = True
-            reason    = f"Strong today candle ({today_dir}, body {today_ratio:.0%}) overrides history"
+            reason    = (
+                f"Strong today candle ({today_dir}, body {today_ratio:.0%}) confirmed by history "
+                f"(weighted {weighted:+d}/15)"
+            )
             return {
                 "bias": bias, "strength": strength,
                 "today_candle": today_dir, "confirmed": confirmed, "reason": reason,
                 "intraday_override": True, "intraday_move_pct": round(intraday_move_pct, 2),
             }
-
-        # Weighted score: today×3, yesterday×2, two_days_ago×1
-        weighted = _score(today) * 3 + _score(yesterday) * 2 + _score(two_days) * 1
-
-        if weighted >= 3:
-            bias = "bullish"
-        elif weighted >= 1:
-            bias = "bullish"
-        elif weighted <= -3:
-            bias = "bearish"
-        elif weighted <= -1:
-            bias = "bearish"
-        else:
-            bias = "neutral"
-
-        confirmed = abs(weighted) >= 2
-
-        # Strength
-        if today_ratio > 0.6 and _candle_dir(today) == bias:
-            strength = "strong"
-        elif abs(weighted) >= 3:
-            strength = "moderate"
-        else:
-            strength = "weak"
+        elif today_ratio > 0.7 and weighted < 0:
+            # Strong candle against recent history — potential reversal, not confirmation
+            bias      = today_dir
+            strength  = "moderate"
+            confirmed = False
+            reason    = (
+                f"Strong today candle ({today_dir}, body {today_ratio:.0%}) AGAINST history "
+                f"(weighted {weighted:+d}/15) — reversal signal"
+            )
+            return {
+                "bias": bias, "strength": strength,
+                "today_candle": today_dir, "confirmed": confirmed, "reason": reason,
+                "intraday_override": False, "intraday_move_pct": round(intraday_move_pct, 2),
+            }
 
         reason = (
-            f"Weighted score {weighted:+d}/6 "
-            f"(today {_candle_dir(today)}, yday {_candle_dir(yesterday)}, "
-            f"2d {_candle_dir(two_days)})"
+            f"Weighted score {weighted:+d}/15 "
+            f"(today {_candle_dir(today)}, d1 {_candle_dir(d1)}, "
+            f"d2 {_candle_dir(d2)}, d3 {_candle_dir(d3)}, d4 {_candle_dir(d4)})"
         )
 
         return {
