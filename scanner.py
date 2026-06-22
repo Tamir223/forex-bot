@@ -25,6 +25,10 @@ from scanner_improvements import (
     analyze_market_structure, get_trade_direction,
     detect_displacement, is_price_in_displacement_fvg,
     get_draw_on_liquidity,
+    score_ob_quality,
+    is_fvg_mitigated, mark_fvg_mitigated,
+    is_ob_mitigated, mark_ob_mitigated,
+    clear_daily_mitigation_state,
 )
 import requests
 import yfinance as yf
@@ -53,6 +57,7 @@ MAX_CACHE_SIZE = 200
 
 # Asia session high/low tracking per symbol (Power of 3 sweep detection)
 _asia_levels: dict = {}  # {symbol: {"high": float, "low": float, "date": str}}
+_last_mitigation_clear_date: str = ""  # track when we last cleared FVG/OB mitigation dicts
 
 # Equity indices that close overnight and have no meaningful Asian session data.
 # For these symbols _update_asia_levels() uses the previous day's D1 high/low
@@ -198,8 +203,15 @@ def _update_asia_levels(symbol: str, candles: list = None) -> None:
       GER40 is closed during Asian hours; US indices have only thin overnight-futures
       prints, making the prev-day session high/low a far more meaningful sweep reference.
     """
+    global _last_mitigation_clear_date
     sym = symbol.upper()
     today = datetime.now(timezone.utc).date()
+
+    # Clear FVG/OB mitigation state once per day on new session
+    today_str = str(today)
+    if today_str != _last_mitigation_clear_date:
+        _last_mitigation_clear_date = today_str
+        clear_daily_mitigation_state()
 
     # ── EQUITY INDICES: prev-day D1 high/low ─────────────────────────────────
     if sym in _EQUITY_INDEX_SYMBOLS:
@@ -572,6 +584,7 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None, 
     def _build_ob(ob_type: str, c: dict, breakout_close: float) -> dict:
         _mid = round((c["high"] + c["low"]) / 2, 5)
         _disp, _quality = _ob_quality(_mid, breakout_close)
+        _ob_score, _ob_tier = score_ob_quality(c, symbol)
         return {
             "type": ob_type,
             "high": round(c["high"], 5),
@@ -581,6 +594,7 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None, 
             "strength": "strong" if (c["high"] - c["low"]) > (candles[0]["high"] - candles[0]["low"]) else "normal",
             "displacement": round(_disp, 5),
             "ob_quality": _quality,
+            "tier": _ob_tier,
         }
 
     # Proximity thresholds — OB must be within this distance of current price
@@ -1017,11 +1031,13 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     elif ob:
         _ob_lo = round(ob['low']  + _disp_off, _dp)
         _ob_hi = round(ob['high'] + _disp_off, _dp)
-        gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi}"
+        _ob_tier = ob.get('tier', '')
+        _tier_suffix = f" ({_ob_tier})" if _ob_tier else ""
+        gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi}{_tier_suffix}"
     elif fvg:
         _fb = fvg.get("display_bottom", round(fvg["bottom"] + _disp_off, _dp))
         _ft = fvg.get("display_top",    round(fvg["top"]    + _disp_off, _dp))
-        gate_details['ob_fvg'] = f"FVG {_fb}-{_ft}"
+        gate_details['ob_fvg'] = f"FVG {_fb}-{_ft} (fresh)"
     else:
         gate_details['ob_fvg'] = "no OB or FVG found"
 
@@ -1235,13 +1251,16 @@ def format_unified_signal(symbol: str, direction: str,
         _ob_type = "Bullish OB" if ob["type"] == "bullish_ob" else "Bearish OB"
         _ob_lo   = round(ob["low"]  + _ob_off, _dp)
         _ob_hi   = round(ob["high"] + _ob_off, _dp)
-        _cond_lines.append(f"✅ {_ob_type}: {_ob_lo}-{_ob_hi}")
+        _ob_tier = ob.get('tier', '')
+        _ob_tier_suffix = f" ({_ob_tier})" if _ob_tier else ""
+        _ob_warn = "⚠️" if _ob_tier == "C-tier" else "✅"
+        _cond_lines.append(f"{_ob_warn} {_ob_type}: {_ob_lo}-{_ob_hi}{_ob_tier_suffix}")
     if fvg:
         _fvg_bot = fvg.get("display_bottom", round(fvg["bottom"] + FUTURES_SPOT_OFFSET.get(sym, 0), _dp))
         _fvg_top = fvg.get("display_top",    round(fvg["top"]    + FUTURES_SPOT_OFFSET.get(sym, 0), _dp))
-        _cond_lines.append(f"✅ FVG: {_fvg_bot}-{_fvg_top}")
+        _cond_lines.append(f"✅ FVG: {_fvg_bot}-{_fvg_top} (fresh)")
     if structure.get("bos"):
-        _cond_lines.append("✅ BOS confirmed")
+        _cond_lines.append("✅ BOS confirmed (body close)")
     _kz_short = (kill_zone_label
                  .replace("Kill zone active — ", "")
                  .replace(" — peak institutional activity", ""))
@@ -1272,12 +1291,14 @@ def format_unified_signal(symbol: str, direction: str,
         ]
         if ob:
             _ob_label = "Bullish OB" if ob["type"] == "bullish_ob" else "Bearish OB"
-            _gate_lines.append(f"✅ {_ob_label}: {gate_details.get('ob_fvg', '')}")
+            _ob_detail = gate_details.get('ob_fvg', '')
+            _ob_warn_g = "⚠️" if ob.get('tier') == "C-tier" else "✅"
+            _gate_lines.append(f"{_ob_warn_g} {_ob_label}: {_ob_detail}")
         elif fvg:
             _gate_lines.append(f"✅ FVG: {gate_details.get('ob_fvg', '')}")
         elif gates and gates.get('ob_fvg'):
             _gate_lines.append(f"✅ OB/FVG: {gate_details.get('ob_fvg', 'Displacement retracement')}")
-        _gate_lines.append(f"✅ BOS: {gate_details.get('bos', 'confirmed')}")
+        _gate_lines.append(f"✅ BOS: {gate_details.get('bos', 'confirmed (body close)')}")
         _gate_lines.append(f"✅ Volatility: {gate_details.get('volatility', 'healthy')}")
         _pd = gate_details.get('premium_discount', '')
         if _pd:
@@ -1382,7 +1403,27 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # OB detection uses direction from the primary gate (not detect_structure trend)
         _ob_trend = "bullish" if _gt_direction == "BUY" else "bearish"
         ob = detect_order_block(candles, _ob_trend, symbol=symbol)
+        _cp = float(candles[0]["close"]) if candles else 0.0
+
+        # FIX 3 — OB freshness: skip already-mitigated OBs; mark new ones if price inside
+        if ob:
+            if is_ob_mitigated(symbol, ob['low'], ob['high']):
+                logger.info(f"[ob] {symbol} OB already mitigated — skip")
+                ob = None
+            elif ob['low'] <= _cp <= ob['high']:
+                mark_ob_mitigated(symbol, ob['low'], ob['high'])
+                ob = None
+
         fvg = detect_fvg(candles, symbol)
+
+        # FIX 2 — FVG freshness: skip already-mitigated FVGs; mark new ones if price inside
+        if fvg:
+            if is_fvg_mitigated(symbol, fvg['bottom'], fvg['top']):
+                logger.info(f"[fvg] {symbol} FVG already mitigated — skip")
+                fvg = None
+            elif fvg['bottom'] <= _cp <= fvg['top']:
+                mark_fvg_mitigated(symbol, fvg['bottom'], fvg['top'])
+                fvg = None
 
         from scanner_improvements import get_daily_bias as _get_daily_bias
         daily_bias = _get_daily_bias(symbol, candles=_data.get("candles_daily"))

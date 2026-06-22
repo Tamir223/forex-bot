@@ -1734,14 +1734,26 @@ def analyze_market_structure(candles: list) -> dict:
         structure = "uptrend"
 
     # BOS — Break of Structure (trend continuation: price extends beyond last swing)
+    # Requires candle BODY to close beyond swing — wick pokes don't count
     bos = False
-    recent_closes = [c['close'] for c in candles[:10]]
     if structure == "uptrend":
-        if any(c > last_highs[-1] for c in recent_closes):
+        current_body_high = max(candles[0]['close'], candles[0]['open'])
+        if current_body_high > last_highs[-1]:
             bos = True
+        else:
+            for c in candles[1:10]:
+                if max(c['close'], c['open']) > last_highs[-1]:
+                    bos = True
+                    break
     elif structure == "downtrend":
-        if any(c < last_lows[-1] for c in recent_closes):
+        current_body_low = min(candles[0]['close'], candles[0]['open'])
+        if current_body_low < last_lows[-1]:
             bos = True
+        else:
+            for c in candles[1:10]:
+                if min(c['close'], c['open']) < last_lows[-1]:
+                    bos = True
+                    break
 
     return {
         "structure": structure,
@@ -2143,6 +2155,84 @@ def detect_round_number_sweep(candles: list, direction: str, symbol: str = "") -
 
 
 # ─── 27. BOS DISPLACEMENT QUALITY SCORE ──────────────────────────────────────
+
+# ─── 28. OB QUALITY SCORING ──────────────────────────────────────────────────
+
+_mitigated_fvgs: dict = {}  # key: f"{symbol}_{fvg_low:.5f}_{fvg_high:.5f}"
+_mitigated_obs:  dict = {}  # key: f"{symbol}_{ob_low:.5f}_{ob_high:.5f}"
+
+
+def score_ob_quality(candle: dict, symbol: str = "") -> tuple[int, str]:
+    """
+    Score OB candle quality on candle anatomy (0-7 points).
+    Returns (score, tier) where tier is 'S-tier'/'A-tier'/'B-tier'/'C-tier'.
+    S=6-7, A=4-5, B=2-3, C=0-1
+    """
+    body  = abs(candle['close'] - candle['open'])
+    total = candle['high'] - candle['low']
+    if total == 0:
+        return 0, "C-tier"
+    score = 0
+
+    body_ratio = body / total
+    if body_ratio > 0.7:   score += 3
+    elif body_ratio > 0.5: score += 2
+    elif body_ratio > 0.3: score += 1
+
+    if candle['close'] > candle['open']:
+        close_pos = (candle['close'] - candle['low']) / total
+    else:
+        close_pos = (candle['high'] - candle['close']) / total
+    if close_pos > 0.8:   score += 2
+    elif close_pos > 0.6: score += 1
+
+    if candle['close'] > candle['open']:
+        opp_wick = (candle['high'] - candle['close']) / total
+    else:
+        opp_wick = (candle['close'] - candle['low']) / total
+    if opp_wick < 0.1:   score += 2
+    elif opp_wick < 0.2: score += 1
+
+    if score >= 6:   tier = "S-tier"
+    elif score >= 4: tier = "A-tier"
+    elif score >= 2: tier = "B-tier"
+    else:            tier = "C-tier"
+
+    return score, tier
+
+
+def is_fvg_mitigated(symbol: str, fvg_low: float, fvg_high: float) -> bool:
+    """Return True if this FVG zone was already mitigated (price entered it)."""
+    key = f"{symbol}_{fvg_low:.5f}_{fvg_high:.5f}"
+    return key in _mitigated_fvgs
+
+
+def mark_fvg_mitigated(symbol: str, fvg_low: float, fvg_high: float) -> None:
+    """Record that price has entered this FVG zone — treat as consumed."""
+    key = f"{symbol}_{fvg_low:.5f}_{fvg_high:.5f}"
+    _mitigated_fvgs[key] = True
+    logger.info(f"[fvg] {symbol} FVG mitigated — removing")
+
+
+def is_ob_mitigated(symbol: str, ob_low: float, ob_high: float) -> bool:
+    """Return True if this OB zone was already mitigated (price entered it)."""
+    key = f"{symbol}_{ob_low:.5f}_{ob_high:.5f}"
+    return key in _mitigated_obs
+
+
+def mark_ob_mitigated(symbol: str, ob_low: float, ob_high: float) -> None:
+    """Record that price has entered this OB zone — treat as consumed."""
+    key = f"{symbol}_{ob_low:.5f}_{ob_high:.5f}"
+    _mitigated_obs[key] = True
+    logger.info(f"[ob] {symbol} OB mitigated — removing")
+
+
+def clear_daily_mitigation_state() -> None:
+    """Clear FVG and OB mitigation dicts at start of a new day."""
+    _mitigated_fvgs.clear()
+    _mitigated_obs.clear()
+    logger.info("[mitigation] Daily state cleared — fresh start")
+
 
 def score_bos_quality(candles: list, direction: str) -> tuple[str, int, str]:
     """
