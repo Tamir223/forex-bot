@@ -2270,8 +2270,7 @@ def clear_daily_mitigation_state() -> None:
 def score_bos_quality(candles: list, direction: str) -> tuple[str, int, str]:
     """
     Assess BOS displacement quality by counting consecutive candles in the BOS direction.
-    3+ consecutive same-direction candles = strong displacement.
-    1-2 candles = weak displacement (still valid, noted in signal).
+    3+ = strong, 2 = moderate, 1 = weak (gate fails).
     Returns (quality, count, signal_label) where signal_label is Telegram-ready.
     """
     if not candles or len(candles) < 2:
@@ -2288,4 +2287,6 @@ def score_bos_quality(candles: list, direction: str) -> tuple[str, int, str]:
 
     if consecutive >= 3:
         return "strong", consecutive, "✅ BOS: confirmed (strong displacement)"
-    return "weak", consecutive, "⚠️ BOS: confirmed (weak displacement)"
+    if consecutive >= 2:
+        return "moderate", consecutive, "⚠️ BOS: confirmed (moderate displacement)"
+    return "weak", consecutive, "⚠️ BOS: confirmed (weak displacement — gate fail)"

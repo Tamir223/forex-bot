@@ -288,7 +288,9 @@ def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> 
     Power of 3: check for Asia range sweep, fall back to recent swing sweep.
     SELL: wick above Asia high then close below it.
     BUY:  wick below Asia low  then close above it.
-    Returns (swept, swept_level).
+    Returns (swept, swept_level, sweep_type) where sweep_type is
+    'judas_swing' (wick through + close back = high-prob reversal) or
+    'liquidity_run' (closes through without reversing = trend continuation, lower prob).
     """
     sym = symbol.upper()
     today = datetime.now(timezone.utc).date()
@@ -300,33 +302,34 @@ def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> 
         asia_low  = asia["low"]
         for c in candles[:15]:
             if direction == "SELL" and c["high"] > asia_high and c["close"] < asia_high:
-                return True, round(asia_high + FUTURES_SPOT_OFFSET.get(sym, 0), 5)
+                return True, round(asia_high + FUTURES_SPOT_OFFSET.get(sym, 0), 5), "judas_swing"
             if direction == "BUY"  and c["low"]  < asia_low  and c["close"] > asia_low:
-                return True, round(asia_low  + FUTURES_SPOT_OFFSET.get(sym, 0), 5)
+                return True, round(asia_low  + FUTURES_SPOT_OFFSET.get(sym, 0), 5), "judas_swing"
     else:
         if asia.get("high", 0) == 0 or asia.get("low", 0) == 0:
             logger.warning(f"[asia] {sym} levels not set — sweep detection skipped, falling back to liquidity sweep")
 
-    # Weekly level sweep — HTF sweep carries more weight than intraday
+    # Weekly level sweep — HTF, wick through + close back = Judas Swing
     weekly_swept, weekly_level, weekly_label = detect_weekly_level_sweep(candles, direction, symbol)
     if weekly_swept:
         logger.info(f"[sweep] {sym} {weekly_label}")
-        return True, weekly_level
+        return True, weekly_level, "judas_swing"
 
-    # Round number sweep — institutional clusters at key price levels
+    # Round number sweep — wick through + close back = Judas Swing
     round_swept, round_level, round_label = detect_round_number_sweep(candles, direction, symbol)
     if round_swept:
         logger.info(f"[sweep] {sym} {round_label}")
-        return True, round_level
+        return True, round_level, "judas_swing"
 
-    # Liquidity run — trend continuation through swing level
+    # Liquidity run — closes THROUGH the level (no reversal close); lower probability
     run_detected, run_level = detect_liquidity_run(candles, direction, symbol)
     if run_detected:
         logger.info(f"[sweep] {sym} liquidity run through {run_level:.5f}")
-        return True, run_level
+        return True, run_level, "liquidity_run"
 
-    # Final fallback — standard recent-swing sweep
-    return detect_liquidity_sweep(candles, direction, symbol)
+    # Final fallback — standard recent-swing sweep (wick through + close back = Judas Swing)
+    swept, level = detect_liquidity_sweep(candles, direction, symbol)
+    return swept, level, "judas_swing" if swept else "none"
 
 
 BASE_URL = "https://api.twelvedata.com"
@@ -1026,7 +1029,7 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
 
     # GATE 4 — Liquidity sweep detected (Asia range or recent swing)
     _update_asia_levels(symbol, candles)
-    _sweep_ok, _swept_level = _detect_asia_sweep_or_recent(symbol, candles, direction)
+    _sweep_ok, _swept_level, _sweep_type = _detect_asia_sweep_or_recent(symbol, candles, direction)
     gates['sweep'] = _sweep_ok
     _sym_upper = symbol.upper()
     _is_pts = _sym_upper in ("XAUUSD", "US30", "NAS100") or _sym_upper in YFINANCE_FUTURES_MAP
@@ -1037,17 +1040,25 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         _draw_pips = draw.get('distance_pips', 0)
         _draw_type = draw.get('type', '')
         _draw_detail = f" → draw: {_draw_type} ({_draw_pips:.0f}p)"
+    _sweep_label = "liquidity run" if _sweep_type == "liquidity_run" else "Judas Swing"
     gate_details['sweep'] = (
-        (f"swept at {_swept_level:.{_swept_dp}f}" + _draw_detail) if (_sweep_ok and _swept_level) else
+        (f"{_sweep_label} at {_swept_level:.{_swept_dp}f}" + _draw_detail) if (_sweep_ok and _swept_level) else
         f"no liquidity sweep{_draw_detail}"
     )
 
-    # GATE 5 — OB or FVG present (including displacement FVG); C-tier OBs fail gate
+    # GATE 5 — OB or FVG present; C-tier OBs fail; liquidity runs require OB+FVG confluence
     _has_ob = bool(ob) and ob.get('tier', '') != 'C-tier'
     _has_fvg = bool(fvg)
     _has_displacement_fvg = bool(displacement) and is_price_in_displacement_fvg(current_price, displacement)
+    _has_confluence = _has_ob and _has_fvg
+    _is_liquidity_run = _sweep_type == "liquidity_run"
 
-    gates['ob_fvg'] = _has_ob or _has_fvg or _has_displacement_fvg
+    if _is_liquidity_run:
+        # Lower-probability setup — single OB or FVG not enough; need both or displacement FVG
+        gates['ob_fvg'] = _has_confluence or _has_displacement_fvg
+    else:
+        gates['ob_fvg'] = _has_ob or _has_fvg or _has_displacement_fvg
+
     _disp_off = FUTURES_SPOT_OFFSET.get(_sym_upper, 0)
     _dp = 3 if _is_pts else 5
     if _has_displacement_fvg and not _has_ob and not _has_fvg:
@@ -1065,12 +1076,19 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         _tier_suffix = f" ({_ob_tier})" if _ob_tier else ""
         if _ob_tier == 'C-tier':
             gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi} (C-tier — gate fail)"
+        elif _has_confluence:
+            gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi}{_tier_suffix} + FVG (confluence)"
+        elif _is_liquidity_run:
+            gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi}{_tier_suffix} (OB only — confluence required)"
         else:
-            gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi}{_tier_suffix}"
+            gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi}{_tier_suffix} (OB only)"
     elif fvg:
         _fb = fvg.get("display_bottom", round(fvg["bottom"] + _disp_off, _dp))
         _ft = fvg.get("display_top",    round(fvg["top"]    + _disp_off, _dp))
-        gate_details['ob_fvg'] = f"FVG {_fb}-{_ft} (fresh)"
+        if _is_liquidity_run:
+            gate_details['ob_fvg'] = f"FVG {_fb}-{_ft} (FVG only — confluence required)"
+        else:
+            gate_details['ob_fvg'] = f"FVG {_fb}-{_ft} (fresh)"
     else:
         gate_details['ob_fvg'] = "no OB or FVG found"
 
@@ -1091,13 +1109,18 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     else:
         gate_details['premium_discount'] = ""
 
-    # GATE 6 — BOS confirmed after sweep
+    # GATE 6 — BOS confirmed after sweep; requires >= 2 consecutive displacement candles
     _bos_ok = bool(structure.get('bos') or ms.get('bos'))
-    gates['bos'] = _bos_ok
     if _bos_ok:
         _bos_quality, _bos_count, _bos_desc = score_bos_quality(candles, direction)
-        gate_details['bos'] = f"confirmed ({_bos_quality} displacement)"
+        if _bos_quality == "weak":
+            gates['bos'] = False
+            gate_details['bos'] = f"weak displacement ({_bos_count} candle) — gate fail"
+        else:
+            gates['bos'] = True
+            gate_details['bos'] = f"confirmed ({_bos_quality} displacement, {_bos_count} candles)"
     else:
+        gates['bos'] = False
         gate_details['bos'] = "not confirmed"
 
     # GATE 7 — Volatility adequate (not low vol)
