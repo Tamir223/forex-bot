@@ -1045,6 +1045,7 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         (f"{_sweep_label} at {_swept_level:.{_swept_dp}f}" + _draw_detail) if (_sweep_ok and _swept_level) else
         f"no liquidity sweep{_draw_detail}"
     )
+    gate_details['sweep_type'] = _sweep_type
 
     # GATE 5 — OB or FVG present; C-tier OBs fail; liquidity runs require OB+FVG confluence
     _has_ob = bool(ob) and ob.get('tier', '') != 'C-tier'
@@ -1300,11 +1301,14 @@ def format_unified_signal(symbol: str, direction: str,
     # Swept level (already has spot offset applied from _detect_asia_sweep_or_recent)
     _swept_dp = 3 if _is_pts else 5
     _swept_str = f"{swept_level:.{_swept_dp}f}" if swept_level else "recent high/low"
+    _is_liq_run = bool(gate_details) and gate_details.get('sweep_type') == 'liquidity_run'
+    _sweep_line = (f"🔄 Liquidity Run: through {_swept_str}"
+                   if _is_liq_run else f"✅ Judas Swing: swept at {_swept_str}")
 
     # OB / FVG condition lines
     _cond_lines = [
         f"✅ HTF: {_htf_display}",
-        f"✅ Liquidity sweep at {_swept_str}",
+        _sweep_line,
     ]
     if ob:
         _ob_off  = FUTURES_SPOT_OFFSET.get(sym, 0)
