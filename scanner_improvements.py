@@ -1433,12 +1433,15 @@ def check_daily_bias_alignment(symbol: str, direction: str, _prefetched: dict = 
     if b == "unknown":
         return False, "⚠️ No bias data available — proceed with extra caution"
 
-    if direction.upper() == "BUY" and b == "bearish" and confirmed:
+    if not confirmed:
+        return False, f"⚠️ Daily bias {b} not confirmed — gate fails"
+
+    if direction.upper() == "BUY" and b == "bearish":
         return False, "⚠️ DAILY BIAS CONFLICT — Trading BUY against confirmed bearish daily bias. High risk."
-    if direction.upper() == "SELL" and b == "bullish" and confirmed:
+    if direction.upper() == "SELL" and b == "bullish":
         return False, "⚠️ DAILY BIAS CONFLICT — Trading SELL against confirmed bullish daily bias. High risk."
 
-    if b not in ("neutral", "unknown") and confirmed:
+    if b not in ("neutral", "unknown"):
         return True, f"✅ Daily bias {b} confirms {direction.upper()} direction"
 
     return True, ""

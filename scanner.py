@@ -75,7 +75,7 @@ _EQUITY_INDEX_SYMBOLS = {'US100', 'US30', 'US500'}
 import time as _time
 _td_credits_exhausted_until: float = 0.0  # epoch seconds
 _direction_lock: dict = {}  # {symbol: {"direction": str, "locked_until": float}}
-_last_signal_time: dict = {}   # {symbol: datetime} — signal dedup cooldown
+_last_signal_time: dict = {}   # {symbol_upper: monotonic_float} — signal dedup cooldown
 _last_signal_entry: dict = {}  # {symbol: float}
 
 
@@ -994,13 +994,19 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     )
     gate_details['kill_zone'] = _kz_short
 
-    # GATE 2 — HTF bias confirmed (Daily + 4H agree with signal direction)
+    # GATE 2 — HTF bias confirmed (Daily + 4H agree with signal direction, daily bias confirmed)
     _htf_dir = "bullish" if direction == "BUY" else "bearish"
     _htf_ok = (htf_bias.get("d1_trend") == _htf_dir and htf_bias.get("h4_trend") == _htf_dir)
-    gates['htf_bias'] = _htf_ok
+    _bias_aligned, _bias_msg = check_daily_bias_alignment(symbol, direction, _prefetched=daily_bias)
+    gates['htf_bias'] = _htf_ok and _bias_aligned
     _d1 = htf_bias.get("d1_trend", "unclear")
     _h4 = htf_bias.get("h4_trend", "unclear")
-    gate_details['htf_bias'] = f"Daily/4H {_htf_dir}" if _htf_ok else f"D1={_d1} 4H={_h4} need={_htf_dir}"
+    if _htf_ok and _bias_aligned:
+        gate_details['htf_bias'] = f"Daily/4H {_htf_dir}"
+    elif not _bias_aligned:
+        gate_details['htf_bias'] = _bias_msg or "daily bias unconfirmed"
+    else:
+        gate_details['htf_bias'] = f"D1={_d1} 4H={_h4} need={_htf_dir}"
 
     # 1H structure — informational context only, does not block signal
     candles_1h = data.get('candles_1h', []) if data else []
@@ -1036,8 +1042,8 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         f"no liquidity sweep{_draw_detail}"
     )
 
-    # GATE 5 — OB or FVG present (including displacement FVG)
-    _has_ob = bool(ob)
+    # GATE 5 — OB or FVG present (including displacement FVG); C-tier OBs fail gate
+    _has_ob = bool(ob) and ob.get('tier', '') != 'C-tier'
     _has_fvg = bool(fvg)
     _has_displacement_fvg = bool(displacement) and is_price_in_displacement_fvg(current_price, displacement)
 
@@ -1057,7 +1063,10 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         _ob_hi = round(ob['high'] + _disp_off, _dp)
         _ob_tier = ob.get('tier', '')
         _tier_suffix = f" ({_ob_tier})" if _ob_tier else ""
-        gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi}{_tier_suffix}"
+        if _ob_tier == 'C-tier':
+            gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi} (C-tier — gate fail)"
+        else:
+            gate_details['ob_fvg'] = f"{_ob_lo}-{_ob_hi}{_tier_suffix}"
     elif fvg:
         _fb = fvg.get("display_bottom", round(fvg["bottom"] + _disp_off, _dp))
         _ft = fvg.get("display_top",    round(fvg["top"]    + _disp_off, _dp))
@@ -1500,6 +1509,18 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed")
 
+        # Signal cooldown — suppress if a signal for this symbol fired < 10 min ago.
+        # Uses monotonic time so NTP clock corrections cannot cause false expiry.
+        _sym_key = symbol.upper()
+        if _sym_key in _last_signal_time:
+            _elapsed = _time.monotonic() - _last_signal_time[_sym_key]
+            if _elapsed < 600:  # 10 minutes = 600 seconds
+                logger.info(
+                    f"[scanner] {symbol} signal suppressed — cooldown active "
+                    f"({_elapsed/60:.1f} min since last)"
+                )
+                return None
+
         # ── 5M ENTRY REFINEMENT ──────────────────────────────────────────────────
         candles_5m = _data.get("candles_5m", [])
         _refinement_5m = refine_entry_5m(symbol, candles_5m, direction, ob) if (ob and candles_5m) else None
@@ -1673,16 +1694,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[scanner] {symbol} correlation skip — {corr_reason}")
                 return None
 
-        # Signal deduplication — suppress if a signal for this symbol fired < 10 min ago
-        if symbol in _last_signal_time:
-            _minutes_since = (datetime.utcnow() - _last_signal_time[symbol]).seconds / 60
-            if _minutes_since < 10:
-                logger.info(
-                    f"[scanner] {symbol} signal suppressed — cooldown active "
-                    f"({_minutes_since:.1f} min since last)"
-                )
-                return None
-
         # ── BUILD UNIFIED SIGNAL ────────────────────────────────────────────────
         from claude import _calculate_lot_size as _cals, _PIP_SIZE as _lots_pip_size, _DEFAULT_PIP_SIZE as _lots_default_pip
         _risk_pct = 0.75  # Always 0.75% — all gate-passing signals are equal quality
@@ -1719,8 +1730,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed, unified signal built")
 
         # Record signal time for dedup cooldown
-        _last_signal_time[symbol] = datetime.utcnow()
-        _last_signal_entry[symbol] = _sig_entry
+        _last_signal_time[_sym_key] = _time.monotonic()
+        _last_signal_entry[_sym_key] = _sig_entry
 
         return {
             "symbol": symbol,
