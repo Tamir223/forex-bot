@@ -63,6 +63,10 @@ MAX_CACHE_SIZE = 200
 
 # Asia session high/low tracking per symbol (Power of 3 sweep detection)
 _asia_levels: dict = {}  # {symbol: {"high": float, "low": float, "date": str}}
+# Midnight open (00:00 UTC) per symbol — Power of Three PO3 reference price.
+# Bullish PO3: price drops below midnight open (manipulation) then rallies above it (distribution).
+# Bearish PO3: price spikes above midnight open (manipulation) then collapses below it.
+_midnight_open: dict = {}  # {symbol: {"price": float, "date": str}}
 _last_mitigation_clear_date: str = ""  # track when we last cleared FVG/OB mitigation dicts
 
 # Equity indices that close overnight and have no meaningful Asian session data.
@@ -270,6 +274,7 @@ def _update_asia_levels(symbol: str, candles: list = None) -> None:
             logger.warning(f"[asia] {sym} — could not fetch candles: {e}")
             return
     asia_candles = []
+    _midnight_open_found = False
     for c in candles:
         try:
             dt = datetime.fromisoformat(str(c.get("datetime", "")))
@@ -279,6 +284,13 @@ def _update_asia_levels(symbol: str, candles: list = None) -> None:
                 dt = dt.astimezone(timezone.utc)
             if dt.date() == today and 0 <= dt.hour < 7:
                 asia_candles.append(c)
+                # Midnight open = open price of the 00:00 UTC candle (first 15M candle of the day)
+                if dt.hour == 0 and dt.minute == 0 and not _midnight_open_found:
+                    _mo_existing = _midnight_open.get(sym, {})
+                    if _mo_existing.get("date") != str(today):
+                        _midnight_open[sym] = {"price": float(c["open"]), "date": str(today)}
+                        logger.info(f"[po3] {sym} midnight open set: {c['open']}")
+                    _midnight_open_found = True
         except Exception:
             continue
     if asia_candles:
@@ -564,10 +576,22 @@ def detect_structure(candles: list) -> dict:
     choch = (current_close > prev_high and trend == "bearish") or \
             (current_close < prev_low and trend == "bullish")
 
+    # Classify BOS subtype:
+    # 'choch' = Change of Character — close breaks structure AGAINST the prevailing trend.
+    #           This is a reversal confirmation — highest-probability ICT entry signal.
+    # 'bos'   = Break of Structure IN trend direction — continuation entry, lower urgency.
+    if choch:
+        bos_type = "choch"      # reversal: sweep + CHoCH = Judas Swing confirmation
+    elif bos:
+        bos_type = "bos"        # continuation: structure break in trend direction
+    else:
+        bos_type = None
+
     return {
         "trend": trend,
         "bos": bos,
         "choch": choch,
+        "bos_type": bos_type,   # 'choch', 'bos', or None
         "prev_high": round(prev_high, 5),
         "prev_low": round(prev_low, 5),
         "current": round(current_close, 5),
@@ -1136,24 +1160,72 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     else:
         gate_details['premium_discount'] = ""
 
-    # GATE 6 — BOS confirmed after sweep; requires >= 2 consecutive displacement candles
-    _bos_ok = bool(structure.get('bos') or ms.get('bos'))
+    # GATE 6 — BOS confirmed after sweep; requires >= 2 consecutive displacement candles.
+    # CHoCH (Change of Character): close breaks structure AGAINST the prior trend after a sweep.
+    #   → Highest-probability reversal. The sweep trapped one side; CHoCH confirms the flip.
+    #   → SL anchor: swept level (tight, institutional).
+    # BOS in trend: close breaks structure IN the trend direction.
+    #   → Continuation entry, moderate confidence. SL anchor: OB/FVG zone.
+    _bos_ok = bool(structure.get('bos') or ms.get('bos') or structure.get('choch') or ms.get('choch'))
+    _bos_type = structure.get('bos_type') or ms.get('bos_type')   # 'choch', 'bos', or None
+    _is_choch = _bos_type == 'choch' or bool(structure.get('choch') or ms.get('choch'))
     if _bos_ok:
         _bos_quality, _bos_count, _bos_desc = score_bos_quality(candles, direction)
         if _bos_quality == "weak":
             gates['bos'] = False
             gate_details['bos'] = f"weak displacement ({_bos_count} candle) — gate fail"
+            gate_details['bos_type'] = _bos_type or 'unknown'
         else:
             gates['bos'] = True
-            gate_details['bos'] = f"confirmed ({_bos_quality} displacement, {_bos_count} candles)"
+            if _is_choch:
+                # CHoCH after sweep = Judas Swing fully confirmed — highest quality
+                gate_details['bos'] = (
+                    f"CHoCH confirmed ({_bos_quality} displacement, {_bos_count} candles) — "
+                    f"reversal confirmed ✅ SL: swept level"
+                )
+                gate_details['bos_type'] = 'choch'
+            else:
+                # Standard BOS in trend direction
+                gate_details['bos'] = (
+                    f"BOS confirmed ({_bos_quality} displacement, {_bos_count} candles) — "
+                    f"continuation"
+                )
+                gate_details['bos_type'] = 'bos'
     else:
         gates['bos'] = False
         gate_details['bos'] = "not confirmed"
+        gate_details['bos_type'] = None
 
     # GATE 7 — Volatility adequate (not low vol)
     _vol_ok = not atr_data.get('is_low_volatility', False) if atr_data else True
     gates['volatility'] = _vol_ok
     gate_details['volatility'] = "healthy" if _vol_ok else "low volatility"
+
+    # ── POWER OF THREE — Midnight open context (informational, does not block) ───
+    # Confirms whether the current sweep is on the correct PO3 side.
+    # Bullish PO3: current price should be below midnight open (manipulation phase) before reversing up.
+    # Bearish PO3: current price should be above midnight open (manipulation phase) before reversing down.
+    _mo_data = _midnight_open.get(symbol.upper(), {})
+    _mo_price = _mo_data.get("price", 0.0)
+    _mo_is_today = _mo_data.get("date") == str(datetime.now(timezone.utc).date())
+    if _mo_price and _mo_is_today:
+        _is_pts_mo = symbol.upper() in ("XAUUSD", "US100", "US30", "US500") or symbol.upper() in YFINANCE_FUTURES_MAP
+        _dp_mo = 3 if _is_pts_mo else 5
+        _mo_display = round(_mo_price + FUTURES_SPOT_OFFSET.get(symbol.upper(), 0), _dp_mo)
+        if current_price and current_price > 0:
+            _po3_side = "below" if current_price < _mo_price else "above"
+            if direction == "BUY" and current_price < _mo_price:
+                gate_details['po3'] = f"✅ PO3: price {_po3_side} midnight open ({_mo_display}) — manipulation confirmed"
+            elif direction == "SELL" and current_price > _mo_price:
+                gate_details['po3'] = f"✅ PO3: price {_po3_side} midnight open ({_mo_display}) — manipulation confirmed"
+            elif direction == "BUY" and current_price > _mo_price:
+                gate_details['po3'] = f"⚠️ PO3: price ABOVE midnight open ({_mo_display}) — possible distribution already underway"
+            else:
+                gate_details['po3'] = f"⚠️ PO3: price BELOW midnight open ({_mo_display}) — possible distribution already underway"
+        else:
+            gate_details['po3'] = f"📊 PO3: midnight open {_mo_display}"
+    else:
+        gate_details['po3'] = "📊 PO3: midnight open not yet available (pre-00:00 UTC)"
 
     all_passed = all(gates.values())
     failed = [k for k, v in gates.items() if not v]
@@ -1388,8 +1460,16 @@ def format_unified_signal(symbol: str, direction: str,
             _gate_lines.append(f"✅ FVG: {gate_details.get('ob_fvg', '')}")
         elif gates and gates.get('ob_fvg'):
             _gate_lines.append(f"✅ OB/FVG: {gate_details.get('ob_fvg', 'Displacement retracement')}")
-        _gate_lines.append(f"✅ BOS: {gate_details.get('bos', 'confirmed (body close)')}")
+        _bos_type_label = gate_details.get('bos_type', '')
+        _bos_detail = gate_details.get('bos', 'confirmed (body close)')
+        if _bos_type_label == 'choch':
+            _gate_lines.append(f"🔥 CHoCH: {_bos_detail}")
+        else:
+            _gate_lines.append(f"✅ BOS: {_bos_detail}")
         _gate_lines.append(f"✅ Volatility: {gate_details.get('volatility', 'healthy')}")
+        _po3 = gate_details.get('po3', '')
+        if _po3:
+            _gate_lines.append(_po3)
         _pd = gate_details.get('premium_discount', '')
         if _pd:
             _gate_lines.append(_pd)
