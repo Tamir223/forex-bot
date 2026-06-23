@@ -2041,7 +2041,22 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         # EA auto-execution — write signal file if user opted in
                         try:
                             from signal_bridge import write_signal
-                            write_signal(result, user.id)
+                            # Pass user's actual account size from their prop firm profile
+                            # so lot sizing is calculated correctly per user (not hardcoded $10k)
+                            try:
+                                from database import load_challenge_state
+                                from drawdown_tracker import state_from_json
+                                from prop_firm_profiles import get_profile as _gp_lots
+                                _cs_lots = load_challenge_state(user.id)
+                                if _cs_lots:
+                                    _st_lots = state_from_json(_cs_lots)
+                                    _pf_lots = _gp_lots(_st_lots.firm_code)
+                                    _acct_size = _pf_lots.account_size if _pf_lots else 10000.0
+                                else:
+                                    _acct_size = 10000.0
+                            except Exception:
+                                _acct_size = 10000.0
+                            write_signal(result, user.id, account_size=_acct_size)
                         except Exception as _sb_err:
                             logger.error(f"[signal_bridge] {symbol} write failed for user {user.id}: {_sb_err}")
 
@@ -2078,13 +2093,44 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         if _trade_id:
                             last_trade_id[str(chat_id)] = _trade_id
 
+                        # Build per-user lot string using their actual account size
+                        try:
+                            from claude import _calculate_lot_size as _cals_user
+                            _sl_dist_user = abs(_sig_entry - _sig_sl)
+                            _pip_size_user = _lots_pip_size.get(symbol.upper(), _lots_default_pip)
+                            _sl_pts_user = _sl_dist_user / _pip_size_user
+                            _lot_full_user = _cals_user(
+                                _risk_pct, _sl_pts_user, symbol,
+                                account_size=_acct_size,
+                                current_price=float(_sig_entry)
+                            )
+                            _lot_str_user = _lot_full_user.split(" ")[0] if _lot_full_user else _lot_str
+                        except Exception:
+                            _lot_str_user = _lot_str
+
+                        msg = format_unified_signal(
+                            symbol=symbol, direction=direction,
+                            entry=_sig_entry, sl=_sig_sl,
+                            tp1=_sig_tp1, tp2=_sig_tp2,
+                            ob=ob, fvg=fvg, structure=structure,
+                            htf_bias=htf_bias or {},
+                            swept_level=_swept_level,
+                            kill_zone_label=_kz_label,
+                            lot_str=_lot_str_user,
+                            gates=gates, gate_details=gate_details,
+                            entry_tf=_entry_tf,
+                            displacement=displacement,
+                            draw=draw,
+                            tp3=_sig_tp3,
+                        )
+
                         keyboard = InlineKeyboardMarkup([[
                             InlineKeyboardButton("✅ YES — Execute", callback_data="trade_yes"),
                             InlineKeyboardButton("❌ NO — Skip",     callback_data="trade_no"),
                         ]])
                         await bot.send_message(
                             chat_id=chat_id,
-                            text=result["unified_signal"],
+                            text=msg,
                             reply_markup=keyboard,
                         )
 
