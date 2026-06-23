@@ -34,6 +34,7 @@ from scanner_improvements import (
     detect_round_number_sweep,
     score_bos_quality,
     get_weekly_levels,
+    is_asia_range_tight,
 )
 import requests
 import yfinance as yf
@@ -1042,6 +1043,19 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     # GATE 4 — Liquidity sweep detected (Asia range or recent swing)
     _update_asia_levels(symbol, candles)
     _sweep_ok, _swept_level, _sweep_type = _detect_asia_sweep_or_recent(symbol, candles, direction)
+
+    # Asia range size check: wide ranges degrade Judas Swing edge significantly.
+    _sym_upper_g4 = symbol.upper()
+    _asia_lvl = _asia_levels.get(_sym_upper_g4, {})
+    _asia_h = _asia_lvl.get("high", 0.0)
+    _asia_l = _asia_lvl.get("low", 0.0)
+    _range_tight, _range_reason = is_asia_range_tight(symbol, _asia_h, _asia_l)
+    if not _range_tight and _sweep_ok:
+        import logging as _g4_log
+        _g4_log.getLogger("scanner").info(
+            f"[G4] {symbol} Asia range wide — {_range_reason} (sweep still passed, quality noted)"
+        )
+
     gates['sweep'] = _sweep_ok
     _sym_upper = symbol.upper()
     _is_pts = _sym_upper in ("XAUUSD", "US30", "NAS100") or _sym_upper in YFINANCE_FUTURES_MAP
@@ -1177,9 +1191,9 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         sl_dist = min(sl_dist, _max_sl_dist(symbol))  # ceiling — never too wide
         _use_3dp = spec or symbol.upper() in ("XAUUSD", "US100", "US30", "NAS100")
         sl = round(entry - sl_dist, 3) if _use_3dp else round(entry - sl_dist, 5)
-        tp1 = round(entry + sl_dist * 1.5, 3 if _use_3dp else 5)
-        tp2 = round(entry + sl_dist * 2.5, 3 if _use_3dp else 5)
-        tp3 = round(entry + sl_dist * 4.0, 3 if _use_3dp else 5)
+        tp1 = round(entry + sl_dist * 2.0, 3 if _use_3dp else 5)
+        tp2 = round(entry + sl_dist * 3.0, 3 if _use_3dp else 5)
+        tp3 = round(entry + sl_dist * 5.0, 3 if _use_3dp else 5)
         logger.info(f"[build_signal] {symbol} BUY sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} max={_max_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     else:  # SELL
@@ -1199,9 +1213,9 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         sl_dist = min(sl_dist, _max_sl_dist(symbol))  # ceiling — never too wide
         _use_3dp = spec or symbol.upper() in ("XAUUSD", "US100", "US30", "NAS100")
         sl = round(entry + sl_dist, 3) if _use_3dp else round(entry + sl_dist, 5)
-        tp1 = round(entry - sl_dist * 1.5, 3 if _use_3dp else 5)
-        tp2 = round(entry - sl_dist * 2.5, 3 if _use_3dp else 5)
-        tp3 = round(entry - sl_dist * 4.0, 3 if _use_3dp else 5)
+        tp1 = round(entry - sl_dist * 2.0, 3 if _use_3dp else 5)
+        tp2 = round(entry - sl_dist * 3.0, 3 if _use_3dp else 5)
+        tp3 = round(entry - sl_dist * 5.0, 3 if _use_3dp else 5)
         logger.info(f"[build_signal] {symbol} SELL sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} max={_max_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
 
     # Build setup description
@@ -1226,14 +1240,14 @@ def build_auto_signal(symbol: str, direction: str, price: float,
 
     trend_dir = "Bullish" if direction == "BUY" else "Bearish"
 
-    # Enforce minimum 1.5:1 TP1 floor before offset is applied
-    _tp1_min_dist = sl_dist * 1.5
+    # Enforce minimum 2.0:1 TP1 floor
+    _tp1_min_dist = sl_dist * 2.0
     if direction == "BUY" and (tp1 - entry) < _tp1_min_dist - 0.0001:
         tp1 = round(entry + _tp1_min_dist, 3 if _use_3dp else 5)
-        logger.warning(f"[build_signal] {symbol} BUY TP1 corrected to 1.5R: tp1={tp1}")
+        logger.warning(f"[build_signal] {symbol} BUY TP1 corrected to 2.0R: tp1={tp1}")
     elif direction == "SELL" and (entry - tp1) < _tp1_min_dist - 0.0001:
         tp1 = round(entry - _tp1_min_dist, 3 if _use_3dp else 5)
-        logger.warning(f"[build_signal] {symbol} SELL TP1 corrected to 1.5R: tp1={tp1}")
+        logger.warning(f"[build_signal] {symbol} SELL TP1 corrected to 2.0R: tp1={tp1}")
 
     # Round prices cleanly and apply spot offset for instruments where yFinance
     # returns futures prices that differ from MT5 spot price
@@ -1671,15 +1685,15 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 _sw_sl_dist = max(abs(_sig_entry - _swept_raw_sl), _min_sl_dist(symbol))
                 _sw_sl_dist = min(_sw_sl_dist, _max_sl_dist(symbol))
                 _sig_sl  = round(_sig_entry - _sw_sl_dist, _dp_sw)
-                _sig_tp1 = round(_sig_entry + _sw_sl_dist * 1.5, _dp_sw)
-                _sig_tp2 = round(_sig_entry + _sw_sl_dist * 2.5, _dp_sw)
+                _sig_tp1 = round(_sig_entry + _sw_sl_dist * 2.0, _dp_sw)
+                _sig_tp2 = round(_sig_entry + _sw_sl_dist * 3.0, _dp_sw)
             else:
                 _swept_raw_sl = _swept_level + _sw_buf
                 _sw_sl_dist = max(abs(_swept_raw_sl - _sig_entry), _min_sl_dist(symbol))
                 _sw_sl_dist = min(_sw_sl_dist, _max_sl_dist(symbol))
                 _sig_sl  = round(_sig_entry + _sw_sl_dist, _dp_sw)
-                _sig_tp1 = round(_sig_entry - _sw_sl_dist * 1.5, _dp_sw)
-                _sig_tp2 = round(_sig_entry - _sw_sl_dist * 2.5, _dp_sw)
+                _sig_tp1 = round(_sig_entry - _sw_sl_dist * 2.0, _dp_sw)
+                _sig_tp2 = round(_sig_entry - _sw_sl_dist * 3.0, _dp_sw)
             logger.info(
                 f"[scanner] {symbol} swept-level SL: swept={_swept_level} buffer={_sw_buf} "
                 f"sl={_sig_sl} entry={_sig_entry} sl_dist={_sw_sl_dist:.5f} tp1={_sig_tp1}"
@@ -1904,6 +1918,39 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         user = get_user_by_chat_id(str(chat_id))
                         if not user or not user.is_active:
                             continue
+
+                        # ── DRAWDOWN GUARD — per-user pre-send check ───────────────────────
+                        try:
+                            from database import load_challenge_state
+                            from drawdown_tracker import (
+                                state_from_json, check_signal_allowed, DrawdownTracker
+                            )
+                            from prop_firm_profiles import get_profile as _get_profile_guard
+                            _cs_json_guard = load_challenge_state(user.id)
+                            if _cs_json_guard:
+                                _state_guard = state_from_json(_cs_json_guard)
+                                _profile_guard = _get_profile_guard(_state_guard.firm_code)
+                                if _profile_guard:
+                                    _sig_ok, _sig_reason = check_signal_allowed(_state_guard, _profile_guard)
+                                    if not _sig_ok:
+                                        logger.info(
+                                            f"[drawdown_guard] {symbol} blocked for user {user.id}: {_sig_reason}"
+                                        )
+                                        await bot.send_message(
+                                            chat_id=chat_id,
+                                            text=f"⛔ *Signal blocked — drawdown protection*\n{_sig_reason}",
+                                        )
+                                        continue
+                            _dt_guard = DrawdownTracker()
+                            _paused, _pause_reason = _dt_guard.is_signals_paused(user.id)
+                            if _paused:
+                                logger.info(
+                                    f"[drawdown_guard] {symbol} suppressed for user {user.id} — {_pause_reason}"
+                                )
+                                continue
+                        except Exception as _dg_err:
+                            logger.error(f"[drawdown_guard] check failed for user {user.id}: {_dg_err}")
+                        # ── END DRAWDOWN GUARD ─────────────────────────────────────────────
 
                         # EA auto-execution — write signal file if user opted in
                         try:

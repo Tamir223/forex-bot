@@ -147,7 +147,10 @@ def record_trade(state: DrawdownState, profile: PropFirmProfile, pnl: float):
 
 
 def _rollover_day(state, profile):
-    if profile.drawdown_type == DrawdownType.EOD:
+    # FTMO STATIC: daily loss limit is calculated from previous day's closing balance.
+    # Update today_start_balance on every day rollover so the daily cap tracks correctly
+    # as your balance grows or shrinks through the challenge.
+    if profile.drawdown_type in (DrawdownType.EOD, DrawdownType.STATIC):
         state.today_start_balance = state.current_balance
     state.today_date = date.today().isoformat()
     state.today_pnl = 0.0

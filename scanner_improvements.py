@@ -44,6 +44,43 @@ def get_pip_spec(symbol: str) -> dict:
     return PIP_SPECS.get(symbol.upper(), {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0007})
 
 
+# Max Asian range sizes (in pip units) above which the Judas Swing edge degrades.
+# Wide ranges produce noisy sweeps with wide SLs and poor RR.
+_MAX_ASIA_RANGE_PIPS = {
+    "EURUSD": 60,
+    "GBPUSD": 70,
+    "XAUUSD": 1200,
+    "USDJPY": 60,
+    "AUDUSD": 50,
+    "NZDUSD": 50,
+    "USDCAD": 55,
+    "USDCHF": 50,
+    "US100":  200,
+    "US30":   180,
+    "US500":  25,
+}
+_DEFAULT_MAX_ASIA_RANGE_PIPS = 60
+
+
+def is_asia_range_tight(symbol: str, asia_high: float, asia_low: float) -> tuple[bool, str]:
+    """
+    Return (is_tight, reason) for a given Asia session range.
+    Tight ranges produce the highest-probability Judas Swing setups.
+    Wide ranges (> max threshold for the pair) produce noisy sweeps with
+    poor RR — ATR is wide, SL must be wide, and TP1 becomes hard to reach.
+    """
+    if asia_high <= asia_low:
+        return True, "no range data"
+    sym = symbol.upper()
+    spec = PIP_SPECS.get(sym, {"pip": 0.0001})
+    pip_size = spec["pip"]
+    range_pips = (asia_high - asia_low) / pip_size
+    max_pips = _MAX_ASIA_RANGE_PIPS.get(sym, _DEFAULT_MAX_ASIA_RANGE_PIPS)
+    if range_pips > max_pips:
+        return False, f"Asia range {range_pips:.0f}p > max {max_pips}p — wide range reduces Judas edge"
+    return True, f"Asia range {range_pips:.0f}p — tight"
+
+
 # ─── 1. NEWS FILTER ───────────────────────────────────────────────────────────
 
 NEWS_BLOCK_MINUTES_BEFORE = 45
@@ -2275,6 +2312,8 @@ def clear_daily_mitigation_state() -> None:
 def score_bos_quality(candles: list, direction: str) -> tuple[str, int, str]:
     """
     Assess BOS displacement quality by counting consecutive candles in the BOS direction.
+    Window tightened to 6 candles (90 min on 15M) — a BOS older than that is stale;
+    the entry window has closed and any retrace to OB/FVG is likely to fail.
     3+ = strong, 2 = moderate, 1 = weak (gate fails).
     Returns (quality, count, signal_label) where signal_label is Telegram-ready.
     """
@@ -2283,7 +2322,9 @@ def score_bos_quality(candles: list, direction: str) -> tuple[str, int, str]:
 
     expected_bullish = direction.upper() == "BUY"
     consecutive = 0
-    for c in candles[:10]:
+    # 6-candle window = 90 min on 15M — BOS older than this is stale for intraday ICT setups.
+    # The sweep → BOS → retrace-to-OB sequence must complete within this window.
+    for c in candles[:6]:
         is_bull = c["close"] > c["open"]
         if is_bull == expected_bullish:
             consecutive += 1
