@@ -1550,6 +1550,12 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         if _gt_direction is None:
             logger.info(f"[scanner] {symbol} {_gt_strength} — no trade")
             return None
+        # Block weak signals — neutral daily bias means no D1 institutional alignment.
+        # Without HTF confirmation, the trade is structure-only: lower probability,
+        # higher risk of being on the wrong side of a larger move. Skip for FTMO.
+        if _gt_strength == "weak":
+            logger.info(f"[scanner] {symbol} direction weak (neutral D1 bias) — skipping, no HTF alignment")
+            return None
         logger.info(f"[scanner] {symbol} direction {_gt_direction} ({_gt_strength})")
         market_structure = ms["structure"]  # "uptrend" or "downtrend" (ranging already gated)
 
