@@ -1584,31 +1584,36 @@ def detect_market_structure_shift(candles: list, direction: str) -> tuple[bool, 
 def check_premium_discount_zone(candles: list, entry: float, direction: str) -> tuple[bool, str]:
     """
     Filter entries by whether they sit in a premium or discount zone.
-    Range of last 20 candles split at equilibrium (midpoint).
-    BUY in discount (below equilibrium) → favourable.
-    SELL in premium (above equilibrium) → favourable.
-    Returns (is_favourable, description). Empty description = neutral/no data.
+    D1 range split at equilibrium with ±10% neutral buffer around midpoint.
+    BUY clearly in discount (below lower_mid) → ok.
+    SELL clearly in premium (above upper_mid) → ok.
+    Neutral zone triggers a warning but does not block the signal.
+    Returns (is_favourable, description). Empty description = no data.
     """
     if not candles or len(candles) < 5:
         return True, ""
 
     recent = candles[:20]
-    range_high = max(c["high"] for c in recent)
-    range_low = min(c["low"] for c in recent)
+    d1_high = max(c["high"] for c in recent)
+    d1_low  = min(c["low"]  for c in recent)
 
-    if range_high == range_low:
+    if d1_high == d1_low:
         return True, ""
 
-    equilibrium = (range_high + range_low) / 2
+    range_size = d1_high - d1_low
+    midpoint   = (d1_high + d1_low) / 2
+    buffer     = range_size * 0.10
+    upper_mid  = midpoint + buffer
+    lower_mid  = midpoint - buffer
 
     if direction.upper() == "BUY":
-        if entry <= equilibrium:
+        if entry < lower_mid:
             return True, "Entry in discount zone — buying at value"
-        return False, "Buying in premium zone — unfavorable"
+        return False, "Entry in neutral/premium zone — buying above discount"
     else:  # SELL
-        if entry >= equilibrium:
+        if entry > upper_mid:
             return True, "Entry in premium zone — selling at premium"
-        return False, "Selling in discount zone — unfavorable"
+        return False, "Entry in neutral/discount zone — selling below premium"
 
 
 # ─── 20. KILL ZONE TIMING BONUS ──────────────────────────────────────────────

@@ -163,6 +163,18 @@ def _max_sl_dist(symbol: str) -> float:
     return MAX_SL_DISTANCE["default_forex"]
 
 
+def _swept_sl_buffer(symbol: str) -> float:
+    """Buffer below swept low (BUY) or above swept high (SELL), in price units."""
+    sym = symbol.upper()
+    if sym == "XAUUSD":
+        return 12.0
+    if sym in ("US100", "US30", "US500", "NAS100") or sym in YFINANCE_FUTURES_MAP:
+        return 80.0
+    if "JPY" in sym:
+        return 0.05   # 5 pips JPY
+    return 0.0005     # 5 pips standard forex
+
+
 # News-resumption alert state — fires once when a news block clears
 _news_was_blocked: bool = False
 _news_resume_sent: bool = False
@@ -1645,6 +1657,32 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 f"[displacement] {symbol} OTE entry override: entry={_sig_entry} sl={_sig_sl} tp1={_sig_tp1} "
                 f"ote_zone={round(displacement.get('ote_low', 0) + _spot_off_d, _dp_d)}"
                 f"-{round(displacement.get('ote_high', 0) + _spot_off_d, _dp_d)}"
+            )
+
+        # ── SWEPT-LEVEL SL ANCHOR (Gate 4) ─────────────────────────────────────
+        # Anchor SL to the swept liquidity level + buffer rather than OB/FVG geometry.
+        # _swept_level is already in spot price domain (offset applied in _detect_asia_sweep_or_recent).
+        if _swept_level:
+            _is_pts_sw = symbol.upper() in ("XAUUSD", "US30", "NAS100", "US100", "US500") or symbol.upper() in YFINANCE_FUTURES_MAP
+            _dp_sw = 3 if _is_pts_sw else 5
+            _sw_buf = _swept_sl_buffer(symbol)
+            if direction == "BUY":
+                _swept_raw_sl = _swept_level - _sw_buf
+                _sw_sl_dist = max(abs(_sig_entry - _swept_raw_sl), _min_sl_dist(symbol))
+                _sw_sl_dist = min(_sw_sl_dist, _max_sl_dist(symbol))
+                _sig_sl  = round(_sig_entry - _sw_sl_dist, _dp_sw)
+                _sig_tp1 = round(_sig_entry + _sw_sl_dist * 1.5, _dp_sw)
+                _sig_tp2 = round(_sig_entry + _sw_sl_dist * 2.5, _dp_sw)
+            else:
+                _swept_raw_sl = _swept_level + _sw_buf
+                _sw_sl_dist = max(abs(_swept_raw_sl - _sig_entry), _min_sl_dist(symbol))
+                _sw_sl_dist = min(_sw_sl_dist, _max_sl_dist(symbol))
+                _sig_sl  = round(_sig_entry + _sw_sl_dist, _dp_sw)
+                _sig_tp1 = round(_sig_entry - _sw_sl_dist * 1.5, _dp_sw)
+                _sig_tp2 = round(_sig_entry - _sw_sl_dist * 2.5, _dp_sw)
+            logger.info(
+                f"[scanner] {symbol} swept-level SL: swept={_swept_level} buffer={_sw_buf} "
+                f"sl={_sig_sl} entry={_sig_entry} sl_dist={_sw_sl_dist:.5f} tp1={_sig_tp1}"
             )
 
         # TP3 ordering validation — draw level must be further than TP2, not behind entry
