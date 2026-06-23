@@ -275,9 +275,9 @@ from scanner import MIN_SL_DISTANCE
 assert MIN_SL_DISTANCE['XAUUSD'] == 12.0
 assert abs(MIN_SL_DISTANCE['EURUSD'] - 0.0012) < 1e-9
 assert abs(MIN_SL_DISTANCE['GBPUSD'] - 0.0015) < 1e-9
-assert abs(MIN_SL_DISTANCE['USDJPY'] - 0.12) < 1e-9
+assert abs(MIN_SL_DISTANCE['USDJPY'] - 0.08) < 1e-9
 " 2>/dev/null
-check $? "Math: min SL distances correct (XAUUSD=12, EURUSD=0.0012, GBPUSD=0.0015, USDJPY=0.12)"
+check $? "Math: min SL distances correct (XAUUSD=12, EURUSD=0.0012, GBPUSD=0.0015, USDJPY=0.08)"
 
 # 33. Pip values correct
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "

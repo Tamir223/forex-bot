@@ -111,7 +111,7 @@ MIN_SL_DISTANCE = {
     "NAS100":        20.0,
     "GBPUSD":        0.0015, # 15 pips — most volatile forex
     "EURUSD":        0.0012, # 12 pips
-    "USDJPY":        0.12,   # 12 pips JPY
+    "USDJPY":        0.08,   # 8 pips JPY
     "USDCAD":        0.0012, # 12 pips
     "USDCHF":        0.0010, # 10 pips
     "AUDUSD":        0.0010, # 10 pips

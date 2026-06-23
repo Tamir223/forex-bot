@@ -26,7 +26,7 @@ PIP_SPECS = {
     "NZDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.00035},  # 10 pips
     "USDCAD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.00049},  # 12 pips
     "USDCHF": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.00049},  # 10 pips
-    "USDJPY": {"pip": 0.01,   "min_sl": 0.12,   "min_atr": 0.035, "max_lots": 0.50},    # 12 pips JPY
+    "USDJPY": {"pip": 0.01,   "min_sl": 0.08,   "min_atr": 0.035, "max_lots": 0.50},    # 8 pips JPY
     "EURJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.08},
     "GBPJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.10},
     "XAUUSD": {"pip": 0.01,   "min_sl": 12.0,   "min_atr": 2.0},     # 12 points — gold needs room

@@ -172,7 +172,7 @@ if IMPORTS_OK:
         "XAUUSD": (12.0,  "12.0 points"),
         "GBPUSD": (0.0015, "15 pips (0.0015)"),
         "EURUSD": (0.0012, "12 pips (0.0012)"),
-        "USDJPY": (0.12,   "12 pips (0.12)"),
+        "USDJPY": (0.08,   "8 pips (0.08)"),
     }
     for pair, (exp_val, label) in expected.items():
         actual = MIN_SL_DISTANCE.get(pair)
