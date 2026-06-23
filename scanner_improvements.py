@@ -1585,10 +1585,10 @@ def check_premium_discount_zone(candles: list, entry: float, direction: str) -> 
     """
     Filter entries by whether they sit in a premium or discount zone.
     D1 range split at equilibrium with ±10% neutral buffer around midpoint.
-    BUY clearly in discount (below lower_mid) → ok.
-    SELL clearly in premium (above upper_mid) → ok.
-    Neutral zone triggers a warning but does not block the signal.
-    Returns (is_favourable, description). Empty description = no data.
+    BUY clearly in discount (below lower_mid) → labelled ok.
+    SELL clearly in premium (above upper_mid) → labelled ok.
+    Neutral zone → silent (no label, no warning).
+    Returns (is_favourable, description). Empty description = neutral or no data.
     """
     if not candles or len(candles) < 5:
         return True, ""
@@ -1609,11 +1609,11 @@ def check_premium_discount_zone(candles: list, entry: float, direction: str) -> 
     if direction.upper() == "BUY":
         if entry < lower_mid:
             return True, "Entry in discount zone — buying at value"
-        return False, "Entry in neutral/premium zone — buying above discount"
+        return True, ""
     else:  # SELL
         if entry > upper_mid:
             return True, "Entry in premium zone — selling at premium"
-        return False, "Entry in neutral/discount zone — selling below premium"
+        return True, ""
 
 
 # ─── 20. KILL ZONE TIMING BONUS ──────────────────────────────────────────────
