@@ -368,7 +368,7 @@ SYMBOLS = [
 ]
 
 # Default watchlist — users can customize with /watch command
-DEFAULT_WATCHLIST = ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "USDCHF", "AUDUSD", "NZDUSD", "XAUUSD", "US100", "US30", "US500"]
+DEFAULT_WATCHLIST = ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "USDCHF", "AUDUSD", "NZDUSD", "XAUUSD", "US500"]
 
 # Scan interval in seconds
 SCAN_INTERVAL = 900  # 15 minutes
