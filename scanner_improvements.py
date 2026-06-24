@@ -55,9 +55,9 @@ _MAX_ASIA_RANGE_PIPS = {
     "NZDUSD": 50,
     "USDCAD": 55,
     "USDCHF": 50,
-    "US100":  200,
-    "US30":   180,
-    "US500":  25,
+    "US100":  2000,  # indices have wide overnight ranges by nature — don't filter on this
+    "US30":   1500,  # previous day H/L sweep is the reference, not Asia range tightness
+    "US500":  500,
 }
 _DEFAULT_MAX_ASIA_RANGE_PIPS = 60
 

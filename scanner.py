@@ -1821,7 +1821,11 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # ── SWEPT-LEVEL SL ANCHOR (Gate 4) ─────────────────────────────────────
         # Anchor SL to the swept liquidity level + buffer rather than OB/FVG geometry.
         # _swept_level is already in spot price domain (offset applied in _detect_asia_sweep_or_recent).
-        if _swept_level:
+        # For equity indices, the overnight swept level produces SLs of 200-500pts.
+        # The 5M OB SL is far more appropriate for intraday index entries.
+        # Skip swept-level SL override for indices — use 5M OB anchor instead.
+        _is_index = symbol.upper() in ("US100", "US30", "US500", "NAS100", "SP500")
+        if _swept_level and not _is_index:
             _is_pts_sw = symbol.upper() in ("XAUUSD", "US30", "NAS100", "US100", "US500") or symbol.upper() in YFINANCE_FUTURES_MAP
             _dp_sw = 3 if _is_pts_sw else 5
             _sw_buf = _swept_sl_buffer(symbol)
