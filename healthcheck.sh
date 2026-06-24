@@ -393,11 +393,11 @@ check $? "Signal flow: news filter active and callable"
 # 44. Entry validation tolerances correct
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 from scanner_improvements import ENTRY_MAX_PIPS_FOREX, ENTRY_MAX_POINTS_GOLD, ENTRY_MAX_POINTS_FUTURES
-assert ENTRY_MAX_PIPS_FOREX == 10
+assert ENTRY_MAX_PIPS_FOREX == 15
 assert ENTRY_MAX_POINTS_GOLD == 15
 assert ENTRY_MAX_POINTS_FUTURES == 20
 " 2>/dev/null
-check $? "Signal flow: entry validation tolerances (forex=10pip, gold=15pt, futures=20pt)"
+check $? "Signal flow: entry validation tolerances (forex=15pip, gold=15pt, futures=20pt)"
 
 # 45. Live exposure sync from DB not counters
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
