@@ -112,11 +112,16 @@ _scan_rotation_index = 0
 
 
 MIN_SL_DISTANCE = {
-    "XAUUSD":        12.0,   # gold needs more room
+    # Gold: ICT setups require 80-300pt SL anchored below swept level.
+    # Previous 12pt min was too tight — a single tick wipes it at $4200 gold.
+    "XAUUSD":        80.0,   # 80 points minimum — below OB/FVG zone
     "US100":         80.0,   # NQ equivalent — 80 pts minimum
     "US30":          60.0,   # YM equivalent — 60 pts minimum
-    "US500":          2.0,   # S&P500 CFD — 20 pips * 0.1 pip_size
+    # US500 min raised from 2.0 to 8.0 — 2pt SL on SP500 is sub-tick level
+    "US500":          8.0,   # S&P500 CFD — 8 pts minimum (realistic 15M range)
     "NAS100":        20.0,
+    # WTI Crude: 15M range = $0.40-$0.80. Min 40 cents (40 pips at $0.01/pip)
+    "USOIL":          0.40,  # 40 cents minimum SL
     "GBPUSD":        0.0015, # 15 pips — most volatile forex
     "EURUSD":        0.0012, # 12 pips
     "USDJPY":        0.08,   # 8 pips JPY
@@ -130,11 +135,14 @@ MIN_SL_DISTANCE = {
 }
 
 MAX_SL_DISTANCE = {
-    "XAUUSD":        20.0,   # max 20 points
+    # Gold: max 300 points — allows swept-level SL anchoring on big Judas moves
+    "XAUUSD":        300.0,  # max 300 points — ICT gold setups can need this room
     "US100":         300.0,  # max 300 pts
     "US30":          250.0,  # max 250 pts
-    "US500":          15.0,  # max 150 pips * 0.1 pip_size
-    "GBPUSD":        0.0020, # max 20 pips
+    "US500":          30.0,  # max 30 pts — SP500 15M range is typically 5-20pts
+    # WTI Crude: max $2.00 SL — wide enough for NY open volatility
+    "USOIL":          2.0,   # max $2.00 SL
+    "GBPUSD":        0.0025, # max 25 pips — raised from 20 for swept-level room
     "EURUSD":        0.0020, # max 20 pips
     "USDJPY":        0.20,   # max 20 pips JPY
     "USDCAD":        0.0020, # max 20 pips
