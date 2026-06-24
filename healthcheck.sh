@@ -234,23 +234,23 @@ assert abs(lot - 0.33) <= 0.01, f'Expected 0.33, got {lot}'
 " 2>/dev/null
 check $? "Math: EURUSD 0.5% 15pip SL = 0.33 lots"
 
-# 29. Lot size — XAUUSD 0.5% $10k 12pt = 0.04 lots (tolerance ±0.01)
+# 29. Lot size — XAUUSD 0.5% $10k 80pt = 0.01 lots (tolerance ±0.01)
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 from claude import _calculate_lot_size
-r = _calculate_lot_size(0.5, 12, 'XAUUSD', 10000.0)
+r = _calculate_lot_size(0.5, 80, 'XAUUSD', 10000.0)
 lot = float(r.split()[0])
-assert abs(lot - 0.04) <= 0.01, f'Expected 0.04, got {lot}'
+assert abs(lot - 0.01) <= 0.01, f'Expected 0.04, got {lot}'
 " 2>/dev/null
-check $? "Math: XAUUSD 0.5% 12pt SL = 0.04 lots"
+check $? "Math: XAUUSD 0.5% 80pt SL = 0.01 lots"
 
-# 29b. Lot size — XAUUSD 0.75% $10k 12pt = 0.06 lots (tolerance ±0.01)
+# 29b. Lot size — XAUUSD 0.75% $10k 80pt = 0.01 lots (tolerance ±0.01)
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 from claude import _calculate_lot_size
-r = _calculate_lot_size(0.75, 12, 'XAUUSD', 10000.0)
+r = _calculate_lot_size(0.75, 80, 'XAUUSD', 10000.0)
 lot = float(r.split()[0])
-assert abs(lot - 0.06) <= 0.01, f'Expected 0.06, got {lot}'
+assert abs(lot - 0.01) <= 0.01, f'Expected 0.06, got {lot}'
 " 2>/dev/null
-check $? "Math: XAUUSD 0.75% 12pt SL = 0.06 lots"
+check $? "Math: XAUUSD 0.75% 80pt SL = 0.01 lots"
 
 # 30. Lot size — GBPUSD 0.75% $10k 15pip = 0.50 lots (tolerance ±0.01)
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
@@ -272,12 +272,12 @@ check $? "Math: 15pip SL → TP1 = 22.5pip (1.5:1 RR)"
 # 32. Minimum SL distances correct
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "
 from scanner import MIN_SL_DISTANCE
-assert MIN_SL_DISTANCE['XAUUSD'] == 12.0
+assert MIN_SL_DISTANCE['XAUUSD'] == 80.0
 assert abs(MIN_SL_DISTANCE['EURUSD'] - 0.0012) < 1e-9
 assert abs(MIN_SL_DISTANCE['GBPUSD'] - 0.0015) < 1e-9
 assert abs(MIN_SL_DISTANCE['USDJPY'] - 0.08) < 1e-9
 " 2>/dev/null
-check $? "Math: min SL distances correct (XAUUSD=12, EURUSD=0.0012, GBPUSD=0.0015, USDJPY=0.08)"
+check $? "Math: min SL distances correct (XAUUSD=80, EURUSD=0.0012, GBPUSD=0.0015, USDJPY=0.08)"
 
 # 33. Pip values correct
 cd /home/ubuntu/apfee && /home/ubuntu/apfee/venv/bin/python -c "

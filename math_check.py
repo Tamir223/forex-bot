@@ -55,7 +55,7 @@ section("LOT SIZE CALCULATIONS:")
 if IMPORTS_OK:
     # _calculate_lot_size expects pip COUNT (not raw price distance).
     # _compute_sl_pts converts price diff → pips before calling this.
-    # So pass: 15 for 15 pips EURUSD, 12 for 12 pips USDJPY, 12 for 12 pts XAUUSD.
+    # So pass: 15 for 15 pips EURUSD, 12 for 12 pips USDJPY, 80 for 80 pts XAUUSD.
 
     # EURUSD: 0.5% of $10k = $50 risk, 15pip SL, $10/pip/lot → 50/(15×10) = 0.33
     try:
@@ -81,27 +81,27 @@ if IMPORTS_OK:
     except Exception as e:
         fail("GBPUSD lot size calculation", str(e))
 
-    # XAUUSD: 0.5% of $10k = $50 risk, 12pt SL, $100/pt/lot → 50/(12×100) = 0.04
+    # XAUUSD: 0.5% of $10k = $50 risk, 80pt SL, $100/pt/lot → 50/(80×100) = 0.01
     try:
-        result = _calculate_lot_size(0.5, 12, "XAUUSD", 10000.0)
+        result = _calculate_lot_size(0.5, 80, "XAUUSD", 10000.0)
         lot = float(result.split()[0]) if result else None
-        dollar_risk = round(lot * 12 * PIP_VALUES["XAUUSD"], 2) if lot else 0
-        if lot is not None and abs(lot - 0.04) <= 0.01:
-            ok(f"XAUUSD 0.5% 12pt: {lot} lots = ${dollar_risk:.2f} risk")
+        dollar_risk = round(lot * 80 * PIP_VALUES["XAUUSD"], 2) if lot else 0
+        if lot is not None and abs(lot - 0.01) <= 0.005:
+            ok(f"XAUUSD 0.5% 80pt: {lot} lots = ${dollar_risk:.2f} risk")
         else:
-            fail(f"XAUUSD 0.5% 12pt", f"expected 0.04, got {lot}")
+            fail(f"XAUUSD 0.5% 80pt", f"expected 0.01, got {lot}")
     except Exception as e:
         fail("XAUUSD lot size calculation", str(e))
 
-    # XAUUSD: 0.75% of $10k = $75 risk, 12pt SL, $100/pt/lot → 75/(12×100) = 0.06
+    # XAUUSD: 0.75% of $10k = $75 risk, 80pt SL, $100/pt/lot → 75/(80×100) = 0.01
     try:
-        result = _calculate_lot_size(0.75, 12, "XAUUSD", 10000.0)
+        result = _calculate_lot_size(0.75, 80, "XAUUSD", 10000.0)
         lot = float(result.split()[0]) if result else None
-        dollar_risk = round(lot * 12 * PIP_VALUES["XAUUSD"], 2) if lot else 0
-        if lot is not None and abs(lot - 0.06) <= 0.01:
-            ok(f"XAUUSD 0.75% 12pt: {lot} lots = ${dollar_risk:.2f} risk")
+        dollar_risk = round(lot * 80 * PIP_VALUES["XAUUSD"], 2) if lot else 0
+        if lot is not None and abs(lot - 0.01) <= 0.005:
+            ok(f"XAUUSD 0.75% 80pt: {lot} lots = ${dollar_risk:.2f} risk")
         else:
-            fail(f"XAUUSD 0.75% 12pt", f"expected 0.06, got {lot}")
+            fail(f"XAUUSD 0.75% 80pt", f"expected 0.01, got {lot}")
     except Exception as e:
         fail("XAUUSD 0.75% lot size calculation", str(e))
 
@@ -169,7 +169,7 @@ section("MINIMUM SL DISTANCES:")
 
 if IMPORTS_OK:
     expected = {
-        "XAUUSD": (12.0,  "12.0 points"),
+        "XAUUSD": (80.0,  "80.0 points"),
         "GBPUSD": (0.0015, "15 pips (0.0015)"),
         "EURUSD": (0.0012, "12 pips (0.0012)"),
         "USDJPY": (0.08,   "8 pips (0.08)"),
