@@ -34,6 +34,7 @@ PIP_SPECS = {
     "US100":  {"pip": 1.0, "min_sl": 80.0,  "min_atr": 20.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 80,  "max_sl_pips": 300, "digits": 2, "unit": "pts"},
     "US30":   {"pip": 1.0, "min_sl": 60.0,  "min_atr": 17.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 60,  "max_sl_pips": 250, "digits": 2, "unit": "pts"},
     "US500":  {"pip": 0.1, "min_sl":  2.0,  "min_atr":  0.7, "pip_size": 0.1, "pip_value": 0.5, "min_sl_pips": 20,  "max_sl_pips": 150, "digits": 2, "unit": "pts"},
+    "USOIL":  {"pip": 0.01, "min_sl": 0.30, "min_atr": 0.20},
 }
 
 _FOREX_PIP_SPEC_PAIRS = {k for k, v in PIP_SPECS.items() if v["pip"] <= 0.01 and k not in ("XAUUSD", "XAGUSD")}
@@ -1680,6 +1681,7 @@ _PAIR_KILL_ZONES = {
     'US100':   ['ny_open', 'ny_indices'],
     'US30':    ['ny_open', 'ny_indices'],
     'US500':   ['ny_open', 'ny_indices'],
+    'USOIL':   ['london', 'ny_open'],
 }
 
 _KILL_ZONE_LABELS = {

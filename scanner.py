@@ -368,7 +368,7 @@ SYMBOLS = [
 ]
 
 # Default watchlist — users can customize with /watch command
-DEFAULT_WATCHLIST = ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "USDCHF", "AUDUSD", "NZDUSD", "XAUUSD", "US500"]
+DEFAULT_WATCHLIST = ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "USDCHF", "AUDUSD", "NZDUSD", "XAUUSD", "USOIL", "US100", "US30", "US500"]
 
 # Scan interval in seconds
 SCAN_INTERVAL = 900  # 15 minutes
@@ -1824,7 +1824,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # For equity indices, the overnight swept level produces SLs of 200-500pts.
         # The 5M OB SL is far more appropriate for intraday index entries.
         # Skip swept-level SL override for indices — use 5M OB anchor instead.
-        _is_index = symbol.upper() in ("US100", "US30", "US500", "NAS100", "SP500")
+        _is_index = symbol.upper() in ("US100", "US30", "US500", "NAS100", "SP500", "USOIL")
         if _swept_level and not _is_index:
             _is_pts_sw = symbol.upper() in ("XAUUSD", "US30", "NAS100", "US100", "US500") or symbol.upper() in YFINANCE_FUTURES_MAP
             _dp_sw = 3 if _is_pts_sw else 5
