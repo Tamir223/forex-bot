@@ -53,6 +53,7 @@ YFINANCE_FUTURES_MAP = {
     'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F',
     'US100': 'NQ=F', 'US30': 'YM=F',
     'US500': 'ES=F',
+    'USOIL': 'CL=F',   # WTI Crude Oil — maps to CME CL futures for data
 }
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ _last_mitigation_clear_date: str = ""  # track when we last cleared FVG/OB mitig
 # For these symbols _update_asia_levels() uses the previous day's D1 high/low
 # instead of today's 00:00-07:00 UTC candles, which are empty (GER40) or very
 # thin overnight-futures prints (US100, US30, US500).
-_EQUITY_INDEX_SYMBOLS = {'US100', 'US30', 'US500'}
+_EQUITY_INDEX_SYMBOLS = {'US100', 'US30', 'US500', 'USOIL'}
 
 # Twelve Data circuit breaker — once daily credits are exhausted, skip TD calls
 # until the next UTC midnight rather than hitting the API on every scan cycle.

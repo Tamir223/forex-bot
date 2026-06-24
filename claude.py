@@ -48,6 +48,9 @@ CORRELATED_USD_LONGS = {"GBPUSD", "EURUSD", "AUDUSD", "NZDUSD"}
 _PIP_SIZE = {
     "USDJPY": 0.01, "EURJPY": 0.01, "GBPJPY": 0.01,
     "XAUUSD": 1.0, "US30": 1.0, "NAS100": 1.0,
+    "US100":  1.0,
+    "US500":  0.1,
+    "USOIL":  0.01,
 }
 _DEFAULT_PIP_SIZE = 0.0001
 
@@ -60,21 +63,32 @@ PIP_VALUES = {
     "NZDUSD": 10.0,
     "USDCHF": 10.50,
     "XAUUSD": 100.0,  # OANDA: $100/pt per lot
-    "US30":   1.0,
+    "US30":   1.0,    # $1 per point per lot
     "NAS100": 1.0,
+    "US100":  1.0,    # $1 per point per lot (NQ proxy)
+    "US500":  0.5,    # $0.50 per point per lot (ES proxy)
+    "USOIL":  1.0,    # $1 per pip per lot (100 barrels × $0.01)
     "default": 10.0,
 }
 
 USER_PIP_VALUES = {
-    8647323622: {  # Tamir - OANDA
+    8647323622: {  # Tamir - OANDA FTMO $10k
         "EURUSD": 10.0, "GBPUSD": 10.0, "USDJPY": 9.3,
         "USDCAD": 7.5, "AUDUSD": 10.0, "NZDUSD": 10.0,
-        "USDCHF": 10.5, "XAUUSD": 100.0,  # OANDA specific
+        "USDCHF": 10.5, "XAUUSD": 100.0,  # OANDA: $100/pt
+        "US100":  1.0,  # $1/pt per lot
+        "US30":   1.0,  # $1/pt per lot
+        "US500":  0.5,  # $0.50/pt per lot
+        "USOIL":  1.0,  # $1/pip per lot (100 barrels)
     },
-    5803919273: {  # Donald - 5ers standard
+    5803919273: {  # Donald - 5ers $25k TradeLocker
         "EURUSD": 10.0, "GBPUSD": 10.0, "USDJPY": 9.3,
         "USDCAD": 7.5, "AUDUSD": 10.0, "NZDUSD": 10.0,
         "USDCHF": 10.5, "XAUUSD": 10.0,  # Standard
+        "US100":  1.0,
+        "US30":   1.0,
+        "US500":  0.5,
+        "USOIL":  1.0,
     },
 }
 
