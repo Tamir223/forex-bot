@@ -1740,7 +1740,7 @@ def analyze_market_structure(candles: list) -> dict:
     bullish_count = sum(1 for c in recent if c['close'] > c['open'])
     bearish_count = sum(1 for c in recent if c['close'] < c['open'])
 
-    if bullish_count >= 8:
+    if bullish_count >= 7:
         return {
             "structure": "uptrend",
             "choch": False,
@@ -1748,7 +1748,7 @@ def analyze_market_structure(candles: list) -> dict:
             "last_swing_high": candles[0]['high'],
             "last_swing_low": candles[9]['low'],
         }
-    elif bearish_count >= 8:
+    elif bearish_count >= 7:
         return {
             "structure": "downtrend",
             "choch": False,
@@ -2278,14 +2278,16 @@ def score_ob_quality(candle: dict, symbol: str = "") -> tuple[int, str]:
 
 
 def is_fvg_mitigated(symbol: str, fvg_low: float, fvg_high: float) -> bool:
-    """Return True if this FVG zone was already mitigated (price entered it)."""
-    key = f"{symbol}_{fvg_low:.5f}_{fvg_high:.5f}"
+    """Return True if this exact FVG zone was already mitigated today."""
+    # Round to 4dp to avoid float precision mismatches while still
+    # distinguishing zones that are close but not identical
+    key = f"{symbol}_{round(fvg_low, 4):.4f}_{round(fvg_high, 4):.4f}"
     return key in _mitigated_fvgs
 
 
 def mark_fvg_mitigated(symbol: str, fvg_low: float, fvg_high: float) -> None:
     """Record that price has entered this FVG zone — treat as consumed."""
-    key = f"{symbol}_{fvg_low:.5f}_{fvg_high:.5f}"
+    key = f"{symbol}_{round(fvg_low, 4):.4f}_{round(fvg_high, 4):.4f}"
     _mitigated_fvgs[key] = True
     logger.info(f"[fvg] {symbol} FVG mitigated — removing")
 

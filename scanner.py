@@ -680,10 +680,23 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None, 
                         # First (most recent) OB found
                         if dist <= _far_threshold:
                             return ob  # close enough — use it
-                        logger.info(
-                            f"[scanner] {symbol} best OB at {ob['mid']} too far "
-                            f"({dist:.5f}) — looking for fresher OB"
-                        )
+                        # Direction-aware OB distance check:
+                        # BUY setup: bullish OB should be BELOW price (demand zone entry).
+                        # If it's on the correct side, keep it even if far — distance
+                        # just means price hasn't retraced to the zone yet.
+                        # Only reject if OB is ABOVE price (wrong side for BUY).
+                        _ob_wrong_side = ob["mid"] > current_price
+                        if _ob_wrong_side:
+                            logger.info(
+                                f"[scanner] {symbol} OB at {ob['mid']} wrong side + too far "
+                                f"({dist:.5f}) — skipping"
+                            )
+                        else:
+                            logger.info(
+                                f"[scanner] {symbol} OB at {ob['mid']} far ({dist:.5f}) "
+                                f"but correct side for BUY — keeping"
+                            )
+                            return ob
                         _first_ob = ob
                     else:
                         # Scanning for a closer OB
@@ -701,10 +714,23 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None, 
                     if _first_ob is None:
                         if dist <= _far_threshold:
                             return ob
-                        logger.info(
-                            f"[scanner] {symbol} best OB at {ob['mid']} too far "
-                            f"({dist:.5f}) — looking for fresher OB"
-                        )
+                        # Direction-aware OB distance check:
+                        # SELL setup: bearish OB should be ABOVE price (supply zone entry).
+                        # If it's on the correct side, keep it even if far — distance
+                        # just means price hasn't rallied to the zone yet.
+                        # Only reject if OB is BELOW price (wrong side for SELL).
+                        _ob_wrong_side = ob["mid"] < current_price
+                        if _ob_wrong_side:
+                            logger.info(
+                                f"[scanner] {symbol} OB at {ob['mid']} wrong side + too far "
+                                f"({dist:.5f}) — skipping"
+                            )
+                        else:
+                            logger.info(
+                                f"[scanner] {symbol} OB at {ob['mid']} far ({dist:.5f}) "
+                                f"but correct side for SELL — keeping"
+                            )
+                            return ob
                         _first_ob = ob
                     else:
                         if dist <= _fresh_threshold:
