@@ -916,9 +916,16 @@ def get_htf_bias(symbol: str, candles_1h: list = None, candles_4h: list = None, 
     try:
         # Fast path — use pre-fetched candles (newest-first) from the unified bundle
         if candles_1h and candles_4h and candles_daily:
-            h1_trend = "bullish" if candles_1h[0]["close"]    > candles_1h[-1]["close"]    else "bearish"
-            h4_trend = "bullish" if candles_4h[0]["close"]    > candles_4h[-1]["close"]    else "bearish"
-            d1_trend = "bullish" if candles_daily[0]["close"] > candles_daily[-1]["close"] else "bearish"
+            # Use recent 5-candle window only — comparing newest to 30-day-ago close
+            # gives false readings when price recovered after a longer-term drop.
+            # 5 candles = 5 hours on 1H, 20 hours on 4H, 5 days on D1 — captures
+            # the current institutional bias without being distorted by distant history.
+            _h1_window = candles_1h[:5]
+            _h4_window = candles_4h[:5]
+            _d1_window = candles_daily[:5]
+            h1_trend = "bullish" if _h1_window[0]["close"] > _h1_window[-1]["close"] else "bearish"
+            h4_trend = "bullish" if _h4_window[0]["close"] > _h4_window[-1]["close"] else "bearish"
+            d1_trend = "bullish" if _d1_window[0]["close"] > _d1_window[-1]["close"] else "bearish"
             result["h1_trend"] = h1_trend
             result["h4_trend"] = h4_trend
             result["d1_trend"] = d1_trend
@@ -936,9 +943,9 @@ def get_htf_bias(symbol: str, candles_1h: list = None, candles_4h: list = None, 
             d1 = yf.Ticker(ticker).history(period="60d", interval="1d")
             if h1.empty or h4.empty or d1.empty:
                 return result
-            h1_trend = "bullish" if h1["Close"].iloc[-1] > h1["Close"].iloc[0] else "bearish"
-            h4_trend = "bullish" if h4["Close"].iloc[-1] > h4["Close"].iloc[0] else "bearish"
-            d1_trend = "bullish" if d1["Close"].iloc[-1] > d1["Close"].iloc[0] else "bearish"
+            h1_trend = "bullish" if h1["Close"].iloc[-1] > h1["Close"].iloc[-5] else "bearish"
+            h4_trend = "bullish" if h4["Close"].iloc[-1] > h4["Close"].iloc[-5] else "bearish"
+            d1_trend = "bullish" if d1["Close"].iloc[-1] > d1["Close"].iloc[-5] else "bearish"
         else:
             from market import YFINANCE_FOREX_MAP as _YF_FOREX_MAP
             _yf_sym = ("GC=F" if symbol.upper() == "XAUUSD"
@@ -965,9 +972,10 @@ def get_htf_bias(symbol: str, candles_1h: list = None, candles_4h: list = None, 
                     _d1 = _fetch_td_htf("1day", 30)
                     if _h1 and _h4 and _d1:
                         # TD values are newest-first; [0]=newest, [-1]=oldest
-                        h1_trend = "bullish" if _h1[0] > _h1[-1] else "bearish"
-                        h4_trend = "bullish" if _h4[0] > _h4[-1] else "bearish"
-                        d1_trend = "bullish" if _d1[0] > _d1[-1] else "bearish"
+                        # Newest-first: [0]=newest, [4]=5 candles ago
+                        h1_trend = "bullish" if _h1[0] > _h1[min(4, len(_h1)-1)] else "bearish"
+                        h4_trend = "bullish" if _h4[0] > _h4[min(4, len(_h4)-1)] else "bearish"
+                        d1_trend = "bullish" if _d1[0] > _d1[min(4, len(_d1)-1)] else "bearish"
                 except Exception as _e:
                     logger.warning(f"[htf_bias] TD failed for {symbol}: {_e} — falling back to yFinance")
 
@@ -980,9 +988,9 @@ def get_htf_bias(symbol: str, candles_1h: list = None, candles_4h: list = None, 
                 d1 = yf.Ticker(_yf_sym).history(period="30d", interval="1d")
                 if h1.empty or h4.empty or d1.empty:
                     return result
-                h1_trend = "bullish" if h1["Close"].iloc[-1] > h1["Close"].iloc[0] else "bearish"
-                h4_trend = "bullish" if h4["Close"].iloc[-1] > h4["Close"].iloc[0] else "bearish"
-                d1_trend = "bullish" if d1["Close"].iloc[-1] > d1["Close"].iloc[0] else "bearish"
+                h1_trend = "bullish" if h1["Close"].iloc[-1] > h1["Close"].iloc[-5] else "bearish"
+                h4_trend = "bullish" if h4["Close"].iloc[-1] > h4["Close"].iloc[-5] else "bearish"
+                d1_trend = "bullish" if d1["Close"].iloc[-1] > d1["Close"].iloc[-5] else "bearish"
 
         result["h1_trend"] = h1_trend
         result["h4_trend"] = h4_trend

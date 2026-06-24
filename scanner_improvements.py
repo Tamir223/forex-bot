@@ -1388,18 +1388,16 @@ def get_daily_bias(symbol: str, candles: list = None) -> dict:
             _score(d4)    * 1
         )
 
-        if weighted >= 5:
+        if weighted >= 2:
             bias = "bullish"
-        elif weighted >= 2:
-            bias = "bullish"
-        elif weighted <= -5:
-            bias = "bearish"
         elif weighted <= -2:
             bias = "bearish"
         else:
             bias = "neutral"
 
-        confirmed = abs(weighted) >= 7
+        # Threshold lowered 7→5: requiring 7/15 misses first day of new trend moves.
+        # 5/15 means at least today + yesterday aligned — sufficient for intraday ICT.
+        confirmed = abs(weighted) >= 5
 
         # Strength
         if today_ratio > 0.6 and _candle_dir(today) == bias:
