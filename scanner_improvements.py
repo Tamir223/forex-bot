@@ -451,7 +451,10 @@ def get_session_quality(session: str) -> str:
 
 # ─── 3. ENTRY VALIDATION ──────────────────────────────────────────────────────
 
-ENTRY_MAX_PIPS_FOREX = 10      # 10 pips max deviation for forex
+ENTRY_MAX_PIPS_FOREX = 15      # 15 pips max deviation for forex
+# Raised from 10 — OBs can be 10-20 pips wide; 10 pip flat rule was blocking
+# valid entries where price was at the top of a valid OB zone.
+# 15 pips gives breathing room while still preventing true entry chasing.
 ENTRY_MAX_POINTS_GOLD = 15     # 15 points max deviation for gold
 ENTRY_MAX_POINTS_FUTURES = 20  # 20 points max deviation for futures
 
