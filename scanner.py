@@ -401,7 +401,8 @@ def is_scan_window() -> bool:
 def get_session_interval() -> int:
     """
     Return scan interval in seconds based on current session.
-    02:00-07:00 UTC — dead hours = 15 minutes (no liquid pairs active)
+    03:00-06:00 UTC — dead hours = 15 minutes (no liquid pairs active)
+    06:00-08:00 UTC — London open = 15 seconds (Judas Swing window, highest priority)
     All other hours  — 30 seconds (London, NY, Asian open, late Asian)
 
     30s sleep + ~29s scan cycle (12 pairs) = ~59s end-to-end. Acceptable.
@@ -410,7 +411,9 @@ def get_session_interval() -> int:
     hour = datetime.now(timezone.utc).hour
     if 3 <= hour < 6:
         return 900   # dead hours — no liquid pairs, no point scanning
-    return 30        # 30s floor for all active windows
+    if 6 <= hour < 8:
+        return 15    # London open — Judas Swing forms here, catch it as it happens
+    return 30        # 30s floor for all other active windows
 
 
 def get_current_session() -> str:
