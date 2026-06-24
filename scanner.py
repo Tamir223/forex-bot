@@ -366,7 +366,7 @@ SYMBOLS = [
 ]
 
 # Default watchlist — users can customize with /watch command
-DEFAULT_WATCHLIST = ["XAUUSD", "EURUSD", "GBPUSD", "US100", "US30"]
+DEFAULT_WATCHLIST = ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "USDCHF", "AUDUSD", "NZDUSD", "XAUUSD", "US100", "US30", "US500"]
 
 # Scan interval in seconds
 SCAN_INTERVAL = 900  # 15 minutes
@@ -389,8 +389,8 @@ def is_scan_window() -> bool:
     if day == 6:
         return hour >= 21
 
-    # Monday-Friday — block only dead hours 02:00-07:00 UTC
-    if 2 <= hour < 7:
+    # Monday-Friday — block only dead hours 03:00-06:00 UTC
+    if 3 <= hour < 6:
         return False
 
     return True
@@ -406,7 +406,7 @@ def get_session_interval() -> int:
     120s was too slow — signals fired 2+ minutes late causing missed fills.
     """
     hour = datetime.now(timezone.utc).hour
-    if 2 <= hour < 7:
+    if 3 <= hour < 6:
         return 900   # dead hours — no liquid pairs, no point scanning
     return 30        # 30s floor for all active windows
 
