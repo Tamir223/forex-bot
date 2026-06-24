@@ -35,6 +35,7 @@ from scanner_improvements import (
     score_bos_quality,
     get_weekly_levels,
     is_asia_range_tight,
+    get_pip_spec,
 )
 import requests
 import yfinance as yf
@@ -81,6 +82,7 @@ import time as _time
 _td_credits_exhausted_until: float = 0.0  # epoch seconds
 _direction_lock: dict = {}  # {symbol: {"direction": str, "locked_until": float}}
 _last_signal_time: dict = {}   # {symbol_upper: monotonic_float} — signal dedup cooldown
+_last_swept_level: dict = {}   # {symbol_upper: float} — last swept level that fired a signal
 _last_signal_entry: dict = {}  # {symbol: float}
 
 
@@ -1687,12 +1689,32 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         _sym_key = symbol.upper()
         if _sym_key in _last_signal_time:
             _elapsed = _time.monotonic() - _last_signal_time[_sym_key]
-            if _elapsed < 600:  # 10 minutes = 600 seconds
+            # Check if this is a genuinely new setup — different swept level means
+            # a new liquidity grab formed. Same swept level = same setup, suppress it.
+            # ICT: once a sweep fires a signal, that setup is consumed. A new sweep
+            # at a different level is a new trade opportunity regardless of time elapsed.
+            _prev_swept = _last_swept_level.get(_sym_key, 0.0)
+            _pip_size = get_pip_spec(_sym_key).get("pip", 0.0001)
+            _level_changed = abs(_swept_level - _prev_swept) > (_pip_size * 3)  # 3 pip difference = new level
+            if _elapsed < 180 and not _level_changed:
+                # Same setup, within 3 minutes — suppress
                 logger.info(
-                    f"[scanner] {symbol} signal suppressed — cooldown active "
-                    f"({_elapsed/60:.1f} min since last)"
+                    f"[scanner] {symbol} signal suppressed — same swept level "
+                    f"{_swept_level} (cooldown {_elapsed/60:.1f} min)"
                 )
                 return None
+            elif not _level_changed and _elapsed < 600:
+                # Same level, between 3-10 min — suppress
+                logger.info(
+                    f"[scanner] {symbol} signal suppressed — same swept level "
+                    f"{_swept_level} ({_elapsed/60:.1f} min since last)"
+                )
+                return None
+            elif _level_changed:
+                logger.info(
+                    f"[scanner] {symbol} new swept level {_swept_level} "
+                    f"(prev {_prev_swept}) — allowing new signal"
+                )
 
         # ── 5M ENTRY REFINEMENT ──────────────────────────────────────────────────
         candles_5m = _data.get("candles_5m", [])
@@ -1930,6 +1952,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         # Record signal time for dedup cooldown
         _last_signal_time[_sym_key] = _time.monotonic()
+        _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
         _last_signal_entry[_sym_key] = _sig_entry
 
         return {
