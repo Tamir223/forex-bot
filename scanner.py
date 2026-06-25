@@ -422,6 +422,8 @@ def get_session_interval() -> int:
         return 900   # dead hours — no liquid pairs, no point scanning
     if 6 <= hour < 8:
         return 15    # London open — Judas Swing forms here, catch it as it happens
+    if 12 <= hour < 16:
+        return 10    # NY open — fast-moving session, 30s cycle misses OB entries
     return 30        # 30s floor for all other active windows
 
 

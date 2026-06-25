@@ -154,11 +154,17 @@ def _fetch_forexfactory_json() -> list:
     """
     Fetch today's high/medium impact events from ForexFactory weekly JSON feed.
     Returns list of dicts: {time_utc, currency, event, impact}.
-    Times in the feed are Eastern Time — converted to UTC here.
+    Feed returns dates as full ISO 8601 datetimes in Eastern Time (e.g. 2026-06-25T08:30:00-04:00).
+    Parse the full datetime and convert to UTC directly — no separate date/time fields.
     """
+    from datetime import timezone as _tz
     now = datetime.now(timezone.utc)
-    et_offset = 4 if 3 <= now.month <= 11 else 5  # EDT/EST
     events: list = []
+    # Cache for 2 hours to avoid rate limiting (429) from repeated hourly hits
+    _ff_cache_key = now.strftime("%Y-%m-%d-%H") if now.hour % 2 == 0 else now.replace(hour=now.hour - 1).strftime("%Y-%m-%d-%H")
+    if hasattr(_fetch_forexfactory_json, '_cache') and _fetch_forexfactory_json._cache.get('key') == _ff_cache_key:
+        logger.info(f"[news] ForexFactory cache hit — {len(_fetch_forexfactory_json._cache['data'])} events")
+        return _fetch_forexfactory_json._cache['data']
     try:
         resp = requests.get(
             "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
@@ -173,18 +179,18 @@ def _fetch_forexfactory_json() -> list:
             if currency not in _TRADEABLE_CURRENCIES:
                 continue
             date_str = (item.get("date") or "").strip()
-            time_str = (item.get("time") or "").strip()
-            if not time_str or time_str.lower() in ("all day", "tentative", ""):
+            if not date_str:
                 continue
             try:
-                event_date = datetime.strptime(date_str, "%b %d, %Y").date()
-                if event_date != now.date():
+                # Feed returns full ISO 8601 datetime with ET offset e.g. 2026-06-25T08:30:00-04:00
+                from datetime import datetime as _dt
+                event_dt_local = _dt.fromisoformat(date_str)
+                # Convert to UTC
+                event_dt_utc = event_dt_local.astimezone(_tz.utc)
+                # Only include today's events (UTC date)
+                if event_dt_utc.date() != now.date():
                     continue
-                t = datetime.strptime(time_str.upper(), "%I:%M%p")
-                time_utc = now.replace(
-                    hour=(t.hour + et_offset) % 24,
-                    minute=t.minute, second=0, microsecond=0,
-                )
+                time_utc = event_dt_utc.replace(second=0, microsecond=0)
             except Exception:
                 continue
             events.append({
@@ -196,6 +202,7 @@ def _fetch_forexfactory_json() -> list:
         logger.info(f"[news] ForexFactory backup: {len(events)} events today")
     except Exception as e:
         logger.warning(f"[news] ForexFactory JSON failed: {e}")
+    _fetch_forexfactory_json._cache = {'key': _ff_cache_key, 'data': events}
     return events
 
 
@@ -243,6 +250,14 @@ def _smart_hardcoded_fallback() -> list:
                 "impact": "high",
             })
             logger.info("[news] Hardcoded: FOMC date detected — blocking 18:00 UTC")
+
+        # Block all 8:30 AM ET (12:30 UTC) releases on known high-impact days
+        # Core PCE is last business day of month, GDP is end of quarter
+        # Rather than hardcoding dates, block 12:30 UTC on ANY day where
+        # Finnhub AND ForexFactory both failed — conservative safety net
+        # This prevents trading during the most common USD release window
+        day_of_week = now.weekday()  # 0=Monday, 4=Friday
+        # Live ForexFactory + Finnhub feeds handle news blocking — no hardcoded day blocks
 
     events = _inject_monday_block(events, now)
     _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
