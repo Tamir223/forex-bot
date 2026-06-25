@@ -227,7 +227,7 @@ def get_cached_score(key: str) -> int | None:
     return entry.get("score")
 
 
-def _update_asia_levels(symbol: str, candles: list = None) -> None:
+async def _update_asia_levels(symbol: str, candles: list = None) -> None:
     """
     Set reference levels used for liquidity-sweep detection.
 
@@ -255,7 +255,7 @@ def _update_asia_levels(symbol: str, candles: list = None) -> None:
                 and existing.get("high", 0) > 0):
             return
         try:
-            bundle = fetch_all_timeframes(sym)
+            bundle = await fetch_all_timeframes(sym)
             d1 = bundle.get("candles_daily", [])  # newest-first; [0]=today partial, [1]=yesterday
             if len(d1) >= 2:
                 prev = d1[1]
@@ -279,7 +279,7 @@ def _update_asia_levels(symbol: str, candles: list = None) -> None:
     # ── FOREX / XAUUSD: Asia session 00:00-07:00 UTC ─────────────────────────
     if candles is None:
         try:
-            bundle = fetch_all_timeframes(sym)
+            bundle = await fetch_all_timeframes(sym)
             candles = bundle.get("candles_15m", [])
         except Exception as e:
             logger.warning(f"[asia] {sym} — could not fetch candles: {e}")
@@ -861,7 +861,7 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
     return None
 
 
-def fetch_all_timeframes(symbol: str) -> dict:
+async def fetch_all_timeframes(symbol: str) -> dict:
     """
     Fetch all timeframes via yFinance and return a unified bundle.
     Always fetches fresh data — no caching.
@@ -906,19 +906,44 @@ def fetch_all_timeframes(symbol: str) -> dict:
 
     try:
         if yf_ticker:
-            tk = yf.Ticker(yf_ticker)
-            candles_5m    = _to_candles(tk.history(period="5d",  interval="5m"))[:50]
-            candles_15m   = _to_candles(tk.history(period="10d", interval="15m"))[:200]
-            candles_1h    = _to_candles(tk.history(period="14d", interval="1h"))[:100]
-            candles_4h    = _to_candles(tk.history(period="30d", interval="4h"))[:60]
-            candles_daily = _to_candles(tk.history(period="30d", interval="1d"))[:20]
+            import asyncio as _asyncio
+
+            def _fetch_yf_all(sym):
+                # Each ticker gets its own object — no shared state, thread-safe
+                _t = yf.Ticker(sym)
+                result = {
+                    "h5m": _t.history(period="5d",   interval="5m"),
+                    "h15": _t.history(period="10d",  interval="15m"),
+                    "h1":  _t.history(period="14d",  interval="1h"),
+                    "h4":  _t.history(period="30d",  interval="4h"),
+                    "hd":  _t.history(period="30d",  interval="1d"),
+                }
+                if sym == "GC=F":
+                    try:
+                        result["h1m"] = _t.history(period="1d", interval="1m")
+                    except Exception:
+                        result["h1m"] = None
+                return result
+
+            _loop = _asyncio.get_event_loop()
+            _yf_data = await _loop.run_in_executor(None, _fetch_yf_all, yf_ticker)
+            h15 = _yf_data["h15"]
+            h1  = _yf_data["h1"]
+            h4  = _yf_data["h4"]
+            hd  = _yf_data["hd"]
+
+            candles_5m    = _to_candles(_yf_data["h5m"])[:50]
+            candles_15m   = _to_candles(h15)[:200]
+            candles_1h    = _to_candles(h1)[:100]
+            candles_4h    = _to_candles(h4)[:60]
+            candles_daily = _to_candles(hd)[:20]
 
             price = candles_15m[0]["close"] if candles_15m else 0.0
 
             if sym == "XAUUSD":
                 try:
-                    _1m = yf.Ticker("GC=F").history(period="1d", interval="1m")
-                    if not _1m.empty:
+                    _1m = _yf_data.get("h1m")
+                    if _1m is not None and not _1m.empty:
                         price = float(_1m["Close"].iloc[-1])
                 except Exception:
                     pass
@@ -1063,7 +1088,7 @@ def detect_breakout(candles: list, direction: str) -> bool:
     return False
 
 
-def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
+async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
                     htf_bias: dict, market_structure: str, daily_bias: dict,
                     atr_data: dict, direction: str, structure: dict, ms: dict,
                     data: dict = None, displacement: dict = None,
@@ -1115,7 +1140,7 @@ def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     )
 
     # GATE 4 — Liquidity sweep detected (Asia range or recent swing)
-    _update_asia_levels(symbol, candles)
+    await _update_asia_levels(symbol, candles)
     _sweep_ok, _swept_level, _sweep_type = _detect_asia_sweep_or_recent(symbol, candles, direction)
 
     # Asia range size check: wide ranges degrade Judas Swing edge significantly.
@@ -1570,7 +1595,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # ── UNIFIED DATA FETCH ───────────────────────────────────────────────
         # Single call fetches all timeframes (cached 4 min) — every component
         # below reads from this bundle instead of fetching independently.
-        _data = fetch_all_timeframes(symbol)
+        _data = await fetch_all_timeframes(symbol)
         candles = _data.get("candles_15m", [])
         if not candles or len(candles) < 10:
             return None
@@ -1663,7 +1688,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         direction = _gt_direction
 
         # ── DRAW ON LIQUIDITY ─────────────────────────────────────────────────
-        _update_asia_levels(symbol, candles)
+        await _update_asia_levels(symbol, candles)
         draw = get_draw_on_liquidity(symbol, candles, direction, _asia_levels.get(symbol, {}))
         if draw:
             _draw_unit = "pts" if symbol.upper() in ("XAUUSD", "US100", "US30") or symbol.upper() in YFINANCE_FUTURES_MAP else "pips"
@@ -1684,7 +1709,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 return None
 
         # ── 7 BINARY GATES — ALL MUST PASS ─────────────────────────────────────
-        all_passed, gates, gate_details, failed_gates, _kz_label, _swept_level = check_tjr_gates(
+        all_passed, gates, gate_details, failed_gates, _kz_label, _swept_level = await check_tjr_gates(
             symbol, candles, ob, fvg, htf_bias, market_structure,
             daily_bias, atr_data, direction, structure, ms, data=_data,
             displacement=displacement,
@@ -2334,7 +2359,7 @@ async def start_scanner(bot, get_active_users_fn):
     # Populate Asia levels on startup
     for sym in ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','US100','US30','US500']:
         try:
-            _update_asia_levels(sym)
+            await _update_asia_levels(sym)
             logger.info(f"[startup] Asia levels initialized for {sym}")
         except Exception as e:
             logger.warning(f"[startup] Asia levels failed for {sym}: {e}")
