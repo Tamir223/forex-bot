@@ -2060,9 +2060,25 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
     alerts_sent = 0
     active_signals_this_scan = []
 
-    for i, symbol in enumerate(pairs_this_cycle):
+    # Run all pairs concurrently instead of sequentially
+    # Sequential: 12 pairs × 3s = 36s scan time
+    # Concurrent: all 12 pairs run in parallel = ~3-5s scan time
+    # This means setups are detected within 15s of forming vs 46s before
+    import asyncio as _asyncio
+
+    async def _scan_one(sym):
         try:
-            result = await scan_symbol(symbol, active_signals=active_signals_this_scan)
+            return sym, await scan_symbol(sym, active_signals=active_signals_this_scan)
+        except Exception as e:
+            logger.error(f"[run_scan] {sym} scan error: {e}")
+            return sym, None
+
+    _scan_results = await _asyncio.gather(*[_scan_one(sym) for sym in pairs_this_cycle])
+
+    for symbol, result in _scan_results:
+        try:
+            if result is None:
+                continue
             if result:
                 active_signals_this_scan.append({
                     "symbol": result.get("symbol", symbol),
@@ -2229,10 +2245,6 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         alerts_sent += 1
                     except Exception as e:
                         logger.error(f"[scanner] Failed to send alert to {chat_id}: {e}")
-
-            # 2-second gap between each pair scan to avoid burst rate limiting
-            if i < len(pairs_this_cycle) - 1:
-                await asyncio.sleep(2)
 
         except Exception as e:
             logger.error(f"[scanner] Symbol scan failed for {symbol}: {e}")
