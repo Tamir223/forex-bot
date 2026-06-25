@@ -271,7 +271,7 @@ async def cmd_bias(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("📊 Fetching market intelligence...")
     from database import get_user_watchlist
-    from scanner import DEFAULT_WATCHLIST, fetch_all_timeframes
+    from scanner import DEFAULT_WATCHLIST, fetch_all_timeframes_sync
     from scanner_improvements import analyze_market_structure, get_trade_direction, get_daily_bias
     watchlist_str = get_user_watchlist(user.id)
     watchlist = [s.strip() for s in watchlist_str.split(",")] if watchlist_str else DEFAULT_WATCHLIST
@@ -284,7 +284,7 @@ async def cmd_bias(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for sym in watchlist:
         try:
-            data = fetch_all_timeframes(sym)
+            data = fetch_all_timeframes_sync(sym)
             candles = data.get("candles_15m", [])
             if not candles:
                 lines.append(f"`{sym:<9}` -- -- ⛔ NO DATA")

@@ -977,6 +977,23 @@ async def fetch_all_timeframes(symbol: str) -> dict:
     return bundle
 
 
+def fetch_all_timeframes_sync(symbol: str) -> dict:
+    """Synchronous wrapper for fetch_all_timeframes — used by bot commands."""
+    import asyncio as _asyncio
+    try:
+        loop = _asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(_asyncio.run, fetch_all_timeframes(symbol))
+                return future.result(timeout=30)
+        else:
+            return loop.run_until_complete(fetch_all_timeframes(symbol))
+    except Exception as e:
+        logger.error(f"[fetch_sync] {symbol} error: {e}")
+        return {}
+
+
 def get_htf_bias(symbol: str, candles_1h: list = None, candles_4h: list = None, candles_daily: list = None) -> dict:
     """Get Daily, 4H, and 1H trend bias for multi-timeframe confirmation."""
     result = {"h1_trend": "unclear", "h4_trend": "unclear", "d1_trend": "unclear", "aligned": False, "bias": "unclear"}
