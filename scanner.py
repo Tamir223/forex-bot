@@ -1684,9 +1684,13 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             if is_fvg_mitigated(symbol, fvg['bottom'], fvg['top']):
                 logger.info(f"[fvg] {symbol} FVG already mitigated — skip")
                 fvg = None
-            elif fvg['bottom'] <= _cp <= fvg['top']:
-                mark_fvg_mitigated(symbol, fvg['bottom'], fvg['top'])
-                fvg = None
+            else:
+                # True ICT mitigation: candle body must close inside the FVG
+                # A wick entry is NOT mitigation — it's price respecting the zone
+                _close_price = candles[0].get("close", current_price) if candles else current_price
+                if fvg['bottom'] <= float(_close_price) <= fvg['top']:
+                    mark_fvg_mitigated(symbol, fvg['bottom'], fvg['top'])
+                    fvg = None
 
         from scanner_improvements import get_daily_bias as _get_daily_bias
         daily_bias = _get_daily_bias(symbol, candles=_data.get("candles_daily"))

@@ -2342,9 +2342,12 @@ def score_bos_quality(candles: list, direction: str) -> tuple[str, int, str]:
 
     expected_bullish = direction.upper() == "BUY"
     consecutive = 0
-    # 6-candle window = 90 min on 15M — BOS older than this is stale for intraday ICT setups.
-    # The sweep → BOS → retrace-to-OB sequence must complete within this window.
-    for c in candles[:6]:
+    from datetime import datetime, timezone as _tz
+    _hour = datetime.now(_tz.utc).hour
+    # Asian session (23-06 UTC): BOS takes longer due to lower liquidity
+    # London/NY (06-20 UTC): 6-candle window sufficient for institutional moves
+    _bos_window = 8 if (23 <= _hour or _hour < 6) else 6
+    for c in candles[:_bos_window]:
         is_bull = c["close"] > c["open"]
         if is_bull == expected_bullish:
             consecutive += 1
