@@ -625,7 +625,7 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None, 
 
     if max_candles_back is None:
         # Dynamic lookback: 15M candles since today's Forex session open (21:00 UTC)
-        _now = datetime.utcnow()
+        _now = datetime.now(timezone.utc)
         _session_open = _now.replace(hour=21, minute=0, second=0, microsecond=0)
         if _now.hour < 21:
             _session_open -= timedelta(days=1)
@@ -969,7 +969,7 @@ async def fetch_all_timeframes(symbol: str) -> dict:
         "candles_4h": candles_4h,
         "candles_daily": candles_daily,
         "atr": atr_data,
-        "timestamp": datetime.utcnow(),
+        "timestamp": datetime.now(timezone.utc),
     }
     return bundle
 
