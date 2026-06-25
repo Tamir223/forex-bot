@@ -1687,7 +1687,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             else:
                 # True ICT mitigation: candle body must close inside the FVG
                 # A wick entry is NOT mitigation — it's price respecting the zone
-                _close_price = candles[0].get("close", current_price) if candles else current_price
+                _close_price = candles[0].get("close", _cp) if candles else _cp
                 if fvg['bottom'] <= float(_close_price) <= fvg['top']:
                     mark_fvg_mitigated(symbol, fvg['bottom'], fvg['top'])
                     fvg = None
