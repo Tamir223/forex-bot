@@ -379,8 +379,7 @@ SYMBOLS = [
 # Default watchlist — users can customize with /watch command
 DEFAULT_WATCHLIST = ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "USDCHF", "AUDUSD", "NZDUSD", "XAUUSD", "USOIL", "US100", "US30", "US500"]
 
-# Scan interval in seconds
-SCAN_INTERVAL = 900  # 15 minutes
+
 
 # Trading hours UTC — scanner only runs during active sessions
 SCANNER_START_HOUR = 7   # 7 AM UTC = London open
@@ -906,8 +905,6 @@ async def fetch_all_timeframes(symbol: str) -> dict:
 
     try:
         if yf_ticker:
-            import asyncio as _asyncio
-
             def _fetch_yf_all(sym):
                 # Each ticker gets its own object — no shared state, thread-safe
                 _t = yf.Ticker(sym)
@@ -925,7 +922,7 @@ async def fetch_all_timeframes(symbol: str) -> dict:
                         result["h1m"] = None
                 return result
 
-            _loop = _asyncio.get_event_loop()
+            _loop = asyncio.get_event_loop()
             _yf_data = await _loop.run_in_executor(None, _fetch_yf_all, yf_ticker)
             h15 = _yf_data["h15"]
             h1  = _yf_data["h1"]
@@ -979,13 +976,12 @@ async def fetch_all_timeframes(symbol: str) -> dict:
 
 def fetch_all_timeframes_sync(symbol: str) -> dict:
     """Synchronous wrapper for fetch_all_timeframes — used by bot commands."""
-    import asyncio as _asyncio
     try:
-        loop = _asyncio.get_event_loop()
+        loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(_asyncio.run, fetch_all_timeframes(symbol))
+                future = pool.submit(asyncio.run, fetch_all_timeframes(symbol))
                 return future.result(timeout=30)
         else:
             return loop.run_until_complete(fetch_all_timeframes(symbol))
@@ -1167,8 +1163,7 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     _asia_l = _asia_lvl.get("low", 0.0)
     _range_tight, _range_reason = is_asia_range_tight(symbol, _asia_h, _asia_l)
     if not _range_tight and _sweep_ok:
-        import logging as _g4_log
-        _g4_log.getLogger("scanner").info(
+        logger.info(
             f"[G4] {symbol} Asia range wide — {_range_reason} (sweep still passed, quality noted)"
         )
 
@@ -2106,8 +2101,6 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
     # Sequential: 12 pairs × 3s = 36s scan time
     # Concurrent: all 12 pairs run in parallel = ~3-5s scan time
     # This means setups are detected within 15s of forming vs 46s before
-    import asyncio as _asyncio
-
     async def _scan_one(sym):
         try:
             return sym, await scan_symbol(sym, active_signals=active_signals_this_scan)
@@ -2115,7 +2108,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
             logger.error(f"[run_scan] {sym} scan error: {e}")
             return sym, None
 
-    _scan_results = await _asyncio.gather(*[_scan_one(sym) for sym in pairs_this_cycle])
+    _scan_results = await asyncio.gather(*[_scan_one(sym) for sym in pairs_this_cycle])
 
     for symbol, result in _scan_results:
         try:
