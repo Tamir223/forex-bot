@@ -1929,14 +1929,14 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             if direction == "SELL" and _spot_entry_for_dir <= _spot_price_for_dir:
                 # Entry below current price for SELL — price already dropped past entry
                 # If within 10 pips, switch to market execution note
-                if abs(_entry_vs_price_pips) <= 10:
+                if abs(_entry_vs_price_pips) <= 25:
                     logger.info(f"[scanner] {symbol} SELL entry {_spot_entry_for_dir} slightly below price {_spot_price_for_dir} ({abs(_entry_vs_price_pips):.1f}p) — allowing as market entry")
                 else:
                     logger.info(f"[scanner] {symbol} SELL entry missed — price {_spot_price_for_dir} already {abs(_entry_vs_price_pips):.1f}p below entry {_spot_entry_for_dir}")
                     return None
             if direction == "BUY" and _spot_entry_for_dir >= _spot_price_for_dir:
                 # Entry above current price for BUY — price already rallied past entry
-                if abs(_entry_vs_price_pips) <= 10:
+                if abs(_entry_vs_price_pips) <= 25:
                     logger.info(f"[scanner] {symbol} BUY entry {_spot_entry_for_dir} slightly above price {_spot_price_for_dir} ({abs(_entry_vs_price_pips):.1f}p) — allowing as market entry")
                 else:
                     logger.info(f"[scanner] {symbol} BUY entry missed — price {_spot_price_for_dir} already {abs(_entry_vs_price_pips):.1f}p above entry {_spot_entry_for_dir}")
