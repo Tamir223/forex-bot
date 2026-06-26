@@ -2237,6 +2237,9 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
 
                         # Build per-user lot string using their actual account size
                         _lot_str = result.get("lot_str", "0.10")
+        _sig_entry = result.get("entry", 0.0)
+        _sig_sl = result.get("sl", 0.0)
+        _sig_tp1 = result.get("tp1", 0.0)
                         try:
                             from claude import _calculate_lot_size as _cals_user
                             _sl_dist_user = abs(_sig_entry - _sig_sl)
