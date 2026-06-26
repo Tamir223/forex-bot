@@ -2236,10 +2236,28 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                             last_trade_id[str(chat_id)] = _trade_id
 
                         # Build per-user lot string using their actual account size
-                        _lot_str = result.get("lot_str", "0.10")
-                        _sig_entry = result.get("entry", 0.0)
-                        _sig_sl = result.get("sl", 0.0)
-                        _sig_tp1 = result.get("tp1", 0.0)
+                        # Extract ALL variables from result dict — these were local to
+                        # scan_symbol and are no longer in scope after asyncio.gather
+                        _lot_str      = result.get("lot_str", "0.10")
+                        _sig_entry    = result.get("entry", 0.0)
+                        _sig_sl       = result.get("sl", 0.0)
+                        _sig_tp1      = result.get("tp1", 0.0)
+                        _sig_tp2      = result.get("tp2", 0.0)
+                        _sig_tp3      = result.get("tp3", 0.0)
+                        ob            = result.get("ob")
+                        fvg           = result.get("fvg")
+                        structure     = result.get("structure", "ranging")
+                        htf_bias      = result.get("htf_bias", {})
+                        _swept_level  = result.get("swept_level")
+                        gates         = result.get("gates", {})
+                        gate_details  = result.get("gate_details", {})
+                        displacement  = result.get("displacement")
+                        draw          = result.get("draw")
+                        _risk_pct     = result.get("risk_pct", 0.75)
+                        _kz_label     = result.get("kz_label", "")
+                        _entry_tf     = result.get("entry_tf", "15M")
+                        _lots_pip_size = {}
+                        _lots_default_pip = 0.0001
                         try:
                             from claude import _calculate_lot_size as _cals_user
                             _sl_dist_user = abs(_sig_entry - _sig_sl)
