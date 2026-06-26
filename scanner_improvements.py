@@ -467,11 +467,12 @@ def get_session_quality(session: str) -> str:
 
 # ─── 3. ENTRY VALIDATION ──────────────────────────────────────────────────────
 
-ENTRY_MAX_PIPS_FOREX = 15      # 15 pips max deviation for forex
-# Raised from 10 — OBs can be 10-20 pips wide; 10 pip flat rule was blocking
-# valid entries where price was at the top of a valid OB zone.
-# 15 pips gives breathing room while still preventing true entry chasing.
-ENTRY_MAX_POINTS_GOLD = 15     # 15 points max deviation for gold
+ENTRY_MAX_PIPS_FOREX = 25      # 25 pips max deviation for forex
+# Raised from 15 — ICT OB zones are 10-20 pips wide on 15M.
+# Distance measured from OB MID not edge — 25 pip tolerance covers zone edge entries.
+# 150+ pip misses still blocked correctly. Catches 20-25 pip timing gaps.
+ENTRY_MAX_POINTS_GOLD = 50     # 50 points max deviation for gold
+# Gold OB zones are 30-80 points wide on 15M — 50pt tolerance covers zone edge entries
 ENTRY_MAX_POINTS_FUTURES = 20  # 20 points max deviation for futures
 
 def validate_entry(symbol: str, entry_price: float, current_price: float) -> tuple[bool, float]:

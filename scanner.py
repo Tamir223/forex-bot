@@ -2258,13 +2258,21 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         _risk_pct     = result.get("risk_pct", 0.75)
                         _kz_label     = result.get("kz_label", "")
                         _entry_tf     = result.get("entry_tf", "15M")
-                        _lots_pip_size = {}
-                        _lots_default_pip = 0.0001
+                        # Correct pip size per pair for lot calculation
+                        from scanner_improvements import get_pip_spec as _gps
+                        _pip_spec_user = _gps(symbol.upper())
+                        _lots_default_pip = _pip_spec_user.get("pip", 0.0001)
                         try:
                             from claude import _calculate_lot_size as _cals_user
                             _sl_dist_user = abs(_sig_entry - _sig_sl)
-                            _pip_size_user = _lots_pip_size.get(symbol.upper(), _lots_default_pip)
-                            _sl_pts_user = _sl_dist_user / _pip_size_user
+                            # For lot sizing: XAUUSD/indices use price distance directly (pts)
+                            # Forex uses distance / pip_size to get pips
+                            _sym_upper = symbol.upper()
+                            _is_pts_pair = _sym_upper in ("XAUUSD","US100","US30","US500","USOIL","NAS100")
+                            if _is_pts_pair:
+                                _sl_pts_user = _sl_dist_user  # already in points
+                            else:
+                                _sl_pts_user = round(_sl_dist_user / _lots_default_pip, 2) if _lots_default_pip > 0 else 10
                             _lot_full_user = _cals_user(
                                 _risk_pct, _sl_pts_user, symbol,
                                 account_size=_acct_size,
