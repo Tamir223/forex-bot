@@ -82,12 +82,15 @@ USER_PIP_VALUES = {
         "USOIL":  1.0,  # $1/pip per lot (100 barrels)
     },
     5803919273: {  # Donald - 5ers $25k TradeLocker
+        # 5ers uses standard contract sizes: 100,000 units forex, 100oz gold
+        # Source: the5ers.com/asset-specifications — standard pip values apply
         "EURUSD": 10.0, "GBPUSD": 10.0, "USDJPY": 9.3,
         "USDCAD": 7.5, "AUDUSD": 10.0, "NZDUSD": 10.0,
-        "USDCHF": 10.5, "XAUUSD": 10.0,  # Standard
+        "USDCHF": 10.5,
+        "XAUUSD": 100.0,  # 5ers standard: 100oz/lot = $100/pt (same as OANDA)
         "US100":  1.0,
         "US30":   1.0,
-        "US500":  0.5,
+        "US500":  5.0,    # Updated from 0.5 — consistent with Tamir fix
         "USOIL":  1.0,
     },
 }
@@ -506,9 +509,11 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
             pip_val = _user_pips.get(pair) or PIP_VALUES.get(pair, PIP_VALUES["default"])
         lot = round(risk_dollar / (sl_pts * pip_val), 2)
         if pair and pair.upper() == "USDJPY":
-            if lot > 1.00:
-                logger.warning(f"[lots] USDJPY lot cap applied: {lot:.2f} → 1.00")
-            lot = min(lot, 1.00)
+            # Cap scales with account size: $10k→1.00, $25k→2.50
+            _usdjpy_cap = 2.50 if (account_size or 10000) >= 20000 else 1.00
+            if lot > _usdjpy_cap:
+                logger.warning(f"[lots] USDJPY lot cap applied: {lot:.2f} → {_usdjpy_cap}")
+            lot = min(lot, _usdjpy_cap)
         # Index lot caps — prevent over-leveraging on prop firm accounts
         _INDEX_CAPS = {"US100": 3.0, "US30": 3.0, "US500": 5.0, "USOIL": 5.0}
         if pair and pair.upper() in _INDEX_CAPS:
