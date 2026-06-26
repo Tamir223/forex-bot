@@ -506,9 +506,9 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
             pip_val = _user_pips.get(pair) or PIP_VALUES.get(pair, PIP_VALUES["default"])
         lot = round(risk_dollar / (sl_pts * pip_val), 2)
         if pair and pair.upper() == "USDJPY":
-            if lot > 0.50:
-                logger.warning(f"[lots] USDJPY lot cap applied: {lot:.2f} → 0.50 (prevents MT5 margin rejection)")
-            lot = min(lot, 0.50)
+            if lot > 1.00:
+                logger.warning(f"[lots] USDJPY lot cap applied: {lot:.2f} → 1.00")
+            lot = min(lot, 1.00)
         # Index lot caps — prevent over-leveraging on prop firm accounts
         _INDEX_CAPS = {"US100": 3.0, "US30": 3.0, "US500": 5.0, "USOIL": 5.0}
         if pair and pair.upper() in _INDEX_CAPS:

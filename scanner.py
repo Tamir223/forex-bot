@@ -1760,7 +1760,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     f"{_swept_level} (cooldown {_elapsed/60:.1f} min)"
                 )
                 return None
-            elif not _level_changed and _elapsed < 600:
+            elif not _level_changed and _elapsed < 300:  # Gold: 5min cooldown (was 10min)
                 # Same level, between 3-10 min — suppress
                 logger.info(
                     f"[scanner] {symbol} signal suppressed — same swept level "
@@ -2241,6 +2241,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         # Extract ALL variables from result dict — these were local to
                         # scan_symbol and are no longer in scope after asyncio.gather
                         _lot_str      = result.get("lot_str", "0.10")
+                        score         = result.get("score", 10)
                         _sig_entry    = result.get("entry", 0.0)
                         _sig_sl       = result.get("sl", 0.0)
                         _sig_tp1      = result.get("tp1", 0.0)
