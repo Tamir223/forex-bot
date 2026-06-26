@@ -1681,7 +1681,9 @@ _KILL_ZONES = {
     'silver_bullet_london': (7,  8),  # 07:00-08:00 UTC — ICT Silver Bullet
     'silver_bullet_ny':    (14, 15),  # 14:00-15:00 UTC — ICT Silver Bullet
     'london_fix':          (9,  10),  # 09:00-10:00 UTC — Gold institutional fix
-    'ny_indices':          (13, 16),  # 13:00-16:00 UTC — 8:30-11 AM EDT cash open
+    'ny_indices':          (12, 16),  # 12:00-16:00 UTC — covers pre-market sweep + NYSE open
+    # ICT research: indices kill zone starts at 8:30AM EST (12:30 UTC) not 9:00AM
+    # Pre-market 12:30-13:30 UTC is where the Judas Swing sweep happens on indices
 }
 
 _PAIR_KILL_ZONES = {
