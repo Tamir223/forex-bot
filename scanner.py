@@ -2219,23 +2219,11 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                             "signal_source": "TNL Scanner",
                         }
 
-                        # Log trade for tracking (confirmed when user taps YES)
-                        _trade_id = log_trade(Trade(
-                            user_id=user.id,
-                            pair=result["symbol"],
-                            direction=result["direction"],
-                            grade=_analysis["grade"],
-                            confidence=score,
-                            signal_source="TNL Scanner",
-                            risk_percent=_risk_pct_val,
-                            entry_zone=str(result.get("entry", "")),
-                            stop_loss=str(result.get("sl", "")),
-                        ))
-
+                        # Store signal for YES/NO handler — do NOT log trade yet
+                        # Trade is only logged when user presses YES in Telegram
+                        _trade_id = None
                         from bot import last_analysis, last_trade_id
                         last_analysis[str(chat_id)] = _analysis
-                        if _trade_id:
-                            last_trade_id[str(chat_id)] = _trade_id
 
                         # Build per-user lot string using their actual account size
                         # Extract ALL variables from result dict — these were local to
