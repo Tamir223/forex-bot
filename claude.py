@@ -66,7 +66,7 @@ PIP_VALUES = {
     "US30":   1.0,    # $1 per point per lot
     "NAS100": 1.0,
     "US100":  1.0,    # $1 per point per lot (NQ proxy)
-    "US500":  0.5,    # $0.50 per point per lot (ES proxy)
+    "US500":  5.0,    # $5.00 per point per lot (SP500 CFD typical)
     "USOIL":  1.0,    # $1 per pip per lot (100 barrels × $0.01)
     "default": 10.0,
 }
@@ -78,7 +78,7 @@ USER_PIP_VALUES = {
         "USDCHF": 10.5, "XAUUSD": 100.0,  # OANDA: $100/pt
         "US100":  1.0,  # $1/pt per lot
         "US30":   1.0,  # $1/pt per lot
-        "US500":  0.5,  # $0.50/pt per lot
+        "US500":  5.0,  # $5.00/pt per lot
         "USOIL":  1.0,  # $1/pip per lot (100 barrels)
     },
     5803919273: {  # Donald - 5ers $25k TradeLocker
@@ -509,6 +509,13 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
             if lot > 0.50:
                 logger.warning(f"[lots] USDJPY lot cap applied: {lot:.2f} → 0.50 (prevents MT5 margin rejection)")
             lot = min(lot, 0.50)
+        # Index lot caps — prevent over-leveraging on prop firm accounts
+        _INDEX_CAPS = {"US100": 3.0, "US30": 3.0, "US500": 5.0, "USOIL": 5.0}
+        if pair and pair.upper() in _INDEX_CAPS:
+            _cap = _INDEX_CAPS[pair.upper()]
+            if lot > _cap:
+                logger.warning(f"[lots] {pair} lot cap applied: {lot:.2f} → {_cap} (index exposure limit)")
+            lot = min(lot, _cap)
         acct_k = int(account_size / 1000)
         logger.info(f"[lots] pair={pair} user={user_id} risk=${risk_dollar:.2f} sl={sl_pts} pip_val={pip_val:.4f} lots={lot}")
         return f"{lot} lots on ${acct_k}k account"
