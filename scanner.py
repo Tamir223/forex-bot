@@ -114,7 +114,7 @@ _scan_rotation_index = 0
 MIN_SL_DISTANCE = {
     # Gold: ICT setups require 80-300pt SL anchored below swept level.
     # Previous 12pt min was too tight — a single tick wipes it at $4200 gold.
-    "XAUUSD":        80.0,   # 80 points minimum — below OB/FVG zone
+    "XAUUSD":        30.0,   # 30 points minimum — allows natural swept-level SL anchoring
     "US100":         80.0,   # NQ equivalent — 80 pts minimum
     "US30":          60.0,   # YM equivalent — 60 pts minimum
     # US500 min raised from 2.0 to 8.0 — 2pt SL on SP500 is sub-tick level
