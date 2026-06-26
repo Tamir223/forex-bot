@@ -1124,7 +1124,9 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
 
     # GATE 2 — HTF bias confirmed (Daily + 4H agree with signal direction, daily bias confirmed)
     _htf_dir = "bullish" if direction == "BUY" else "bearish"
-    _htf_ok = (htf_bias.get("d1_trend") == _htf_dir and htf_bias.get("h4_trend") == _htf_dir)
+    # G2: weighted daily bias scoring covers D1 — only require 4H from get_htf_bias
+    # Raw 5-candle D1 comparison gets distorted by prior week highs (e.g. gold at 4224 last week)
+    _htf_ok = htf_bias.get("h4_trend") == _htf_dir  # 4H must align
     _bias_aligned, _bias_msg = check_daily_bias_alignment(symbol, direction, _prefetched=daily_bias)
     gates['htf_bias'] = _htf_ok and _bias_aligned
     _d1 = htf_bias.get("d1_trend", "unclear")
