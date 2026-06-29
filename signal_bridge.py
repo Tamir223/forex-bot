@@ -45,9 +45,11 @@ def _calc_lots(symbol: str, entry: float, sl: float,
         # JPY: pip_val varies with rate — approximate with standard value (close enough for lot sizing)
         lot = round(risk_dollar / (sl_pips * pip_val), 2)
         if symbol.upper() == "USDJPY":
-            if lot > 0.50:
-                logger.warning(f"[signal_bridge] USDJPY lot cap applied: {lot:.2f} → 0.50 (prevents MT5 margin rejection)")
-            lot = min(lot, 0.50)
+            # Dynamic cap: $10k accounts → 1.00 lots, $25k accounts → 2.50 lots
+            _sb_usdjpy_cap = 2.50 if (account_size or 10000) >= 20000 else 1.00
+            if lot > _sb_usdjpy_cap:
+                logger.warning(f"[signal_bridge] USDJPY lot cap applied: {lot:.2f} → {_sb_usdjpy_cap}")
+            lot = min(lot, _sb_usdjpy_cap)
         return max(lot, 0.01)
     except Exception:
         return 0.10

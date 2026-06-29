@@ -80,6 +80,9 @@ _EQUITY_INDEX_SYMBOLS = {'US100', 'US30', 'US500', 'USOIL'}
 # Twelve Data circuit breaker — once daily credits are exhausted, skip TD calls
 # until the next UTC midnight rather than hitting the API on every scan cycle.
 import time as _time
+import time
+import re
+import concurrent.futures
 _td_credits_exhausted_until: float = 0.0  # epoch seconds
 _direction_lock: dict = {}  # {symbol: {"direction": str, "locked_until": float}}
 _last_signal_time: dict = {}   # {symbol_upper: monotonic_float} — signal dedup cooldown
@@ -979,7 +982,6 @@ def fetch_all_timeframes_sync(symbol: str) -> dict:
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 future = pool.submit(asyncio.run, fetch_all_timeframes(symbol))
                 return future.result(timeout=30)
@@ -1242,8 +1244,7 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
             _pd_label = "⚠️ Premium zone (caution)" if direction == "BUY" else "⚠️ Discount zone (caution)"
         gate_details['premium_discount'] = _pd_label
         if not _pd_ok:
-            import logging as _log
-            _log.getLogger("scanner").warning(
+            logger.warning(
                 "[premium_discount] %s %s — %s", symbol, direction, _pd_msg
             )
     else:
@@ -1794,9 +1795,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         signal_key = _cache_signal(auto_signal, score=None)
 
         # ── RR VERIFICATION ─────────────────────────────────────────────────────
-        import re as _re_sig
-        _sig_entry_m = _re_sig.search(r"Entry Zone:\s*([\d.]+)", auto_signal)
-        _sig_sl_m    = _re_sig.search(r"Stop Loss:\s*([\d.]+)", auto_signal)
+        _sig_entry_m = re.search(r"Entry Zone:\s*([\d.]+)", auto_signal)
+        _sig_sl_m    = re.search(r"Stop Loss:\s*([\d.]+)", auto_signal)
         _sig_tp1_m   = _re_sig.search(r"TP1:\s*([\d.]+)", auto_signal)
         _sig_tp2_m   = _re_sig.search(r"TP2:\s*([\d.]+)", auto_signal)
         if _sig_entry_m and _sig_sl_m and _sig_tp1_m:
@@ -2338,7 +2338,6 @@ async def check_bias_shifts(symbols: list, bot, user_chat_ids: list):
     Fires a Telegram alert only when the bias direction has changed AND
     intraday_override is True (strong intraday candle confirms the shift).
     """
-    import time
     from scanner_improvements import get_daily_bias, _previous_bias, _last_bias_shift
 
     for symbol in symbols:
