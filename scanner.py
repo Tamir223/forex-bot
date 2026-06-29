@@ -1797,8 +1797,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # ── RR VERIFICATION ─────────────────────────────────────────────────────
         _sig_entry_m = re.search(r"Entry Zone:\s*([\d.]+)", auto_signal)
         _sig_sl_m    = re.search(r"Stop Loss:\s*([\d.]+)", auto_signal)
-        _sig_tp1_m   = _re_sig.search(r"TP1:\s*([\d.]+)", auto_signal)
-        _sig_tp2_m   = _re_sig.search(r"TP2:\s*([\d.]+)", auto_signal)
+        _sig_tp1_m   = re.search(r"TP1:\s*([\d.]+)", auto_signal)
+        _sig_tp2_m   = re.search(r"TP2:\s*([\d.]+)", auto_signal)
         if _sig_entry_m and _sig_sl_m and _sig_tp1_m:
             _sig_entry = float(_sig_entry_m.group(1))
             _sig_sl    = float(_sig_sl_m.group(1))
@@ -1813,7 +1813,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _sig_tp1 = 0.0
 
         _sig_tp2 = float(_sig_tp2_m.group(1)) if _sig_tp2_m else 0.0
-        _sig_tp3_m = _re_sig.search(r"TP3:\s*([\d.]+)", auto_signal)
+        _sig_tp3_m = re.search(r"TP3:\s*([\d.]+)", auto_signal)
         _sig_tp3 = float(_sig_tp3_m.group(1)) if _sig_tp3_m else 0.0
         if draw:
             _spot_off_draw = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
