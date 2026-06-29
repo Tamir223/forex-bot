@@ -475,7 +475,8 @@ ENTRY_MAX_PIPS_FOREX = 25      # 25 pips max deviation for forex
 # 150+ pip misses still blocked correctly. Catches 20-25 pip timing gaps.
 ENTRY_MAX_POINTS_GOLD = 50     # 50 points max deviation for gold
 # Gold OB zones are 30-80 points wide on 15M — 50pt tolerance covers zone edge entries
-ENTRY_MAX_POINTS_FUTURES = 20  # 20 points max deviation for futures
+ENTRY_MAX_POINTS_FUTURES = 200  # 200 points max deviation for US indices
+# US100 BOS candles create 100-180pt moves from OB — need 200pt tolerance for limit order placement
 
 def validate_entry(symbol: str, entry_price: float, current_price: float) -> tuple[bool, float]:
     """
