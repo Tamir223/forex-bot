@@ -299,7 +299,11 @@ async def _update_asia_levels(symbol: str, candles: list = None) -> None:
             if dt.date() == today and 0 <= dt.hour < 7:
                 asia_candles.append(c)
                 # Midnight open = open price of the 00:00 UTC candle (first 15M candle of the day)
-                if dt.hour == 0 and dt.minute == 0 and not _midnight_open_found:
+                # For US indices, midnight reference is 05:00 UTC (00:00 ET summer)
+                # For forex/gold, midnight reference is 00:00 UTC
+                _is_index = sym in ("US100", "US30", "US500", "USOIL")
+                _midnight_hour = 5 if _is_index else 0
+                if dt.hour == _midnight_hour and dt.minute == 0 and not _midnight_open_found:
                     _mo_existing = _midnight_open.get(sym, {})
                     if _mo_existing.get("date") != str(today):
                         _midnight_open[sym] = {"price": float(c["open"]), "date": str(today)}
