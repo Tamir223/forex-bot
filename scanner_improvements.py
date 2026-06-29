@@ -259,7 +259,8 @@ def _smart_hardcoded_fallback() -> list:
         day_of_week = now.weekday()  # 0=Monday, 4=Friday
         # Live ForexFactory + Finnhub feeds handle news blocking — no hardcoded day blocks
 
-    events = _inject_monday_block(events, now)
+    # Monday block removed — ForexFactory calendar handles this dynamically
+    # events = _inject_monday_block(events, now)
     _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
     return events
 
@@ -338,7 +339,8 @@ def fetch_forexfactory_today() -> list:
                         events.append(fe)
                         existing_keys.add((fe['currency'], fe['event']))
 
-        events = _inject_monday_block(events, now)
+        # Monday block removed — ForexFactory calendar handles this dynamically
+    # events = _inject_monday_block(events, now)
         _FF_CACHE.update({"events": events, "fetched_at": _t.time()})
         return events
 
