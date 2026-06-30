@@ -1751,22 +1751,35 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         _sym_key = symbol.upper()
         if _sym_key in _last_signal_time:
             _elapsed = _time.monotonic() - _last_signal_time[_sym_key]
-            # Check if this is a genuinely new setup — different swept level means
-            # a new liquidity grab formed. Same swept level = same setup, suppress it.
-            # ICT: once a sweep fires a signal, that setup is consumed. A new sweep
-            # at a different level is a new trade opportunity regardless of time elapsed.
             _prev_swept = _last_swept_level.get(_sym_key, 0.0)
             _pip_size = get_pip_spec(_sym_key).get("pip", 0.0001)
-            _level_changed = abs(_swept_level - _prev_swept) > (_pip_size * 3)  # 3 pip difference = new level
-            if _elapsed < 180 and not _level_changed:
-                # Same setup, within 3 minutes — suppress
+
+            # Threshold for "genuinely new setup" scales with the symbol's typical
+            # SL distance rather than a flat 3 pips — during a strong trend, price
+            # sweeps a fresh local high/low every scan cycle, so a flat small
+            # threshold gets bypassed constantly, causing duplicate signals every
+            # 15-90 seconds with only slightly different entry levels.
+            _min_sl = _min_sl_dist(symbol)
+            _level_change_threshold = max(_pip_size * 3, _min_sl * 0.5)
+            _level_changed = abs(_swept_level - _prev_swept) > _level_change_threshold
+
+            # Hard floor: never re-signal the same symbol within 90 seconds
+            # regardless of level change — gives the EA time to act on the
+            # previous signal and prevents trend-continuation spam.
+            _hard_floor_sec = 90
+            if _elapsed < _hard_floor_sec:
+                logger.info(
+                    f"[scanner] {symbol} signal suppressed — hard floor "
+                    f"({_elapsed:.0f}s < {_hard_floor_sec}s since last signal)"
+                )
+                return None
+            elif _elapsed < 180 and not _level_changed:
                 logger.info(
                     f"[scanner] {symbol} signal suppressed — same swept level "
                     f"{_swept_level} (cooldown {_elapsed/60:.1f} min)"
                 )
                 return None
-            elif not _level_changed and _elapsed < 300:  # Gold: 5min cooldown (was 10min)
-                # Same level, between 3-10 min — suppress
+            elif not _level_changed and _elapsed < 300:
                 logger.info(
                     f"[scanner] {symbol} signal suppressed — same swept level "
                     f"{_swept_level} ({_elapsed/60:.1f} min since last)"
@@ -1775,7 +1788,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             elif _level_changed:
                 logger.info(
                     f"[scanner] {symbol} new swept level {_swept_level} "
-                    f"(prev {_prev_swept}) — allowing new signal"
+                    f"(prev {_prev_swept}, threshold {_level_change_threshold:.5f}) — allowing new signal"
                 )
 
         # ── 5M ENTRY REFINEMENT ──────────────────────────────────────────────────
