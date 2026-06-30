@@ -88,6 +88,22 @@ _direction_lock: dict = {}  # {symbol: {"direction": str, "locked_until": float}
 _last_signal_time: dict = {}   # {symbol_upper: monotonic_float} — signal dedup cooldown
 _last_swept_level: dict = {}   # {symbol_upper: float} — last swept level that fired a signal
 _last_signal_entry: dict = {}  # {symbol: float}
+_fetch_fail_times: dict = {}   # {symbol_upper: [monotonic_ts, ...]} — yfinance failure tracking
+
+
+def _record_fetch_failure(sym: str) -> None:
+    """Track per-symbol yfinance failures; emit [data-gap] warning at 3+ in 10 minutes."""
+    now = _time.monotonic()
+    _window = 600.0
+    times = _fetch_fail_times.get(sym, [])
+    times = [t for t in times if now - t < _window]
+    times.append(now)
+    _fetch_fail_times[sym] = times
+    if len(times) >= 3:
+        logger.warning(
+            f"[data-gap] {sym} yfinance failed {len(times)}x in the past "
+            f"{int(now - times[0])}s — persistent data source issue"
+        )
 
 
 def _td_available() -> bool:
@@ -966,6 +982,27 @@ async def fetch_all_timeframes(symbol: str) -> dict:
 
     except Exception as e:
         logger.error(f"[fetch_all_timeframes] {symbol}: {e}")
+
+    # Track failures and attempt Twelve Data fallback for forex when yfinance returns empty.
+    # Covers both the exception path above and the silent-empty-DataFrame path.
+    if not candles_15m:
+        _record_fetch_failure(sym)
+        if sym not in YFINANCE_FUTURES_MAP and sym != "XAUUSD":
+            if TWELVE_DATA_API_KEY and _td_available():
+                try:
+                    _td_15m = await asyncio.get_event_loop().run_in_executor(
+                        None, get_candles, symbol, "15min", 200
+                    )
+                    if _td_15m:
+                        candles_15m = _td_15m
+                        price = candles_15m[0]["close"]
+                        if len(candles_15m) >= 14:
+                            ranges = [c["high"] - c["low"] for c in candles_15m[:14]]
+                            atr_val = sum(ranges) / len(ranges)
+                            atr_data = {"atr": atr_val, "is_low_volatility": atr_val < _get_pip_spec(sym).get("min_atr", 0.0007)}
+                        logger.info(f"[fetch_all_timeframes] {sym} 15m: TD fallback OK ({len(candles_15m)} candles)")
+                except Exception as _td_e:
+                    logger.error(f"[fetch_all_timeframes] {sym} TD fallback error: {_td_e}")
 
     bundle = {
         "symbol": sym,
