@@ -1823,8 +1823,27 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _spot_off_draw = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
             _is_pts_draw = symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP
             _dp_draw = 3 if _is_pts_draw else 5
-            _sig_tp3 = round(draw['level'] + _spot_off_draw, _dp_draw)
-            logger.info(f"[draw] {symbol} TP3 set to draw level {_sig_tp3} ({draw['type']})")
+            _draw_level = round(draw['level'] + _spot_off_draw, _dp_draw)
+
+            # Cap TP1/TP2 at the draw level — never target beyond the realistic
+            # liquidity draw for the session. If draw distance < 2R/3R distance,
+            # the draw itself becomes the ceiling.
+            if direction == "BUY":
+                if _sig_tp1 and _sig_tp1 > _draw_level:
+                    logger.info(f"[draw] {symbol} TP1 {_sig_tp1} capped to draw {_draw_level}")
+                    _sig_tp1 = _draw_level
+                if _sig_tp2 and _sig_tp2 > _draw_level:
+                    _sig_tp2 = _draw_level
+                _sig_tp3 = _draw_level if _draw_level > (_sig_tp1 or 0) else 0.0
+            else:  # SELL
+                if _sig_tp1 and _sig_tp1 < _draw_level:
+                    logger.info(f"[draw] {symbol} TP1 {_sig_tp1} capped to draw {_draw_level}")
+                    _sig_tp1 = _draw_level
+                if _sig_tp2 and _sig_tp2 < _draw_level:
+                    _sig_tp2 = _draw_level
+                _sig_tp3 = _draw_level if _draw_level < (_sig_tp1 or 999999) else 0.0
+
+            logger.info(f"[draw] {symbol} draw level {_draw_level} ({draw['type']}) — TP1={_sig_tp1} TP2={_sig_tp2} TP3={_sig_tp3}")
 
         # ── APPLY 5M ENTRY OVERRIDE ───────────────────────────────────────────────
         if _refinement_5m and _sig_entry_m:
