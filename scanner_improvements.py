@@ -1135,7 +1135,8 @@ def _fetch_htf_candles(symbol: str, interval_yf: str, period_yf: str,
         # TD primary for forex HTF candles
         try:
             from config import TWELVE_DATA_API_KEY
-            if TWELVE_DATA_API_KEY:
+            from scanner import _td_available, _mark_td_exhausted
+            if TWELVE_DATA_API_KEY and _td_available():
                 from market import normalize_symbol as _norm_sym
                 td_symbol = _norm_sym(sym)
                 resp = requests.get("https://api.twelvedata.com/time_series",
@@ -1146,6 +1147,9 @@ def _fetch_htf_candles(symbol: str, interval_yf: str, period_yf: str,
                     return [{"open": float(v["open"]), "high": float(v["high"]),
                              "low": float(v["low"]), "close": float(v["close"])}
                             for v in data["values"]][:outputsize]
+                _msg = data.get("message", "")
+                if "credits" in _msg.lower():
+                    _mark_td_exhausted()
         except Exception as e:
             logger.debug(f"MTF TD fetch error {symbol} {interval_td}: {e}")
 
@@ -1338,7 +1342,8 @@ def get_daily_bias(symbol: str, candles: list = None) -> dict:
             td_success = False
             try:
                 from config import TWELVE_DATA_API_KEY
-                if TWELVE_DATA_API_KEY:
+                from scanner import _td_available, _mark_td_exhausted
+                if TWELVE_DATA_API_KEY and _td_available():
                     from market import normalize_symbol as _norm_sym
                     td_sym = _norm_sym(sym)
                     resp = requests.get(
@@ -1355,6 +1360,10 @@ def get_daily_bias(symbol: str, candles: list = None) -> dict:
                                 "low":  float(v["low"]),  "close": float(v["close"]),
                             })
                         td_success = True
+                    else:
+                        _msg = data.get("message", "")
+                        if "credits" in _msg.lower():
+                            _mark_td_exhausted()
             except Exception:
                 pass
             if not td_success:
