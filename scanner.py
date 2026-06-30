@@ -1845,6 +1845,21 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
             logger.info(f"[draw] {symbol} draw level {_draw_level} ({draw['type']}) — TP1={_sig_tp1} TP2={_sig_tp2} TP3={_sig_tp3}")
 
+        # ── SWEPT-LEVEL INVALIDATION CHECK (with buffer) ────────────────
+        # Only invalidate if price has moved meaningfully beyond the swept
+        # level — not just noise/wick overshoot. Buffer = 20% of SL distance.
+        sl_dist = abs(_sig_entry - _sig_sl) if _sig_entry and _sig_sl else None
+        if _swept_level and sl_dist:
+            _invalidation_buffer = sl_dist * 0.20
+            if direction == "SELL" and current_price > (_swept_level + _invalidation_buffer):
+                logger.info(f"[invalidation] {symbol} SELL blocked — price {current_price} "
+                            f"reclaimed {_invalidation_buffer:.5f} beyond swept level {_swept_level} — thesis invalidated")
+                return None
+            elif direction == "BUY" and current_price < (_swept_level - _invalidation_buffer):
+                logger.info(f"[invalidation] {symbol} BUY blocked — price {current_price} "
+                            f"reclaimed {_invalidation_buffer:.5f} below swept level {_swept_level} — thesis invalidated")
+                return None
+
         # ── APPLY 5M ENTRY OVERRIDE ───────────────────────────────────────────────
         if _refinement_5m and _sig_entry_m:
             _spot_offset_5m = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
