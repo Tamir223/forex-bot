@@ -1745,6 +1745,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             return None
 
         logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed")
+        _gate_pass_time = _time.monotonic()
 
         # Signal cooldown — suppress if a signal for this symbol fired < 10 min ago.
         # Uses monotonic time so NTP clock corrections cannot cause false expiry.
@@ -2074,6 +2075,19 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         )
         logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed, unified signal built")
 
+        # ── REMAINING R:R CHECK ────────────────────────────────────────
+        # By dispatch time, price may have already moved toward TP1.
+        # Recalculate R:R using CURRENT price as the entry — if the
+        # remaining reward-to-risk from here no longer meets the same
+        # 1.5R minimum the system already enforces, the signal is stale.
+        if current_price and _sig_sl and _sig_tp1:
+            _remaining_valid, _remaining_rr = validate_risk_reward(float(current_price), _sig_sl, _sig_tp1)
+            if not _remaining_valid:
+                logger.info(f"[staleness] {symbol} {direction} blocked — remaining R:R "
+                            f"from current price {current_price} is {_remaining_rr:.2f} "
+                            f"(below 1.5R minimum) — signal stale, price already moved toward TP1")
+                return None
+
         # Record signal time for dedup cooldown
         _last_signal_time[_sym_key] = _time.monotonic()
         _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
@@ -2105,6 +2119,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             "swept_level": _swept_level,
             "gates": gates,
             "gate_details": gate_details,
+            "gate_pass_time": _gate_pass_time,
         }
 
     except Exception as e:
@@ -2232,6 +2247,9 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         except Exception as _dg_err:
                             logger.error(f"[drawdown_guard] check failed for user {user.id}: {_dg_err}")
                         # ── END DRAWDOWN GUARD ─────────────────────────────────────────────
+
+                        _dispatch_latency = _time.monotonic() - result.get("gate_pass_time", _time.monotonic())
+                        logger.info(f"[latency] {symbol} {direction} gate-to-dispatch: {_dispatch_latency:.2f}s")
 
                         # EA auto-execution — write signal file if user opted in
                         try:
