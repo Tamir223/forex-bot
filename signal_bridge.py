@@ -120,6 +120,7 @@ def write_signal(result: dict, user_id: int = None, account_size: float = 10000.
             "lots":      lots,
             "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
             "fired":     True,
+            "auto_execute": True,
         }
 
         with open(SIGNAL_FILE, "w") as f:
