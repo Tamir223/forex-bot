@@ -56,6 +56,11 @@ YFINANCE_FUTURES_MAP = {
     'USOIL': 'CL=F',   # WTI Crude Oil — maps to CME CL futures for data
 }
 
+# High-velocity instruments where 5M execution timeframe is the ICT standard.
+# For these symbols the BOS gate accepts 5M displacement as an alternative to 15M,
+# reducing signal lag from ~30 min to ~10 min per innercircletrader.net guidance.
+FAST_INSTRUMENTS = {"USDJPY", "XAUUSD", "US100", "US30", "US500"}
+
 logger = logging.getLogger(__name__)
 
 # Cache for auto-built signals — keyed by short ID
@@ -1297,11 +1302,42 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     #   → SL anchor: swept level (tight, institutional).
     # BOS in trend: close breaks structure IN the trend direction.
     #   → Continuation entry, moderate confidence. SL anchor: OB/FVG zone.
+    # Fast instruments (USDJPY, XAUUSD, US100/US30/US500): 5M BOS accepted as alternative to 15M
+    # to reduce signal lag from ~30 min to ~10 min per ICT 5M execution timeframe standard.
     _bos_ok = bool(structure.get('bos') or ms.get('bos') or structure.get('choch') or ms.get('choch'))
     _bos_type = structure.get('bos_type') or ms.get('bos_type')   # 'choch', 'bos', or None
     _is_choch = _bos_type == 'choch' or bool(structure.get('choch') or ms.get('choch'))
+    _is_fast = symbol.upper() in FAST_INSTRUMENTS
     if _bos_ok:
         _bos_quality, _bos_count, _bos_desc = score_bos_quality(candles, direction)
+        _bos_tf_label = "15M"
+        if _bos_quality == "weak" and _is_fast:
+            # 15M failed — try 5M for fast instruments
+            _candles_5m = (data.get("candles_5m") or []) if data else []
+            if _candles_5m:
+                _bos_quality_5m, _bos_count_5m, _ = score_bos_quality(_candles_5m, direction)
+                if _bos_quality_5m != "weak":
+                    _bos_quality = _bos_quality_5m
+                    _bos_count = _bos_count_5m
+                    _bos_tf_label = "5M"
+                    logger.info(
+                        f"[bos] {symbol} BOS confirmed via 5M displacement ({_bos_count_5m} candles)"
+                        f" — fast instrument"
+                    )
+                else:
+                    logger.info(
+                        f"[bos] {symbol} BOS weak on both 15M ({_bos_count} candles)"
+                        f" and 5M ({_bos_count_5m} candles) — gate fail"
+                    )
+            else:
+                logger.info(
+                    f"[bos] {symbol} fast instrument but candles_5m empty — using 15M only"
+                )
+        elif _bos_quality != "weak":
+            logger.info(
+                f"[bos] {symbol} BOS confirmed via 15M displacement ({_bos_count} candles)"
+                f" — standard"
+            )
         if _bos_quality == "weak":
             gates['bos'] = False
             gate_details['bos'] = f"weak displacement ({_bos_count} candle) — gate fail"
@@ -1311,15 +1347,15 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
             if _is_choch:
                 # CHoCH after sweep = Judas Swing fully confirmed — highest quality
                 gate_details['bos'] = (
-                    f"CHoCH confirmed ({_bos_quality} displacement, {_bos_count} candles) — "
-                    f"reversal confirmed ✅ SL: swept level"
+                    f"CHoCH confirmed ({_bos_quality} displacement, {_bos_count} candles"
+                    f" {_bos_tf_label}) — reversal confirmed ✅ SL: swept level"
                 )
                 gate_details['bos_type'] = 'choch'
             else:
                 # Standard BOS in trend direction
                 gate_details['bos'] = (
-                    f"BOS confirmed ({_bos_quality} displacement, {_bos_count} candles) — "
-                    f"continuation"
+                    f"BOS confirmed ({_bos_quality} displacement, {_bos_count} candles"
+                    f" {_bos_tf_label}) — continuation"
                 )
                 gate_details['bos_type'] = 'bos'
     else:
