@@ -2055,20 +2055,20 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _pip_size_dir = get_pip_spec(symbol.upper()).get("pip", 0.0001)
             _entry_vs_price_pips = (_spot_entry_for_dir - _spot_price_for_dir) / _pip_size_dir
 
-            if direction == "SELL" and _spot_entry_for_dir <= _spot_price_for_dir:
-                # Entry below current price for SELL — price already dropped past entry
-                # If within 10 pips, switch to market execution note
+            if direction == "SELL" and _spot_price_for_dir > _spot_entry_for_dir:
+                # Price ABOVE entry on a SELL — bearish OB has been broken to the upside
                 if abs(_entry_vs_price_pips) <= 25:
-                    logger.info(f"[scanner] {symbol} SELL entry {_spot_entry_for_dir} slightly below price {_spot_price_for_dir} ({abs(_entry_vs_price_pips):.1f}p) — allowing as market entry")
+                    logger.info(f"[scanner] {symbol} SELL entry {_spot_entry_for_dir} slightly above price {_spot_price_for_dir} ({abs(_entry_vs_price_pips):.1f}p) — allowing as market entry")
                 else:
-                    logger.info(f"[scanner] {symbol} SELL entry missed — price {_spot_price_for_dir} already {abs(_entry_vs_price_pips):.1f}p below entry {_spot_entry_for_dir}")
+                    logger.info(f"[scanner] {symbol} SELL OB broken — price {_spot_price_for_dir} already {abs(_entry_vs_price_pips):.1f}p above entry {_spot_entry_for_dir} — setup invalidated")
                     return None
-            if direction == "BUY" and _spot_entry_for_dir >= _spot_price_for_dir:
-                # Entry above current price for BUY — price already rallied past entry
+            if direction == "BUY" and _spot_price_for_dir < _spot_entry_for_dir:
+                # Price BELOW entry on a BUY — OB has been broken to the downside
+                # This means the bullish OB was violated and the setup is invalid
                 if abs(_entry_vs_price_pips) <= 25:
-                    logger.info(f"[scanner] {symbol} BUY entry {_spot_entry_for_dir} slightly above price {_spot_price_for_dir} ({abs(_entry_vs_price_pips):.1f}p) — allowing as market entry")
+                    logger.info(f"[scanner] {symbol} BUY entry {_spot_entry_for_dir} slightly below price {_spot_price_for_dir} ({abs(_entry_vs_price_pips):.1f}p) — allowing as market entry")
                 else:
-                    logger.info(f"[scanner] {symbol} BUY entry missed — price {_spot_price_for_dir} already {abs(_entry_vs_price_pips):.1f}p above entry {_spot_entry_for_dir}")
+                    logger.info(f"[scanner] {symbol} BUY OB broken — price {_spot_price_for_dir} already {abs(_entry_vs_price_pips):.1f}p below entry {_spot_entry_for_dir} — setup invalidated")
                     return None
 
         # Entry zone proximity check
