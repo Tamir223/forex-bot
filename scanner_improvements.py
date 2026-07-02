@@ -2384,3 +2384,97 @@ def score_bos_quality(candles: list, direction: str) -> tuple[str, int, str]:
     if consecutive >= 2:
         return "moderate", consecutive, "⚠️ BOS: confirmed (moderate displacement)"
     return "weak", consecutive, "⚠️ BOS: confirmed (weak displacement — gate fail)"
+
+
+# ─── 29. BREAKER BLOCK DETECTION (ICT Unicorn Model) ─────────────────────────
+
+def detect_breaker_block(candles_15m: list, direction: str) -> dict | None:
+    """
+    Detect the most recent valid breaker block per ICT Unicorn Model spec.
+    candles are newest-first.
+
+    BULLISH BREAKER (BUY): Last down-close candle before a swing high that was
+    subsequently swept, where price then broke ABOVE structure with displacement.
+    That candle's body range becomes support on retest.
+
+    BEARISH BREAKER (SELL): Last up-close candle before a swing low that was
+    subsequently swept, where price then broke BELOW structure with displacement.
+    That candle's body range becomes resistance on retest.
+
+    Returns {'low': float, 'high': float, 'type': 'bullish_breaker'|'bearish_breaker',
+             'swept_level': float} or None.
+    """
+    if not candles_15m or len(candles_15m) < 10:
+        return None
+
+    lookback = min(20, len(candles_15m))
+    recent = candles_15m[:lookback]
+
+    def _is_displacement(c: dict) -> bool:
+        total_range = c["high"] - c["low"]
+        if total_range == 0:
+            return False
+        body = abs(c["close"] - c["open"])
+        return body / total_range >= 0.5
+
+    if direction == "BUY":
+        # Scan for swing highs: candle higher than 2 neighbours on each side
+        for i in range(2, lookback - 2):
+            sh = recent[i]["high"]
+            if not (sh > recent[i-1]["high"] and sh > recent[i-2]["high"] and
+                    sh > recent[i+1]["high"] and sh > recent[i+2]["high"]):
+                continue
+
+            # Swing high must have been swept by a newer candle (lower index)
+            if not any(recent[j]["high"] > sh for j in range(0, i)):
+                continue
+
+            # Displacement BOS: strong bullish candle closing above the swing high
+            if not any(
+                recent[j]["close"] > sh and _is_displacement(recent[j])
+                for j in range(0, i)
+            ):
+                continue
+
+            # Find the last down-close candle older than the swing high (higher index)
+            for k in range(i + 1, lookback):
+                c = recent[k]
+                if c["close"] < c["open"]:
+                    return {
+                        "low":  round(min(c["open"], c["close"]), 5),
+                        "high": round(max(c["open"], c["close"]), 5),
+                        "type": "bullish_breaker",
+                        "swept_level": round(sh, 5),
+                    }
+
+    else:  # SELL
+        # Scan for swing lows: candle lower than 2 neighbours on each side
+        for i in range(2, lookback - 2):
+            sl = recent[i]["low"]
+            if not (sl < recent[i-1]["low"] and sl < recent[i-2]["low"] and
+                    sl < recent[i+1]["low"] and sl < recent[i+2]["low"]):
+                continue
+
+            # Swing low must have been swept by a newer candle (lower index)
+            if not any(recent[j]["low"] < sl for j in range(0, i)):
+                continue
+
+            # Displacement BOS: strong bearish candle closing below the swing low
+            if not any(
+                recent[j]["close"] < sl and _is_displacement(recent[j])
+                for j in range(0, i)
+            ):
+                continue
+
+            # Find the last up-close candle older than the swing low (higher index)
+            for k in range(i + 1, lookback):
+                c = recent[k]
+                if c["close"] > c["open"]:
+                    return {
+                        "low":  round(min(c["open"], c["close"]), 5),
+                        "high": round(max(c["open"], c["close"]), 5),
+                        "type": "bearish_breaker",
+                        "swept_level": round(sl, 5),
+                    }
+
+    return None

@@ -36,6 +36,7 @@ from scanner_improvements import (
     get_weekly_levels,
     is_asia_range_tight,
     get_pip_spec,
+    detect_breaker_block,
 )
 import requests
 import yfinance as yf
@@ -1280,6 +1281,28 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     else:
         gate_details['ob_fvg'] = "no OB or FVG found"
 
+    # ── UNICORN MODEL — optional quality upgrade, no hard gate ───────────────
+    # Breaker block + FVG overlap = S-tier (highest probability) quality tag.
+    # Non-breaker setups are completely unaffected — gate pass/fail unchanged.
+    if _has_fvg and fvg:
+        _breaker = detect_breaker_block(candles, direction)
+        if _breaker:
+            _b_low  = _breaker['low']
+            _b_high = _breaker['high']
+            _fvg_low  = fvg['bottom']
+            _fvg_high = fvg['top']
+            if _b_low <= _fvg_high and _b_high >= _fvg_low:
+                gate_details['ob_fvg'] = "🦄 UNICORN (Breaker+FVG)"
+                logger.info(
+                    f"[breaker] {symbol} UNICORN — breaker {_b_low}-{_b_high} overlaps "
+                    f"FVG {_fvg_low}-{_fvg_high}"
+                )
+            else:
+                logger.info(
+                    f"[breaker] {symbol} breaker detected {_b_low}-{_b_high} — no FVG overlap, "
+                    f"standard quality"
+                )
+
     # INFORMATIONAL — Premium/Discount zone (does not block signal)
     _d1_candles = (data.get("candles_daily") or []) if data else []
     if _d1_candles and current_price:
@@ -1618,15 +1641,17 @@ def format_unified_signal(symbol: str, direction: str,
             f"✅ Structure: {gate_details.get('structure', '')}",
             f"✅ Sweep: {gate_details.get('sweep', '')}",
         ]
+        _ob_fvg_detail = gate_details.get('ob_fvg', '')
         if ob:
             _ob_label = "Bullish OB" if ob["type"] == "bullish_ob" else "Bearish OB"
-            _ob_detail = gate_details.get('ob_fvg', '')
             _ob_warn_g = "⚠️" if ob.get('tier') == "C-tier" else "✅"
-            _gate_lines.append(f"{_ob_warn_g} {_ob_label}: {_ob_detail}")
+            _gate_lines.append(f"{_ob_warn_g} {_ob_label}: {_ob_fvg_detail}")
         elif fvg:
-            _gate_lines.append(f"✅ FVG: {gate_details.get('ob_fvg', '')}")
+            _gate_lines.append(f"✅ FVG: {_ob_fvg_detail}")
         elif gates and gates.get('ob_fvg'):
-            _gate_lines.append(f"✅ OB/FVG: {gate_details.get('ob_fvg', 'Displacement retracement')}")
+            _gate_lines.append(f"✅ OB/FVG: {_ob_fvg_detail or 'Displacement retracement'}")
+        if "UNICORN" in _ob_fvg_detail:
+            _gate_lines.append("🦄 UNICORN: Breaker+FVG confluence — highest probability setup")
         _bos_type_label = gate_details.get('bos_type', '')
         _bos_detail = gate_details.get('bos', 'confirmed (body close)')
         if _bos_type_label == 'choch':
