@@ -1736,6 +1736,17 @@ _KILL_ZONE_LABELS = {
     'ny_indices':          "NY Indices Open",
 }
 
+# Maps each news-adjacent kill zone to its documented ICT follow-through window.
+# Source: ICT NY Killzone guide — "If you missed the 8:30 AM move, the 9:30 AM
+# open often provides a re-entry or second leg into a newly formed FVG."
+# This is purely informational — no gate logic, thresholds, or R:R changes.
+SECOND_LEG_WINDOWS = {
+    # After NY 8:30am EST news block (12:30-13:00 UTC), the 9:30am EST
+    # NYSE cash open (13:30-14:00 UTC) often gives the re-entry leg.
+    'ny_open': (13, 14),  # 13:00-14:00 UTC follow-through window
+    # London second-leg already covered by existing 'london' window (06-10 UTC).
+}
+
 def is_kill_zone(symbol: str) -> tuple[bool, str]:
     """
     Check if current UTC time falls within the pair's ICT kill zone window.

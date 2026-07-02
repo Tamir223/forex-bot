@@ -1665,6 +1665,9 @@ def format_unified_signal(symbol: str, direction: str,
         _pd = gate_details.get('premium_discount', '')
         if _pd:
             _gate_lines.append(_pd)
+        _second_leg = gate_details.get('second_leg', '')
+        if _second_leg:
+            _gate_lines.append(_second_leg)
         if draw:
             _draw_level_disp = round(draw.get('level', 0) + FUTURES_SPOT_OFFSET.get(sym, 0), _dp)
             _draw_unit = "pts" if _is_pts else "pips"
@@ -1844,6 +1847,24 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         logger.info(f"[scanner] {symbol} {direction} — all 7 gates passed")
         _gate_pass_time = _time.monotonic()
+
+        # ── SECOND-LEG WINDOW TAG ────────────────────────────────────────────
+        # Informational only — does not affect gate logic, R:R, or lot sizing.
+        from scanner_improvements import SECOND_LEG_WINDOWS as _SLW
+        _utc_hour = datetime.now(timezone.utc).hour
+        _kz_lower = _kz_label.lower()
+        _sl_label_map = {'ny_open': 'ny open'}
+        for _sl_zone, (_sl_start, _sl_end) in _SLW.items():
+            _sl_fragment = _sl_label_map.get(_sl_zone, _sl_zone.replace('_', ' '))
+            if _sl_fragment in _kz_lower and _sl_start <= _utc_hour < _sl_end:
+                gate_details['second_leg'] = (
+                    "📍 Second-leg entry — post-news retracement window (9:30am EST NYSE open)"
+                )
+                logger.info(
+                    f"[second_leg] {symbol} signal fired in documented follow-through "
+                    f"window — likely genuine retracement, not first-reaction spike"
+                )
+                break
 
         # Signal cooldown — suppress if a signal for this symbol fired < 10 min ago.
         # Uses monotonic time so NTP clock corrections cannot cause false expiry.
@@ -2491,7 +2512,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
 
 def build_bias_report(symbols: list) -> str:
     """Build a formatted daily bias report for the given symbol list."""
-    from scanner_improvements import get_daily_bias
+    from scanner_improvements import get_daily_bias, _fetch_forexfactory_json
     lines = ["📊 *DAILY BIAS REPORT*", "━━━━━━━━━━━━━━━━━━━━"]
     for sym in symbols:
         try:
@@ -2504,6 +2525,21 @@ def build_bias_report(symbols: list) -> str:
         except Exception:
             lines.append(f"⚪ *{sym}*: data unavailable")
     lines += ["━━━━━━━━━━━━━━━━━━━━", "Check this every morning before trading."]
+    try:
+        _news_events = _fetch_forexfactory_json()
+        _HI_KEYWORDS = ('non-farm', 'nfp', 'fomc', 'fed rate', 'rate decision', 'cpi', 'consumer price index')
+        _has_high_impact = any(
+            e.get('impact') == 'high' and any(kw in e.get('event', '').lower() for kw in _HI_KEYWORDS)
+            for e in _news_events
+        )
+        if _has_high_impact:
+            lines.append(
+                "⚠️ High-impact news today (NFP/FOMC/CPI) — signal volume may be lower "
+                "than usual. Per ICT practice, clean setups often wait for the "
+                "post-news second-leg window rather than the initial spike."
+            )
+    except Exception:
+        pass
     return "\n".join(lines)
 
 
