@@ -478,9 +478,12 @@ ENTRY_MAX_POINTS_GOLD = 50     # 50 points max deviation for gold
 ENTRY_MAX_POINTS_FUTURES = 200  # 200 points max deviation for US indices
 # US100 BOS candles create 100-180pt moves from OB — need 200pt tolerance for limit order placement
 
-def validate_entry(symbol: str, entry_price: float, current_price: float) -> tuple[bool, float]:
+def validate_entry(symbol: str, entry_price: float, current_price: float, direction: str = "BUY") -> tuple[bool, float]:
     """
-    Check if current price is still within acceptable range of entry.
+    Check if price has moved past the entry in the wrong direction beyond max deviation.
+    For BUY: only block if price dropped BELOW entry (OB broken to downside).
+    For SELL: only block if price rallied ABOVE entry (OB broken to upside).
+    Price above entry on BUY and price below entry on SELL are valid limit-order states.
     Returns (is_valid, deviation).
     """
     deviation = abs(current_price - entry_price)
@@ -494,7 +497,14 @@ def validate_entry(symbol: str, entry_price: float, current_price: float) -> tup
         # Forex (standard and JPY) — use pip spec so JPY pairs get correct scaling
         max_dev = get_pip_spec(sym)["pip"] * ENTRY_MAX_PIPS_FOREX
 
-    return deviation <= max_dev, round(deviation, 5)
+    if direction == "BUY":
+        # Only invalid if price is below the entry by more than max_dev
+        broken = current_price < entry_price - max_dev
+    else:
+        # Only invalid if price is above the entry by more than max_dev
+        broken = current_price > entry_price + max_dev
+
+    return not broken, round(deviation, 5)
 
 
 # ─── 4. 1H CANDLE CONFIRMATION ────────────────────────────────────────────────
@@ -664,7 +674,7 @@ def run_pre_scan_checks(symbol: str, entry_price: float,
         results["warnings"].append(f"✅ Prime session — highest probability window")
 
     # 3. Entry validation
-    entry_valid, deviation = validate_entry(symbol, entry_price, current_price)
+    entry_valid, deviation = validate_entry(symbol, entry_price, current_price, direction)
     results["entry_valid"] = entry_valid
     if not entry_valid:
         results["passed"] = False

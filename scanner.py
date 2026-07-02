@@ -2081,7 +2081,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         _spot_offset = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
         price_for_ob_check = float(current_price) - _spot_offset if _spot_offset != 0 else float(current_price)
-        entry_valid, deviation = validate_entry(symbol, entry_check, price_for_ob_check)
+        entry_valid, deviation = validate_entry(symbol, entry_check, price_for_ob_check, direction)
 
         if not entry_valid:
             logger.info(f"[scanner] {symbol} entry missed by {deviation} — blocking")
