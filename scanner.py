@@ -1941,10 +1941,14 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             if direction == "SELL" and current_price > (_swept_level + _invalidation_buffer):
                 logger.info(f"[invalidation] {symbol} SELL blocked — price {current_price} "
                             f"reclaimed {_invalidation_buffer:.5f} beyond swept level {_swept_level} — thesis invalidated")
+                _last_signal_time[_sym_key] = _time.monotonic()
+                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
                 return None
             elif direction == "BUY" and current_price < (_swept_level - _invalidation_buffer):
                 logger.info(f"[invalidation] {symbol} BUY blocked — price {current_price} "
                             f"reclaimed {_invalidation_buffer:.5f} below swept level {_swept_level} — thesis invalidated")
+                _last_signal_time[_sym_key] = _time.monotonic()
+                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
                 return None
 
         # ── APPLY 5M ENTRY OVERRIDE ───────────────────────────────────────────────
@@ -2081,6 +2085,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         if not entry_valid:
             logger.info(f"[scanner] {symbol} entry missed by {deviation} — blocking")
+            _last_signal_time[_sym_key] = _time.monotonic()
+            _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
             return None
 
         # OB-based RR hard check
@@ -2159,6 +2165,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 logger.info(f"[staleness] {symbol} {direction} blocked — remaining R:R "
                             f"from current price {current_price} is {_remaining_rr:.2f} "
                             f"(below 1.5R minimum) — signal stale, price already moved toward TP1")
+                _last_signal_time[_sym_key] = _time.monotonic()
+                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
                 return None
 
         # Record signal time for dedup cooldown
