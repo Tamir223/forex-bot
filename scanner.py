@@ -95,6 +95,7 @@ _last_signal_time: dict = {}   # {symbol_upper: monotonic_float} — signal dedu
 _last_swept_level: dict = {}   # {symbol_upper: float} — last swept level that fired a signal
 _last_signal_entry: dict = {}  # {symbol: float}
 _fetch_fail_times: dict = {}   # {symbol_upper: [monotonic_ts, ...]} — yfinance failure tracking
+_last_breaker_log: dict = {}   # {(symbol, b_low, b_high): monotonic_float} — breaker no-FVG log dedup
 
 
 def _record_fetch_failure(sym: str) -> None:
@@ -889,6 +890,103 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
     return None
 
 
+def _try_reprice_stale_signal(
+    symbol: str,
+    direction: str,
+    current_price: float,
+    candles_5m: list,
+    candles_15m: list,
+    ob: dict | None,
+    fvg: dict | None,
+) -> tuple | None:
+    """
+    IOFED/IFVG re-pricing: when original entry is stale (remaining R:R < 1.5R),
+    search for a valid fresher structural reference near current price.
+
+    Priority:
+    1. 5M OB near current price
+    2. 5M FVG aligned with direction
+    3. IFVG — original FVG zone that price has broken through and returned to
+
+    Returns (new_entry, new_sl, new_tp1, new_tp2, ref_type, new_rr) or None.
+    """
+    _sym_u = symbol.upper()
+    _spot_off = FUTURES_SPOT_OFFSET.get(_sym_u, 0)
+    _raw_price = current_price - _spot_off
+    _is_pts = _sym_u in ("XAUUSD", "US30", "NAS100", "US100", "US500") or _sym_u in YFINANCE_FUTURES_MAP
+    _dp = 3 if _is_pts else 5
+    trend = "bullish" if direction == "BUY" else "bearish"
+
+    def _compute(raw_entry: float, raw_extreme: float) -> tuple | None:
+        _entry = round(raw_entry + _spot_off, _dp)
+        _sl_dist = max(abs(raw_entry - raw_extreme), _min_sl_dist(symbol))
+        _sl_dist = min(_sl_dist, _max_sl_dist(symbol))
+        if direction == "BUY":
+            _sl  = round(_entry - _sl_dist, _dp)
+            _tp1 = round(_entry + _sl_dist * 1.5, _dp)
+            _tp2 = round(_entry + _sl_dist * 2.5, _dp)
+        else:
+            _sl  = round(_entry + _sl_dist, _dp)
+            _tp1 = round(_entry - _sl_dist * 1.5, _dp)
+            _tp2 = round(_entry - _sl_dist * 2.5, _dp)
+        _valid, _rr = validate_risk_reward(_entry, _sl, _tp1)
+        if _valid:
+            return _entry, _sl, _tp1, _tp2, _rr
+        return None
+
+    # ── PRIORITY 1: 5M OB near current price ──────────────────────────────────
+    if candles_5m and len(candles_5m) >= 5:
+        _5m_ob = detect_order_block(candles_5m, trend, symbol=symbol)
+        if _5m_ob:
+            if direction == "BUY":
+                _raw_e = _5m_ob["low"]
+                _raw_x = _5m_ob["low"] - _min_sl_dist(symbol)
+            else:
+                _raw_e = _5m_ob["high"]
+                _raw_x = _5m_ob["high"] + _min_sl_dist(symbol)
+            _res = _compute(_raw_e, _raw_x)
+            if _res:
+                return (_res[0], _res[1], _res[2], _res[3], "5M OB", _res[4])
+
+        # ── PRIORITY 1b: 5M FVG aligned with direction ──────────────────────
+        _5m_fvg = detect_fvg(candles_5m, symbol)
+        if _5m_fvg:
+            if direction == "BUY" and _5m_fvg["type"] == "bullish_fvg":
+                _res = _compute(_5m_fvg["mid"], _5m_fvg["bottom"])
+                if _res:
+                    return (_res[0], _res[1], _res[2], _res[3], "5M FVG", _res[4])
+            elif direction == "SELL" and _5m_fvg["type"] == "bearish_fvg":
+                _res = _compute(_5m_fvg["mid"], _5m_fvg["top"])
+                if _res:
+                    return (_res[0], _res[1], _res[2], _res[3], "5M FVG", _res[4])
+
+    # ── PRIORITY 2: IFVG — original zone role-flipped after break-and-return ──
+    if fvg:
+        _fvg_top = fvg.get("top", 0.0)
+        _fvg_bot = fvg.get("bottom", 0.0)
+        _check_candles = (candles_5m or candles_15m or [])[:10]
+
+        if direction == "BUY" and fvg.get("type") == "bearish_fvg":
+            # Bearish FVG price broke up through → now potential demand (IFVG for BUY)
+            _broke_up = any(c["close"] > _fvg_top for c in _check_candles)
+            _in_zone  = _fvg_bot <= _raw_price <= _fvg_top
+            if _broke_up and _in_zone:
+                _res = _compute((_fvg_top + _fvg_bot) / 2.0, _fvg_bot)
+                if _res:
+                    return (_res[0], _res[1], _res[2], _res[3], "IFVG", _res[4])
+
+        elif direction == "SELL" and fvg.get("type") == "bullish_fvg":
+            # Bullish FVG price broke down through → now potential supply (IFVG for SELL)
+            _broke_dn = any(c["close"] < _fvg_bot for c in _check_candles)
+            _in_zone  = _fvg_bot <= _raw_price <= _fvg_top
+            if _broke_dn and _in_zone:
+                _res = _compute((_fvg_top + _fvg_bot) / 2.0, _fvg_top)
+                if _res:
+                    return (_res[0], _res[1], _res[2], _res[3], "IFVG", _res[4])
+
+    return None
+
+
 async def fetch_all_timeframes(symbol: str) -> dict:
     """
     Fetch all timeframes via yFinance and return a unified bundle.
@@ -1298,10 +1396,15 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
                     f"FVG {_fvg_low}-{_fvg_high}"
                 )
             else:
-                logger.info(
-                    f"[breaker] {symbol} breaker detected {_b_low}-{_b_high} — no FVG overlap, "
-                    f"standard quality"
-                )
+                _breaker_key = (symbol, _b_low, _b_high)
+                _now_b = _time.monotonic()
+                if (_breaker_key not in _last_breaker_log
+                        or _now_b - _last_breaker_log[_breaker_key] >= 300):
+                    logger.info(
+                        f"[breaker] {symbol} breaker detected {_b_low}-{_b_high} — no FVG overlap, "
+                        f"standard quality"
+                    )
+                    _last_breaker_log[_breaker_key] = _now_b
 
     # INFORMATIONAL — Premium/Discount zone (does not block signal)
     _d1_candles = (data.get("candles_daily") or []) if data else []
@@ -2203,17 +2306,37 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # ── REMAINING R:R CHECK ────────────────────────────────────────
         # By dispatch time, price may have already moved toward TP1.
         # Recalculate R:R using CURRENT price as the entry — if the
-        # remaining reward-to-risk from here no longer meets the same
-        # 1.5R minimum the system already enforces, the signal is stale.
+        # remaining reward-to-risk from here no longer meets the 1.5R
+        # minimum, try IOFED/IFVG re-pricing from a fresh structural
+        # reference near current price before declaring the signal stale.
         if current_price and _sig_sl and _sig_tp1:
             _remaining_valid, _remaining_rr = validate_risk_reward(float(current_price), _sig_sl, _sig_tp1)
             if not _remaining_valid:
-                logger.info(f"[staleness] {symbol} {direction} blocked — remaining R:R "
-                            f"from current price {current_price} is {_remaining_rr:.2f} "
-                            f"(below 1.5R minimum) — signal stale, price already moved toward TP1")
-                _last_signal_time[_sym_key] = _time.monotonic()
-                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
-                return None
+                _repriced = _try_reprice_stale_signal(
+                    symbol, direction, float(current_price),
+                    candles_5m, candles,
+                    ob, fvg,
+                )
+                if _repriced:
+                    _new_entry, _new_sl, _new_tp1, _new_tp2, _ref_type, _new_rr = _repriced
+                    logger.info(
+                        f"[staleness] {symbol} original entry stale — re-priced via fresh "
+                        f"{_ref_type} reference, entry={_new_entry} sl={_new_sl} "
+                        f"tp1={_new_tp1} R:R={_new_rr:.2f}"
+                    )
+                    _sig_entry = _new_entry
+                    _sig_sl    = _new_sl
+                    _sig_tp1   = _new_tp1
+                    _sig_tp2   = _new_tp2
+                else:
+                    logger.info(
+                        f"[staleness] {symbol} {direction} blocked — remaining R:R "
+                        f"from current price {current_price} is {_remaining_rr:.2f} "
+                        f"(below 1.5R minimum) — no fresh structure found, signal stale"
+                    )
+                    _last_signal_time[_sym_key] = _time.monotonic()
+                    _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+                    return None
 
         # Record signal time for dedup cooldown
         _last_signal_time[_sym_key] = _time.monotonic()
