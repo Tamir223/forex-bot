@@ -2059,25 +2059,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         _sig_tp3_m = re.search(r"TP3:\s*([\d.]+)", auto_signal)
         _sig_tp3 = float(_sig_tp3_m.group(1)) if _sig_tp3_m else 0.0
 
-        # ── SWEPT-LEVEL INVALIDATION CHECK (with buffer) ────────────────
-        # Only invalidate if price has moved meaningfully beyond the swept
-        # level — not just noise/wick overshoot. Buffer = 20% of SL distance.
-        sl_dist = abs(_sig_entry - _sig_sl) if _sig_entry and _sig_sl else None
-        if _swept_level and sl_dist:
-            _invalidation_buffer = sl_dist * 0.20
-            if direction == "SELL" and current_price > (_swept_level + _invalidation_buffer):
-                logger.info(f"[invalidation] {symbol} SELL blocked — price {current_price} "
-                            f"reclaimed {_invalidation_buffer:.5f} beyond swept level {_swept_level} — thesis invalidated")
-                _last_signal_time[_sym_key] = _time.monotonic()
-                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
-                return None
-            elif direction == "BUY" and current_price < (_swept_level - _invalidation_buffer):
-                logger.info(f"[invalidation] {symbol} BUY blocked — price {current_price} "
-                            f"reclaimed {_invalidation_buffer:.5f} below swept level {_swept_level} — thesis invalidated")
-                _last_signal_time[_sym_key] = _time.monotonic()
-                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
-                return None
-
         # ── APPLY 5M ENTRY OVERRIDE ───────────────────────────────────────────────
         if _refinement_5m and _sig_entry_m:
             _spot_offset_5m = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
@@ -2204,6 +2185,27 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     logger.info(f"[draw] {symbol} TP3 {_sig_tp3} >= TP2 {_sig_tp2} for SELL — dropping TP3")
                     _sig_tp3 = 0.0
 
+        # ── SWEPT-LEVEL INVALIDATION CHECK — runs LAST with final entry/SL ──────
+        # Placed after all overrides (5M refinement, displacement FVG, swept-level SL
+        # anchor, draw-cap) so sl_dist reflects the actual risk used in the signal,
+        # not the preliminary value from build_auto_signal(). Same ordering principle
+        # as the draw-cap fix: check must see final values to produce the correct buffer.
+        _final_sl_dist = abs(_sig_entry - _sig_sl) if (_sig_entry and _sig_sl) else None
+        if _swept_level and _final_sl_dist:
+            _invalidation_buffer = _final_sl_dist * 0.20
+            if direction == "SELL" and current_price > (_swept_level + _invalidation_buffer):
+                logger.info(f"[invalidation] {symbol} SELL blocked — price {current_price} "
+                            f"reclaimed {_invalidation_buffer:.5f} beyond swept level {_swept_level} — thesis invalidated")
+                _last_signal_time[_sym_key] = _time.monotonic()
+                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+                return None
+            elif direction == "BUY" and current_price < (_swept_level - _invalidation_buffer):
+                logger.info(f"[invalidation] {symbol} BUY blocked — price {current_price} "
+                            f"reclaimed {_invalidation_buffer:.5f} below swept level {_swept_level} — thesis invalidated")
+                _last_signal_time[_sym_key] = _time.monotonic()
+                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+                return None
+
         # Entry direction validation
         if _sig_entry_m and current_price:
             _spot_entry_for_dir = float(_sig_entry_m.group(1))
@@ -2237,7 +2239,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         _spot_offset = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
         price_for_ob_check = float(current_price) - _spot_offset if _spot_offset != 0 else float(current_price)
-        entry_valid, deviation = validate_entry(symbol, entry_check, price_for_ob_check, direction)
+        _entry_sl_dist = abs(_sig_entry - _sig_sl) if (_sig_entry and _sig_sl) else None
+        entry_valid, deviation = validate_entry(symbol, entry_check, price_for_ob_check, direction, sl_dist=_entry_sl_dist)
 
         if not entry_valid:
             logger.info(f"[scanner] {symbol} entry missed by {deviation} — blocking")

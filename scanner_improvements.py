@@ -475,10 +475,9 @@ ENTRY_MAX_PIPS_FOREX = 25      # 25 pips max deviation for forex
 # 150+ pip misses still blocked correctly. Catches 20-25 pip timing gaps.
 ENTRY_MAX_POINTS_GOLD = 50     # 50 points max deviation for gold
 # Gold OB zones are 30-80 points wide on 15M — 50pt tolerance covers zone edge entries
-ENTRY_MAX_POINTS_FUTURES = 200  # 200 points max deviation for US indices
-# US100 BOS candles create 100-180pt moves from OB — need 200pt tolerance for limit order placement
+ENTRY_MAX_POINTS_FUTURES = 200  # fallback flat tolerance (used when sl_dist not available)
 
-def validate_entry(symbol: str, entry_price: float, current_price: float, direction: str = "BUY") -> tuple[bool, float]:
+def validate_entry(symbol: str, entry_price: float, current_price: float, direction: str = "BUY", sl_dist: float | None = None) -> tuple[bool, float]:
     """
     Check if price has moved past the entry in the wrong direction beyond max deviation.
     For BUY: only block if price dropped BELOW entry (OB broken to downside).
@@ -491,8 +490,11 @@ def validate_entry(symbol: str, entry_price: float, current_price: float, direct
 
     if sym in ("XAUUSD", "GC", "MGC", "XAGUSD"):
         max_dev = ENTRY_MAX_POINTS_GOLD
-    elif sym in ("ES", "MES", "NQ", "MNQ", "RTY", "YM", "CL", "MCL", "NG", "US100", "US30"):
-        max_dev = ENTRY_MAX_POINTS_FUTURES
+    elif sym in ("ES", "MES", "NQ", "MNQ", "RTY", "YM", "CL", "MCL", "NG", "US100", "US30", "US500"):
+        # Scale tolerance to the trade's own SL distance — a 60pt-SL trade and a
+        # 300pt-SL trade should not share a flat 200pt ceiling. 50% of SL distance
+        # with a 50pt floor prevents unreasonably tight blocks on very tight SLs.
+        max_dev = max(sl_dist * 0.5, 50) if sl_dist else ENTRY_MAX_POINTS_FUTURES
     else:
         # Forex (standard and JPY) — use pip spec so JPY pairs get correct scaling
         max_dev = get_pip_spec(sym)["pip"] * ENTRY_MAX_PIPS_FOREX
