@@ -1492,6 +1492,51 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         gate_details['bos'] = "not confirmed"
         gate_details['bos_type'] = None
 
+    # ── CONTINUATION/REVERSAL RISK TIERING ──────────────────────────────────────
+    # Research: BOS continuation = 55-65% win rate vs CHoCH reversal = ~45% win rate
+    # in SMC backtests on forex majors, 1,000+ trades (lunefi.com).
+    # CHoCH + moderate displacement (2 candles) → downgrade OB tier one full level.
+    # CHoCH + strong displacement (3+ candles) → no penalty (clear institutional flip).
+    _structure_risk_note = ""
+    if _is_choch and gates.get('bos') and ob:
+        _orig_tier = ob.get('tier', '')
+        _tier_order = ["S-tier", "A-tier", "B-tier", "C-tier"]
+        if _bos_quality == "moderate":
+            _orig_idx = _tier_order.index(_orig_tier) if _orig_tier in _tier_order else len(_tier_order) - 1
+            _new_idx  = min(_orig_idx + 1, len(_tier_order) - 1)
+            _eff_tier = _tier_order[_new_idx]
+            logger.info(
+                f"[structure_risk] {symbol} {direction} CHoCH reversal with {_bos_quality}"
+                f" displacement — {_orig_tier} downgraded to {_eff_tier}"
+                f" per continuation/reversal reliability research"
+            )
+            # Re-evaluate Gate 5 with the downgraded effective tier
+            _has_ob_eff = _eff_tier != 'C-tier'
+            if _is_liquidity_run:
+                gates['ob_fvg'] = (_has_ob_eff and _has_fvg) or _has_displacement_fvg
+            else:
+                gates['ob_fvg'] = _has_ob_eff or _has_fvg or _has_displacement_fvg
+            _ob_lo_r = round(ob['low']  + _disp_off, _dp)
+            _ob_hi_r = round(ob['high'] + _disp_off, _dp)
+            if _eff_tier == 'C-tier':
+                gate_details['ob_fvg'] = (
+                    f"{_ob_lo_r}-{_ob_hi_r} ({_orig_tier}→C-tier CHoCH reversal downgrade — gate fail)"
+                )
+            else:
+                gate_details['ob_fvg'] = (
+                    f"{_ob_lo_r}-{_ob_hi_r} ({_orig_tier}→{_eff_tier} CHoCH reversal downgrade)"
+                )
+            _structure_risk_note = (
+                "⚠️ Reversal signal (CHoCH) — historically lower reliability than"
+                " continuation (BOS) setups, especially with moderate displacement"
+            )
+        elif _bos_quality == "strong":
+            logger.info(
+                f"[structure_risk] {symbol} {direction} CHoCH reversal with strong"
+                f" displacement — no tier penalty (clear institutional flip)"
+            )
+    gate_details['structure_risk'] = _structure_risk_note
+
     # GATE 7 — Volatility adequate (not low vol)
     _vol_ok = not atr_data.get('is_low_volatility', False) if atr_data else True
     gates['volatility'] = _vol_ok
@@ -1764,6 +1809,9 @@ def format_unified_signal(symbol: str, direction: str,
             _gate_lines.append(f"🔥 CHoCH: {_bos_detail}")
         else:
             _gate_lines.append(f"✅ BOS: {_bos_detail}")
+        _structure_risk = gate_details.get('structure_risk', '')
+        if _structure_risk:
+            _gate_lines.append(_structure_risk)
         _gate_lines.append(f"✅ Volatility: {gate_details.get('volatility', 'healthy')}")
         _po3 = gate_details.get('po3', '')
         if _po3:
