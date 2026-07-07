@@ -1786,6 +1786,9 @@ def format_unified_signal(symbol: str, direction: str,
     _entry_ote_suffix = " (OTE 62-79%)" if _is_ote_entry else ""
     _ote_lines = []
 
+    _tp1_r = abs(tp1 - entry) / sl_dist if sl_dist else 0.0
+    _tp2_r = abs(tp2 - entry) / sl_dist if sl_dist else 0.0
+
     lines = [
         DIV,
         "🏆 TNL TRADER SIGNAL",
@@ -1793,8 +1796,8 @@ def format_unified_signal(symbol: str, direction: str,
         f"📊 {symbol} | {direction} | 7/7 Gates ✅ | {entry_tf}",
         f"📍 Entry: {entry:.{_dp}f}{_entry_ote_suffix}",
         f"🛑 SL:       {sl:.{_dp}f}  ({_sl_display})",
-        f"🎯 TP1:      {tp1:.{_dp}f}  (2.0R)",
-        f"🎯 TP2:      {tp2:.{_dp}f}  (3.0R)",
+        f"🎯 TP1:      {tp1:.{_dp}f}  ({_tp1_r:.1f}R)",
+        f"🎯 TP2:      {tp2:.{_dp}f}  ({_tp2_r:.1f}R)",
     ] + ([f"🎯 TP3:      {tp3:.{_dp}f}  (Draw)"] if tp3 else []) + [
         f"📦 Lots:     {lot_str}",
         f"⚡ Type:     {_type_str}",
@@ -2055,31 +2058,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         _sig_tp2 = float(_sig_tp2_m.group(1)) if _sig_tp2_m else 0.0
         _sig_tp3_m = re.search(r"TP3:\s*([\d.]+)", auto_signal)
         _sig_tp3 = float(_sig_tp3_m.group(1)) if _sig_tp3_m else 0.0
-        if draw:
-            _spot_off_draw = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
-            _is_pts_draw = symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP
-            _dp_draw = 3 if _is_pts_draw else 5
-            _draw_level = round(draw['level'] + _spot_off_draw, _dp_draw)
-
-            # Cap TP1/TP2 at the draw level — never target beyond the realistic
-            # liquidity draw for the session. If draw distance < 2R/3R distance,
-            # the draw itself becomes the ceiling.
-            if direction == "BUY":
-                if _sig_tp1 and _sig_tp1 > _draw_level:
-                    logger.info(f"[draw] {symbol} TP1 {_sig_tp1} capped to draw {_draw_level}")
-                    _sig_tp1 = _draw_level
-                if _sig_tp2 and _sig_tp2 > _draw_level:
-                    _sig_tp2 = _draw_level
-                _sig_tp3 = _draw_level if _draw_level > (_sig_tp1 or 0) else 0.0
-            else:  # SELL
-                if _sig_tp1 and _sig_tp1 < _draw_level:
-                    logger.info(f"[draw] {symbol} TP1 {_sig_tp1} capped to draw {_draw_level}")
-                    _sig_tp1 = _draw_level
-                if _sig_tp2 and _sig_tp2 < _draw_level:
-                    _sig_tp2 = _draw_level
-                _sig_tp3 = _draw_level if _draw_level < (_sig_tp1 or 999999) else 0.0
-
-            logger.info(f"[draw] {symbol} draw level {_draw_level} ({draw['type']}) — TP1={_sig_tp1} TP2={_sig_tp2} TP3={_sig_tp3}")
 
         # ── SWEPT-LEVEL INVALIDATION CHECK (with buffer) ────────────────
         # Only invalidate if price has moved meaningfully beyond the swept
@@ -2179,6 +2157,35 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 f"[scanner] {symbol} swept-level SL: swept={_swept_level} buffer={_sw_buf} "
                 f"sl={_sig_sl} entry={_sig_entry} sl_dist={_sw_sl_dist:.5f} tp1={_sig_tp1}"
             )
+
+        # ── DRAW-ON-LIQUIDITY CAP — applied after all TP overrides so every
+        # signal type (OB Retracement, FVG Fill, Displacement FVG, Structure
+        # Setup) is capped equally before final dispatch.
+        if draw:
+            _spot_off_draw = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+            _is_pts_draw = symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP
+            _dp_draw = 3 if _is_pts_draw else 5
+            _draw_level = round(draw['level'] + _spot_off_draw, _dp_draw)
+
+            # Cap TP1/TP2 at the draw level — never target beyond the realistic
+            # liquidity draw for the session. If draw distance < 2R/3R distance,
+            # the draw itself becomes the ceiling.
+            if direction == "BUY":
+                if _sig_tp1 and _sig_tp1 > _draw_level:
+                    logger.info(f"[draw] {symbol} TP1 {_sig_tp1} capped to draw {_draw_level}")
+                    _sig_tp1 = _draw_level
+                if _sig_tp2 and _sig_tp2 > _draw_level:
+                    _sig_tp2 = _draw_level
+                _sig_tp3 = _draw_level if _draw_level > (_sig_tp1 or 0) else 0.0
+            else:  # SELL
+                if _sig_tp1 and _sig_tp1 < _draw_level:
+                    logger.info(f"[draw] {symbol} TP1 {_sig_tp1} capped to draw {_draw_level}")
+                    _sig_tp1 = _draw_level
+                if _sig_tp2 and _sig_tp2 < _draw_level:
+                    _sig_tp2 = _draw_level
+                _sig_tp3 = _draw_level if _draw_level < (_sig_tp1 or 999999) else 0.0
+
+            logger.info(f"[draw] {symbol} draw level {_draw_level} ({draw['type']}) — TP1={_sig_tp1} TP2={_sig_tp2} TP3={_sig_tp3}")
 
         # TP3 ordering validation — draw level must be further than TP2, not behind entry
         if _sig_tp3:
