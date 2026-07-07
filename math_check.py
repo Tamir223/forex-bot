@@ -35,7 +35,7 @@ try:
     from claude import _calculate_lot_size, PIP_VALUES
     from scanner import MIN_SL_DISTANCE, FUTURES_SPOT_OFFSET
     from config import MAX_WEEKLY_LOSSES
-    from drawdown_tracker import DrawdownTracker, _resume_overrides
+    from drawdown_tracker import DrawdownTracker
     IMPORTS_OK = True
 except Exception as e:
     IMPORTS_OK = False
@@ -267,24 +267,9 @@ section("SIGNAL PROTECTION:")
 if IMPORTS_OK:
     try:
         dt = DrawdownTracker()
-        ok(f"DrawdownTracker: get_losses_today / is_signals_paused / set_resume_override all present")
+        ok(f"DrawdownTracker: get_losses_today present")
     except Exception as e:
         fail("DrawdownTracker instantiation", str(e))
-
-    # Confirm is_signals_paused logic against threshold constants
-    try:
-        import inspect
-        src = inspect.getsource(DrawdownTracker.is_signals_paused)
-        if "losses_today >= 2" in src:
-            ok("2 losses today → signals pause (threshold confirmed in source)")
-        else:
-            fail("2-loss pause threshold", "losses_today >= 2 not found")
-        if "today_loss >= 200" in src:
-            ok("$200 daily loss → signals pause (threshold confirmed in source)")
-        else:
-            fail("$200 pause threshold", "today_loss >= 200 not found")
-    except Exception as e:
-        fail("Signal pause thresholds", str(e))
 
     try:
         if MAX_WEEKLY_LOSSES == 4:

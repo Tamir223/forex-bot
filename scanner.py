@@ -2643,9 +2643,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         # ── DRAWDOWN GUARD — per-user pre-send check ───────────────────────
                         try:
                             from database import load_challenge_state
-                            from drawdown_tracker import (
-                                state_from_json, check_signal_allowed, DrawdownTracker
-                            )
+                            from drawdown_tracker import state_from_json, check_signal_allowed
                             from prop_firm_profiles import get_profile as _get_profile_guard
                             _cs_json_guard = load_challenge_state(user.id)
                             if _cs_json_guard:
@@ -2662,13 +2660,6 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                                             text=f"⛔ *Signal blocked — drawdown protection*\n{_sig_reason}",
                                         )
                                         continue
-                            _dt_guard = DrawdownTracker()
-                            _paused, _pause_reason = _dt_guard.is_signals_paused(user.id)
-                            if _paused:
-                                logger.info(
-                                    f"[drawdown_guard] {symbol} suppressed for user {user.id} — {_pause_reason}"
-                                )
-                                continue
                         except Exception as _dg_err:
                             logger.error(f"[drawdown_guard] check failed for user {user.id}: {_dg_err}")
                         # ── END DRAWDOWN GUARD ─────────────────────────────────────────────
@@ -2841,7 +2832,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                     # ── DRAWDOWN GUARD — same check as main signals ────────────────
                     try:
                         from database import load_challenge_state
-                        from drawdown_tracker import state_from_json, check_signal_allowed, DrawdownTracker
+                        from drawdown_tracker import state_from_json, check_signal_allowed
                         from prop_firm_profiles import get_profile as _get_profile_orb
                         _cs_orb = load_challenge_state(_orb_user.id)
                         if _cs_orb:
@@ -2852,10 +2843,6 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                                 if not _sig_ok_orb:
                                     logger.info(f"[orb] {orb_symbol} blocked for user {_orb_user.id}: {_sig_reason_orb}")
                                     continue
-                        _dt_orb = DrawdownTracker()
-                        _paused_orb, _ = _dt_orb.is_signals_paused(_orb_user.id)
-                        if _paused_orb:
-                            continue
                     except Exception as _dg_orb_err:
                         logger.error(f"[orb] drawdown guard error for user {_orb_user.id}: {_dg_orb_err}")
 

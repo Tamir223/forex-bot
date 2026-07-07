@@ -13,9 +13,6 @@ from prop_firm_profiles import PropFirmProfile, DrawdownType
 
 logger = logging.getLogger(__name__)
 
-# In-memory resume overrides: user_id -> midnight UTC expiry
-_resume_overrides: dict = {}
-
 
 class DrawdownTracker:
     def get_losses_today(self, user_id: int) -> int:
@@ -37,54 +34,6 @@ class DrawdownTracker:
         except Exception as e:
             logger.error(f"get_losses_today error: {e}")
             return 0
-
-    def is_signals_paused(self, user_id: int) -> tuple:
-        global _resume_overrides
-        override_expiry = _resume_overrides.get(user_id)
-        if override_expiry:
-            now = datetime.now(timezone.utc)
-            if now < override_expiry:
-                return False, ""
-            else:
-                del _resume_overrides[user_id]
-
-        losses_today = self.get_losses_today(user_id)
-
-        # Prefer challenge_state.today_pnl — kept current by /logtrade via record_trade().
-        # user_state.daily_pnl is a separate field that /logtrade never writes to.
-        daily_pnl = 0.0
-        try:
-            from database import load_challenge_state
-            _cs_json = load_challenge_state(user_id)
-            if _cs_json:
-                daily_pnl = state_from_json(_cs_json).today_pnl
-        except Exception:
-            pass
-        if daily_pnl == 0.0:
-            # Fallback: user_state.daily_pnl (may be stale but better than nothing)
-            from database import get_state
-            daily_pnl = get_state(user_id).daily_pnl
-
-        logger.info(f"[pause_check] user={user_id} losses={losses_today} daily_pnl={daily_pnl:.2f}")
-
-        if losses_today >= 2:
-            if daily_pnl < 0:
-                return True, "2 losses today — signals paused. Type /resume to continue trading."
-            else:
-                # Net positive despite 2 losses — warn but allow signals through
-                pnl_str = f"+${daily_pnl:.2f}"
-                return False, f"⚠️ 2 losses today but still net positive ({pnl_str}). Trading carefully."
-
-        today_loss = -daily_pnl if daily_pnl < 0 else 0
-        if today_loss >= 200:
-            return True, "Daily loss $200 reached — signals paused. Type /resume to continue."
-
-        return False, ""
-
-    def set_resume_override(self, user_id: int):
-        now = datetime.now(timezone.utc)
-        midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        _resume_overrides[user_id] = midnight
 
 
 @dataclass
