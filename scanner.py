@@ -37,6 +37,9 @@ from scanner_improvements import (
     is_asia_range_tight,
     get_pip_spec,
     detect_breaker_block,
+    detect_orb_breakout,
+    ORB_INSTRUMENTS,
+    ORB_KILL_ZONES_FOR_SYMBOL,
 )
 import requests
 import yfinance as yf
@@ -1812,6 +1815,168 @@ def format_unified_signal(symbol: str, direction: str,
 
 
 
+_ORB_KZ_LABELS = {
+    "london":  "London Open",
+    "ny_open": "NY Open",
+    "asian":   "Asian Open",
+}
+
+
+def format_orb_signal(
+    symbol: str,
+    direction: str,
+    entry: float,
+    sl: float,
+    tp1: float,
+    tp2: float,
+    range_high: float,
+    range_low: float,
+    range_width: float,
+    kz_name: str,
+    lot_str: str,
+    daily_bias: dict,
+) -> str:
+    """Build the ⚡ ORB CONTINUATION SIGNAL Telegram message."""
+    DIV = "━━━━━━━━━━━━━━━━━━━━"
+    sym = symbol.upper()
+    _is_pts = sym in ("XAUUSD", "US100", "US30", "US500")
+    _dp = 3 if _is_pts else (3 if "JPY" in sym else 5)
+    sl_dist = abs(entry - sl)
+    if _is_pts:
+        _sl_display = f"{round(sl_dist, 1)} pts"
+    elif "JPY" in sym:
+        _sl_display = f"{round(sl_dist * 100, 1)} pips"
+    else:
+        _sl_display = f"{round(sl_dist * 10000, 1)} pips"
+    _tp1_r = abs(tp1 - entry) / sl_dist if sl_dist else 0.0
+    _tp2_r = abs(tp2 - entry) / sl_dist if sl_dist else 0.0
+    _dir_word = "Buy" if direction == "BUY" else "Sell"
+    _kz_label = _ORB_KZ_LABELS.get(kz_name, kz_name.replace("_", " ").title())
+    _bias_str = daily_bias.get("bias", "neutral").title()
+    _rw_str = f"{round(range_width, _dp)} pts" if _is_pts else f"{round(range_width * 10000, 1)} pips"
+    lines = [
+        DIV,
+        "⚡ ORB CONTINUATION SIGNAL",
+        DIV,
+        f"📊 {symbol} | {direction} | Opening Range Breakout",
+        f"⏰ Kill Zone: {_kz_label}  |  Range width: {_rw_str}",
+        f"📐 Opening range: {range_low:.{_dp}f} — {range_high:.{_dp}f}",
+        DIV,
+        f"📍 Entry:    {entry:.{_dp}f}  (breakout close — market order)",
+        f"🛑 SL:       {sl:.{_dp}f}  ({_sl_display})",
+        f"🎯 TP1:      {tp1:.{_dp}f}  ({_tp1_r:.1f}R)",
+        f"🎯 TP2:      {tp2:.{_dp}f}  ({_tp2_r:.1f}R)",
+        f"📦 Lots:     {lot_str}",
+        DIV,
+        f"✅ HTF Bias: {_bias_str} (confirmed)",
+        "✅ Breakout: candle CLOSE beyond range (wick-only = no entry)",
+        "✅ News filter: cleared",
+        "⚡ Type:     ORB Continuation / MARKET ORDER",
+        DIV,
+        f"🔄 {_dir_word} MARKET at {entry:.{_dp}f}",
+        "⚠️ Enter on next candle open — do not chase if price has moved significantly.",
+        DIV,
+    ]
+    return "\n".join(lines)
+
+
+async def scan_orb_symbol(symbol: str) -> dict | None:
+    """
+    Scan one ORB-eligible symbol for an Opening Range Breakout signal.
+    Separate dispatch path from scan_symbol() — does NOT run through 7-gate
+    check_tjr_gates(). Applies: news filter, HTF bias gate, cooldown/dedup.
+    Returns result dict (including orb_msg key) or None.
+    """
+    sym = symbol.upper()
+    if sym not in ORB_INSTRUMENTS:
+        return None
+
+    try:
+        # ── NEWS FILTER ───────────────────────────────────────────────────────
+        news_blocked, news_reason, _ = is_news_window(sym)
+        if news_blocked:
+            logger.info(f"[orb] {sym} BLOCKED by news — {news_reason}")
+            return None
+
+        # ── COOLDOWN / DEDUP — shared with OB Retracement via _last_signal_time ──
+        _sym_key = sym
+        if _sym_key in _last_signal_time:
+            _elapsed = _time.monotonic() - _last_signal_time[_sym_key]
+            if _elapsed < 90:
+                logger.info(f"[orb] {sym} suppressed — within hard-floor cooldown ({_elapsed:.0f}s)")
+                return None
+
+        _data = await fetch_all_timeframes(sym)
+        candles_15m = _data.get("candles_15m", [])
+        candles_5m  = _data.get("candles_5m",  [])
+        if not candles_15m or len(candles_15m) < 5:
+            return None
+
+        from scanner_improvements import get_daily_bias as _get_daily_bias
+        daily_bias = _get_daily_bias(sym, candles=_data.get("candles_daily"))
+
+        kz_list = ORB_KILL_ZONES_FOR_SYMBOL.get(sym, [])
+        for kz_name in kz_list:
+            orb = detect_orb_breakout(sym, candles_15m, candles_5m, kz_name, daily_bias)
+            if orb is None:
+                continue
+
+            direction = orb["direction"]
+            entry     = orb["entry"]
+            sl        = orb["sl"]
+            tp1       = orb["tp1"]
+            tp2       = orb["tp2"]
+
+            # RR validation (minimum 1.5R for TP1)
+            rr_valid, actual_rr = validate_risk_reward(entry, sl, tp1)
+            if not rr_valid:
+                logger.info(f"[orb] {sym} blocked — RR {actual_rr:.2f} < 1.5 minimum")
+                continue
+
+            # Lot sizing at 0.75% risk (same as OB Retracement signals)
+            _lot_str = "0.10"
+            try:
+                from claude import _calculate_lot_size as _cals, _PIP_SIZE as _lots_pip_size, _DEFAULT_PIP_SIZE as _lots_default_pip
+                _pip_size_l  = _lots_pip_size.get(sym, _lots_default_pip)
+                _sl_dist_raw = abs(entry - sl)
+                _is_pts_l    = sym in ("XAUUSD", "US100", "US30", "US500")
+                _sl_pts      = _sl_dist_raw if _is_pts_l else round(_sl_dist_raw / _pip_size_l, 2) if _pip_size_l > 0 else 10
+                _lot_full    = _cals(0.75, _sl_pts, sym, current_price=float(entry))
+                _lot_str     = _lot_full.split(" ")[0] if _lot_full else "0.10"
+            except Exception:
+                pass
+
+            msg = format_orb_signal(
+                symbol=sym, direction=direction,
+                entry=entry, sl=sl, tp1=tp1, tp2=tp2,
+                range_high=orb["range_high"], range_low=orb["range_low"],
+                range_width=orb["range_width"], kz_name=kz_name,
+                lot_str=_lot_str, daily_bias=daily_bias,
+            )
+
+            # Mark cooldown — prevents a second ORB signal for this symbol this cycle
+            _last_signal_time[_sym_key] = _time.monotonic()
+
+            logger.info(f"[orb] {sym} {direction} ORB signal ready — kz={kz_name} rr={actual_rr:.2f}")
+            return {
+                "symbol":     sym,
+                "direction":  direction,
+                "entry":      entry,
+                "sl":         sl,
+                "tp1":        tp1,
+                "tp2":        tp2,
+                "lot_str":    _lot_str,
+                "orb_msg":    msg,
+                "daily_bias": daily_bias,
+                "kz_name":    kz_name,
+            }
+
+    except Exception as e:
+        logger.error(f"[orb] {sym} scan error: {e}")
+
+    return None
+
+
 async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
     """
     Run full scan on one symbol. Returns alert dict if setup found, None otherwise.
@@ -2637,6 +2802,68 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
 
         except Exception as e:
             logger.error(f"[scanner] Symbol scan failed for {symbol}: {e}")
+
+    # ── ORB SCAN — separate dispatch path for ORB instruments ────────────────
+    # Runs after main scan so shared _last_signal_time cooldowns are respected:
+    # if an OB Retracement signal just fired for USDJPY, ORB is suppressed for 90s.
+    _orb_symbols = [s for s in pairs_this_cycle if s.upper() in ORB_INSTRUMENTS]
+    if _orb_symbols:
+        async def _scan_orb_one(sym):
+            try:
+                return sym, await scan_orb_symbol(sym)
+            except Exception as e:
+                logger.error(f"[run_scan] {sym} ORB scan error: {e}")
+                return sym, None
+
+        _orb_results = await asyncio.gather(*[_scan_orb_one(s) for s in _orb_symbols])
+
+        for orb_symbol, orb_result in _orb_results:
+            if orb_result is None:
+                continue
+            _orb_msg = orb_result.get("orb_msg", "")
+            if not _orb_msg:
+                continue
+            for chat_id in user_chat_ids:
+                try:
+                    from database import get_user_by_chat_id, get_user_watchlist
+                    _chat_user = get_user_by_chat_id(str(chat_id))
+                    if _chat_user:
+                        _user_wl = get_user_watchlist(_chat_user.id)
+                        if _user_wl:
+                            _user_syms = [s.strip().upper() for s in _user_wl.split(",")]
+                            if orb_symbol.upper() not in _user_syms:
+                                logger.info(f"[orb] Skipping {orb_symbol} for {chat_id} — not in watchlist")
+                                continue
+                    _orb_user = get_user_by_chat_id(str(chat_id))
+                    if not _orb_user or not _orb_user.is_active:
+                        continue
+
+                    # ── DRAWDOWN GUARD — same check as main signals ────────────────
+                    try:
+                        from database import load_challenge_state
+                        from drawdown_tracker import state_from_json, check_signal_allowed, DrawdownTracker
+                        from prop_firm_profiles import get_profile as _get_profile_orb
+                        _cs_orb = load_challenge_state(_orb_user.id)
+                        if _cs_orb:
+                            _st_orb = state_from_json(_cs_orb)
+                            _pf_orb = _get_profile_orb(_st_orb.firm_code)
+                            if _pf_orb:
+                                _sig_ok_orb, _sig_reason_orb = check_signal_allowed(_st_orb, _pf_orb)
+                                if not _sig_ok_orb:
+                                    logger.info(f"[orb] {orb_symbol} blocked for user {_orb_user.id}: {_sig_reason_orb}")
+                                    continue
+                        _dt_orb = DrawdownTracker()
+                        _paused_orb, _ = _dt_orb.is_signals_paused(_orb_user.id)
+                        if _paused_orb:
+                            continue
+                    except Exception as _dg_orb_err:
+                        logger.error(f"[orb] drawdown guard error for user {_orb_user.id}: {_dg_orb_err}")
+
+                    await bot.send_message(chat_id=chat_id, text=_orb_msg)
+                    alerts_sent += 1
+                    logger.info(f"[orb] {orb_symbol} ORB signal sent to {chat_id}")
+                except Exception as _orb_send_err:
+                    logger.error(f"[orb] {orb_symbol} send error to {chat_id}: {_orb_send_err}")
 
     cycle_time = _time.time() - cycle_start
     logger.info(f"[scanner] Cycle {cycle_num} completed in {cycle_time:.1f}s — {alerts_sent} alerts sent")

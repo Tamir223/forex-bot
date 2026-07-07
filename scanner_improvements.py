@@ -2491,3 +2491,195 @@ def detect_breaker_block(candles_15m: list, direction: str) -> dict | None:
                     }
 
     return None
+
+
+# ─── 30. ORB (OPENING RANGE BREAKOUT) DETECTION ──────────────────────────────
+# Research-backed rules (tradethatswing.com, litefinance.org, crosstrade.io,
+# buildalpha.com, damnpropfirms.com): 40-60% base win rate, 55%+ with HTF filter.
+# "ORB's job is to catch trend days and skip the chop" — enters ON breakout,
+# not on a pullback. Complements OB Retracement by catching displacement moves.
+
+ORB_INSTRUMENTS = {"US100", "US30", "US500", "XAUUSD", "USDJPY"}
+
+# Per-instrument kill zones to check for ORB (subset of _PAIR_KILL_ZONES).
+# Indices are closed at London open — NY open only. Gold and JPY active in both.
+ORB_KILL_ZONES_FOR_SYMBOL = {
+    "US100":  ["ny_open"],
+    "US30":   ["ny_open"],
+    "US500":  ["ny_open"],
+    "XAUUSD": ["london", "ny_open"],
+    "USDJPY": ["london", "ny_open"],
+}
+
+# Session state — cleared organically when a new session's date+kz_name key is created.
+# Key: (symbol_upper, date_str, kz_name)
+# Value: {"high": float|None, "low": float|None, "long_fired": bool, "short_fired": bool}
+_orb_state: dict = {}
+
+
+def _parse_candle_dt(dt_str: str) -> "datetime | None":
+    """Parse candle datetime string to timezone-aware UTC datetime."""
+    try:
+        dt = datetime.fromisoformat(str(dt_str))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def detect_orb_breakout(
+    symbol: str,
+    candles_15m: list,
+    candles_5m: list,
+    kz_name: str,
+    daily_bias: dict,
+) -> dict | None:
+    """
+    Detect an Opening Range Breakout (ORB) continuation signal.
+
+    Rules (research-consistent):
+    1. Opening range = first 15 min of the kill zone (kz_start_hour:00–:15 UTC).
+    2. Entry trigger = 5M or 15M candle CLOSE beyond range high (BUY) or range low (SELL).
+       Wick-only breaks do NOT count — confirmed close required.
+    3. SL = opposite side of the opening range.
+    4. TP = entry ± 2× range width (2R default, consistent with codebase convention).
+    5. One trade per side per session per symbol (long_fired / short_fired flags).
+    6. 75-minute cutoff after range close — no signal after deadline.
+    7. HTF bias gate: only BUY when daily bias is confirmed bullish,
+                      only SELL when daily bias is confirmed bearish.
+
+    Returns signal dict or None.
+    Log format: [orb] {symbol} {direction} breakout confirmed — range {high}-{low},
+                entry={entry}, sl={sl}, tp={tp}
+    """
+    sym = symbol.upper()
+    now = datetime.now(timezone.utc)
+    today_str = str(now.date())
+    state_key = (sym, today_str, kz_name)
+
+    kz_bounds = _KILL_ZONES.get(kz_name)
+    if kz_bounds is None:
+        return None
+    kz_start_hour = kz_bounds[0]
+
+    range_open_dt  = now.replace(hour=kz_start_hour, minute=0,  second=0, microsecond=0)
+    range_close_dt = now.replace(hour=kz_start_hour, minute=15, second=0, microsecond=0)
+    deadline       = range_close_dt + timedelta(minutes=75)
+
+    # Must be after the range has closed and before the deadline
+    if now < range_close_dt or now > deadline:
+        return None
+
+    # HTF bias gate — check before building range to fail fast
+    bias      = daily_bias.get("bias", "neutral")
+    confirmed = daily_bias.get("confirmed", False)
+    if not confirmed or bias == "neutral":
+        return None
+
+    # Init session state
+    if state_key not in _orb_state:
+        _orb_state[state_key] = {
+            "high": None, "low": None,
+            "long_fired": False, "short_fired": False,
+        }
+    state = _orb_state[state_key]
+
+    # Both sides already traded — nothing left to do this session
+    if state["long_fired"] and state["short_fired"]:
+        return None
+
+    # Build opening range from 15M candles in the range window
+    range_candles = [
+        c for c in candles_15m
+        if (dt := _parse_candle_dt(c.get("datetime", ""))) is not None
+        and range_open_dt <= dt < range_close_dt
+    ]
+    if range_candles:
+        orb_high = max(c["high"] for c in range_candles)
+        orb_low  = min(c["low"]  for c in range_candles)
+        state["high"] = orb_high
+        state["low"]  = orb_low
+    elif state["high"] is not None and state["low"] is not None:
+        orb_high = state["high"]
+        orb_low  = state["low"]
+    else:
+        return None  # range not yet established
+
+    if orb_high <= orb_low:
+        return None
+
+    range_width = orb_high - orb_low
+
+    # Find the first confirming breakout close in the post-range window
+    def _find_breakout(candles: list) -> dict | None:
+        for c in candles:
+            dt = _parse_candle_dt(c.get("datetime", ""))
+            if dt is None:
+                continue
+            if not (range_close_dt <= dt < deadline):
+                continue
+            close_val = c["close"]
+            if close_val > orb_high and not state["long_fired"] and bias == "bullish":
+                return {"direction": "BUY",  "entry": close_val}
+            if close_val < orb_low  and not state["short_fired"] and bias == "bearish":
+                return {"direction": "SELL", "entry": close_val}
+        return None
+
+    # 5M first (faster confirmation), fall back to 15M
+    raw = _find_breakout(candles_5m) or _find_breakout(candles_15m)
+    if raw is None:
+        return None
+
+    direction = raw["direction"]
+    entry_raw = raw["entry"]
+
+    # Import scanner-level helpers via lazy import (avoids circular at module load)
+    try:
+        from scanner import FUTURES_SPOT_OFFSET as _FSO
+        from scanner import _min_sl_dist, _max_sl_dist
+    except Exception:
+        _FSO = {}
+        def _min_sl_dist(s): return 0.0   # noqa
+        def _max_sl_dist(s): return 999.0  # noqa
+
+    spot_off = _FSO.get(sym, 0)
+    _is_pts  = sym in ("XAUUSD", "US100", "US30", "US500")
+    _dp      = 3 if _is_pts else (3 if "JPY" in sym else 5)
+
+    if direction == "BUY":
+        sl_dist  = max(abs(entry_raw - orb_low), _min_sl_dist(sym))
+        sl_dist  = min(sl_dist, _max_sl_dist(sym))
+        sl_raw   = entry_raw - sl_dist
+        tp1_raw  = entry_raw + range_width * 2.0
+        tp2_raw  = entry_raw + range_width * 3.0
+        state["long_fired"]  = True
+    else:
+        sl_dist  = max(abs(orb_high - entry_raw), _min_sl_dist(sym))
+        sl_dist  = min(sl_dist, _max_sl_dist(sym))
+        sl_raw   = entry_raw + sl_dist
+        tp1_raw  = entry_raw - range_width * 2.0
+        tp2_raw  = entry_raw - range_width * 3.0
+        state["short_fired"] = True
+
+    logger.info(
+        f"[orb] {sym} {direction} breakout confirmed — "
+        f"range {round(orb_high + spot_off, _dp)}-{round(orb_low + spot_off, _dp)}, "
+        f"entry={round(entry_raw + spot_off, _dp)}, "
+        f"sl={round(sl_raw + spot_off, _dp)}, "
+        f"tp={round(tp1_raw + spot_off, _dp)}"
+    )
+
+    return {
+        "direction":   direction,
+        "entry":       round(entry_raw + spot_off, _dp),
+        "sl":          round(sl_raw    + spot_off, _dp),
+        "tp1":         round(tp1_raw   + spot_off, _dp),
+        "tp2":         round(tp2_raw   + spot_off, _dp),
+        "range_high":  round(orb_high  + spot_off, _dp),
+        "range_low":   round(orb_low   + spot_off, _dp),
+        "range_width": round(range_width, _dp),
+        "kz_name":     kz_name,
+    }
