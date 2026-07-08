@@ -1901,7 +1901,8 @@ def format_orb_signal(
     _dir_word = "Buy" if direction == "BUY" else "Sell"
     _kz_label = _ORB_KZ_LABELS.get(kz_name, kz_name.replace("_", " ").title())
     _bias_str = daily_bias.get("bias", "neutral").title()
-    _rw_str = f"{round(range_width, _dp)} pts" if _is_pts else f"{round(range_width * 10000, 1)} pips"
+    _rw_pip_size = get_pip_spec(sym).get("pip", 0.0001)
+    _rw_str = f"{round(range_width, _dp)} pts" if _is_pts else f"{round(range_width / _rw_pip_size, 1)} pips"
     lines = [
         DIV,
         "⚡ ORB CONTINUATION SIGNAL",
