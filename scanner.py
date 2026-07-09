@@ -99,6 +99,7 @@ _last_swept_level: dict = {}   # {symbol_upper: float} — last swept level that
 _last_signal_entry: dict = {}  # {symbol: float}
 _fetch_fail_times: dict = {}   # {symbol_upper: [monotonic_ts, ...]} — yfinance failure tracking
 _last_breaker_log: dict = {}   # {(symbol, b_low, b_high): monotonic_float} — breaker no-FVG log dedup
+_fvg_pending_holds: dict = {}  # {(symbol, fvg_key): monotonic_float} — log dedup for FVG LTF hold state
 
 
 def _record_fetch_failure(sym: str) -> None:
@@ -861,6 +862,19 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
                 gap_size = c3["low"] - c1["high"]
                 _top = round(c3["low"], 5)
                 _bot = round(c1["high"], 5)
+                # Displacement-strength: how far c2 closed beyond c1's high, relative to c1's range
+                _c1_range = c1["high"] - c1["low"]
+                if _c1_range > 0:
+                    _c2_disp = max(c2["close"] - c1["high"], 0.0)
+                    _disp_ratio = _c2_disp / _c1_range
+                else:
+                    _disp_ratio = 0.0
+                if _disp_ratio >= 0.5:
+                    _swept_ok, _ = detect_liquidity_sweep(candles, "BUY", symbol)
+                    _fvg_strength = "Exceptional" if _swept_ok else "Quietly Strong"
+                    _fvg_stier = "S-tier" if _swept_ok else "B-tier"
+                else:
+                    _fvg_strength, _fvg_stier = "Weak", "C-tier"
                 return {
                     "type": "bullish_fvg",
                     "top": _top,
@@ -870,6 +884,8 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
                     "mid": round((_top + _bot) / 2, 5),
                     "size": round(gap_size, 5),
                     "datetime": c2["datetime"],
+                    "strength": _fvg_strength,
+                    "strength_tier": _fvg_stier,
                 }
 
             # Bearish FVG
@@ -877,6 +893,19 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
                 gap_size = c1["low"] - c3["high"]
                 _top = round(c1["low"], 5)
                 _bot = round(c3["high"], 5)
+                # Displacement-strength: how far c2 closed below c1's low, relative to c1's range
+                _c1_range = c1["high"] - c1["low"]
+                if _c1_range > 0:
+                    _c2_disp = max(c1["low"] - c2["close"], 0.0)
+                    _disp_ratio = _c2_disp / _c1_range
+                else:
+                    _disp_ratio = 0.0
+                if _disp_ratio >= 0.5:
+                    _swept_ok, _ = detect_liquidity_sweep(candles, "SELL", symbol)
+                    _fvg_strength = "Exceptional" if _swept_ok else "Quietly Strong"
+                    _fvg_stier = "S-tier" if _swept_ok else "B-tier"
+                else:
+                    _fvg_strength, _fvg_stier = "Weak", "C-tier"
                 return {
                     "type": "bearish_fvg",
                     "top": _top,
@@ -886,11 +915,41 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
                     "mid": round((_top + _bot) / 2, 5),
                     "size": round(gap_size, 5),
                     "datetime": c2["datetime"],
+                    "strength": _fvg_strength,
+                    "strength_tier": _fvg_stier,
                 }
     except Exception as e:
         logger.error(f"FVG detection error: {e}")
 
     return None
+
+
+def _check_fvg_ltf_confirmation(symbol: str, direction: str, fvg: dict, candles_5m: list) -> bool:
+    """
+    Check for 5M MSS/CHoCH or rejection candle before dispatching an FVG Fill signal.
+    Research: first FVG touch is frequently institutional inducement (stop-hunt). The real
+    entry trigger is a lower-timeframe structure shift or rejection, not the zone touch alone.
+    Reuses detect_market_structure_shift (the same path used for Unicorn CHoCH detection)
+    and detect_rejection_candle (used for OB Retracement confirmation).
+    Returns True if LTF confirmation is present; False if still unconfirmed (hold).
+    """
+    if not candles_5m or len(candles_5m) < 10:
+        return True  # no 5M data — fail-open so signal coverage is not silently broken
+
+    # Check a) — 5M MSS/CHoCH in the expected trade direction
+    mss_ok, mss_desc = detect_market_structure_shift(candles_5m, direction)
+    if mss_ok:
+        logger.info(f"[fvg_fill] {symbol} 5M MSS/CHoCH at FVG zone: {mss_desc}")
+        return True
+
+    # Check b) — engulfing or rejection candle closing back out of the zone in the trade direction
+    fvg_mid = fvg.get("mid", (fvg["top"] + fvg["bottom"]) / 2)
+    rejection_ok, rejection_type = detect_rejection_candle(candles_5m, direction, fvg_mid, symbol)
+    if rejection_ok:
+        logger.info(f"[fvg_fill] {symbol} 5M {rejection_type} rejection confirmed at FVG zone")
+        return True
+
+    return False
 
 
 def _try_reprice_stale_signal(
@@ -1336,9 +1395,20 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     )
     gate_details['sweep_type'] = _sweep_type
 
-    # GATE 5 — OB or FVG present; C-tier OBs fail; liquidity runs require OB+FVG confluence
+    # GATE 5 — OB or FVG present; C-tier OBs fail; Weak FVGs (C-tier after penalty) fail;
+    # liquidity runs require OB+FVG confluence
     _has_ob = bool(ob) and ob.get('tier', '') != 'C-tier'
-    _has_fvg = bool(fvg)
+    _has_fvg = bool(fvg) and fvg.get('strength_tier', 'B-tier') != 'C-tier'
+    if fvg:
+        if _has_fvg and fvg.get('strength') == "Exceptional":
+            logger.info(
+                f"[fvg_strength] {symbol} Exceptional FVG — displacement+sweep, no tier penalty"
+            )
+        elif not _has_fvg and fvg.get('strength_tier') == 'C-tier':
+            logger.info(
+                f"[fvg_strength] {symbol} Weak FVG {fvg.get('display_bottom')}"
+                f"-{fvg.get('display_top')} — walked down to C-tier, gate fail"
+            )
     _has_displacement_fvg = bool(displacement) and is_price_in_displacement_fvg(current_price, displacement)
     _has_confluence = _has_ob and _has_fvg
     _is_liquidity_run = _sweep_type == "liquidity_run"
@@ -1375,8 +1445,13 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     elif fvg:
         _fb = fvg.get("display_bottom", round(fvg["bottom"] + _disp_off, _dp))
         _ft = fvg.get("display_top",    round(fvg["top"]    + _disp_off, _dp))
-        if _is_liquidity_run:
-            gate_details['ob_fvg'] = f"FVG {_fb}-{_ft} (FVG only — confluence required)"
+        _fvg_strength = fvg.get('strength', '')
+        if fvg.get('strength_tier') == 'C-tier':
+            gate_details['ob_fvg'] = f"FVG {_fb}-{_ft} (Weak — gate fail)"
+        elif _is_liquidity_run:
+            gate_details['ob_fvg'] = f"FVG {_fb}-{_ft} ({_fvg_strength} — confluence required)" if _fvg_strength else f"FVG {_fb}-{_ft} (FVG only — confluence required)"
+        elif _fvg_strength:
+            gate_details['ob_fvg'] = f"FVG {_fb}-{_ft} (fresh, {_fvg_strength})"
         else:
             gate_details['ob_fvg'] = f"FVG {_fb}-{_ft} (fresh)"
     else:
@@ -1761,7 +1836,9 @@ def format_unified_signal(symbol: str, direction: str,
     if fvg:
         _fvg_bot = fvg.get("display_bottom", round(fvg["bottom"] + FUTURES_SPOT_OFFSET.get(sym, 0), _dp))
         _fvg_top = fvg.get("display_top",    round(fvg["top"]    + FUTURES_SPOT_OFFSET.get(sym, 0), _dp))
-        _cond_lines.append(f"✅ FVG: {_fvg_bot}-{_fvg_top} (fresh)")
+        _fvg_strength_label = fvg.get('strength', '')
+        _fvg_strength_suffix = f", {_fvg_strength_label}" if _fvg_strength_label else ""
+        _cond_lines.append(f"✅ FVG: {_fvg_bot}-{_fvg_top} (fresh{_fvg_strength_suffix})")
     if structure.get("bos"):
         _cond_lines.append("✅ BOS confirmed (body close)")
     _kz_short = (kill_zone_label
@@ -2239,6 +2316,28 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             logger.info(f"[scanner] {symbol} 5M OB found within 15M zone: entry={_refinement_5m['entry']} sl={_refinement_5m['sl']}")
         else:
             logger.info(f"[scanner] {symbol} no 5M OB in zone — falling back to 15M entry")
+
+        # ── FVG FILL: REQUIRE LTF CONFIRMATION AT RETEST ──────────────────────
+        # Research: first FVG touch is frequently institutional inducement (stop-hunt).
+        # The entry trigger is a 5M MSS/CHoCH or rejection candle at the zone, not the touch alone.
+        # Reuses _check_fvg_ltf_confirmation (detect_market_structure_shift + detect_rejection_candle).
+        _raw_cp_ltf = float(candles[0]["close"]) if candles else 0.0
+        _is_disp_fvg = displacement and is_price_in_displacement_fvg(_raw_cp_ltf, displacement)
+        if fvg and not ob and not _is_disp_fvg:
+            _fvg_ltf_ok = _check_fvg_ltf_confirmation(symbol, direction, fvg, candles_5m)
+            if not _fvg_ltf_ok:
+                _fvg_hold_key = (symbol, f"{fvg['bottom']:.5f}-{fvg['top']:.5f}")
+                _now_mono = _time.monotonic()
+                _last_hold_log = _fvg_pending_holds.get(_fvg_hold_key, 0.0)
+                if _now_mono - _last_hold_log >= 90:
+                    logger.info(
+                        f"[fvg_fill] {symbol} touched FVG "
+                        f"{fvg.get('display_bottom', round(fvg['bottom'], 5))}"
+                        f"-{fvg.get('display_top', round(fvg['top'], 5))} "
+                        f"— no LTF confirmation yet, holding"
+                    )
+                    _fvg_pending_holds[_fvg_hold_key] = _now_mono
+                return None  # do not update _last_signal_time — allow retry on next scan
 
         # ── BUILD SIGNAL LEVELS ─────────────────────────────────────────────────
         current_price = price_data.get("price", 0) if price_data else 0
