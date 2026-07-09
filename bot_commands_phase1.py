@@ -149,18 +149,30 @@ async def cmd_logtrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile = get_profile(state.firm_code)
     state, warnings = record_trade(state, profile, pnl)
     save_challenge_state(user.id, state.firm_code, state_to_json(state))
-    # INSERT into trades table
+    # INSERT into trades table — pull signal metadata from last dispatched signal
     if result in ("WIN", "LOSS"):
         try:
+            from bot import last_analysis as _last_analysis
+            _meta = _last_analysis.get(str(update.effective_user.id), {})
+            # Use pair from /logtrade args if provided, otherwise fall back to last signal pair
+            _pair = pair or _meta.get("pair") or None
+            _direction = _meta.get("direction") or None
+            _signal_source = _meta.get("signal_source") or None
+            _grade = _meta.get("grade") or None
             with get_conn() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        """INSERT INTO trades (user_id, result, pair, pnl, pnl_amount, created_at)
-                           VALUES (%s, %s, %s, %s, %s, NOW())""",
-                        (user.id, result, pair, pnl, amount)
+                        """INSERT INTO trades (user_id, result, pair, pnl, pnl_amount,
+                                              direction, signal_source, grade, created_at)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())""",
+                        (user.id, result, _pair, pnl, amount,
+                         _direction, _signal_source, _grade)
                     )
                 conn.commit()
-            logger.info(f"[logtrade] Saved {result} {pair} pnl=${amount} for user {user.id}")
+            logger.info(
+                f"[logtrade] Saved {result} {_pair} pnl=${amount} "
+                f"dir={_direction} src={_signal_source} grade={_grade} for user {user.id}"
+            )
         except Exception as e:
             logger.error(f"[logtrade] DB insert error: {e}")
     # Stop trade monitoring when WIN or LOSS is logged via /logtrade

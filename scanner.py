@@ -2839,6 +2839,23 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
 
                         # Build minimal analysis dict for YES/NO trade handler
                         _risk_pct_val = result.get("risk_pct", 0.50)
+                        # Derive signal_source and grade from what the signal actually is
+                        _gd_detail = gate_details.get("ob_fvg", "")
+                        if "UNICORN" in _gd_detail:
+                            _sig_source = "Unicorn"
+                            _sig_grade  = "Unicorn"
+                        elif ob:
+                            _sig_source = "OB Retracement"
+                            _sig_grade  = ob.get("tier", "B-tier")
+                        elif fvg:
+                            _sig_source = "FVG Fill"
+                            _sig_grade  = fvg.get("strength", "") or fvg.get("strength_tier", "B-tier")
+                        elif displacement:
+                            _sig_source = "Displacement FVG"
+                            _sig_grade  = "B-tier"
+                        else:
+                            _sig_source = "Structure Setup"
+                            _sig_grade  = "B-tier"
                         _analysis = {
                             "pair":          result["symbol"],
                             "direction":     result["direction"],
@@ -2848,8 +2865,8 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                             "tp2":           result.get("tp2", 0),
                             "risk_percent":  _risk_pct_val,
                             "confidence":    score,
-                            "grade":         "A" if score == 10 else "B",
-                            "signal_source": "TNL Scanner",
+                            "grade":         _sig_grade,
+                            "signal_source": _sig_source,
                         }
 
                         # Store signal for YES/NO handler — do NOT log trade yet
@@ -2997,6 +3014,22 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                     await bot.send_message(chat_id=chat_id, text=_orb_msg)
                     alerts_sent += 1
                     logger.info(f"[orb] {orb_symbol} ORB signal sent to {chat_id}")
+                    # Store signal metadata so /logtrade can capture signal_source + direction
+                    try:
+                        from bot import last_analysis as _la_orb
+                        _la_orb[str(chat_id)] = {
+                            "pair":          orb_symbol,
+                            "direction":     orb_result.get("direction", ""),
+                            "entry_zone":    orb_result.get("entry", 0),
+                            "stop_loss":     orb_result.get("sl", 0),
+                            "tp1":           orb_result.get("tp1", 0),
+                            "risk_percent":  0.75,
+                            "confidence":    10,
+                            "grade":         "B-tier",
+                            "signal_source": "ORB Continuation",
+                        }
+                    except Exception as _la_orb_err:
+                        logger.error(f"[orb] last_analysis update error: {_la_orb_err}")
                 except Exception as _orb_send_err:
                     logger.error(f"[orb] {orb_symbol} send error to {chat_id}: {_orb_send_err}")
 
