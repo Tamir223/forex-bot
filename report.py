@@ -99,6 +99,12 @@ def _action_line(analysis: dict) -> str:
     )
 
 
+_SIGNAL_DISCLAIMER = (
+    "Standardized signal, not tailored to your account. Not financial advice. "
+    "Your decision to act is your own. Trading involves substantial risk of loss."
+)
+
+
 def execute_report(analysis: dict) -> str:
     confluence = calculate_confluence(analysis)
     return (
@@ -140,6 +146,7 @@ def execute_report(analysis: dict) -> str:
         + f"\n📝 REASON\n"
         f"{fmt(analysis.get('reason'))}\n"
         + _action_line(analysis)
+        + f"\n{_SIGNAL_DISCLAIMER}"
     )
 
 
