@@ -1772,6 +1772,12 @@ def build_auto_signal(symbol: str, direction: str, price: float,
 
 
 
+_SIGNAL_DISCLAIMER = (
+    "Standardized signal, not tailored to your account. Not financial advice. "
+    "Your decision to act is your own. Trading involves substantial risk of loss."
+)
+
+
 def format_unified_signal(symbol: str, direction: str,
                           entry: float, sl: float, tp1: float, tp2: float,
                           ob: dict, fvg: dict, structure: dict, htf_bias: dict,
@@ -1935,6 +1941,7 @@ def format_unified_signal(symbol: str, direction: str,
         DIV,
         _action,
         DIV,
+        _SIGNAL_DISCLAIMER,
     ]
     return "\n".join(lines)
 
@@ -2002,6 +2009,7 @@ def format_orb_signal(
         f"🔄 {_dir_word} MARKET at {entry:.{_dp}f}",
         "⚠️ Enter on next candle open — do not chase if price has moved significantly.",
         DIV,
+        _SIGNAL_DISCLAIMER,
     ]
     return "\n".join(lines)
 
