@@ -2779,6 +2779,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                 direction = result.get("direction", "")
                 symbol = result.get("symbol", "")
 
+                _discord_sent_main = False
                 for chat_id in user_chat_ids:
                     try:
                         # Filter by user watchlist
@@ -2955,6 +2956,11 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                             reply_markup=keyboard,
                         )
 
+                        if not _discord_sent_main:
+                            from discord_bridge import send_to_discord as _send_discord
+                            asyncio.create_task(_send_discord(msg))
+                            _discord_sent_main = True
+
                         # Lock direction for 30 min after a signal fires
                         _locked_until = _time.time() + 1800
                         _direction_lock[symbol] = {"direction": direction, "locked_until": _locked_until}
@@ -2987,6 +2993,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
             _orb_msg = orb_result.get("orb_msg", "")
             if not _orb_msg:
                 continue
+            _discord_sent_orb = False
             for chat_id in user_chat_ids:
                 try:
                     from database import get_user_by_chat_id, get_user_watchlist
@@ -3020,6 +3027,10 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         logger.error(f"[orb] drawdown guard error for user {_orb_user.id}: {_dg_orb_err}")
 
                     await bot.send_message(chat_id=chat_id, text=_orb_msg)
+                    if not _discord_sent_orb:
+                        from discord_bridge import send_to_discord as _send_discord_orb
+                        asyncio.create_task(_send_discord_orb(_orb_msg))
+                        _discord_sent_orb = True
                     alerts_sent += 1
                     logger.info(f"[orb] {orb_symbol} ORB signal sent to {chat_id}")
                     # Store signal metadata so /logtrade can capture signal_source + direction

@@ -455,6 +455,8 @@ async def process_signal_queue():
                     [InlineKeyboardButton("❌ Limit Not Filled", callback_data="trade_limit_not_filled")],
                 ])
                 await bot.send_message(chat_id=int(chat_id), text=report, reply_markup=_grade_keyboard)
+                from discord_bridge import send_to_discord as _send_discord_sq
+                asyncio.create_task(_send_discord_sq(report))
         except Exception as e:
             logger.error(f"Signal queue worker error: {e}")
         finally:
@@ -862,6 +864,8 @@ async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 parse_mode="Markdown",
                 reply_markup=execute_keyboard
             )
+            from discord_bridge import send_to_discord as _send_discord_ag
+            asyncio.create_task(_send_discord_ag(report_text))
 
     except Exception as e:
         logger.error(f"callback_autograde error: {e}")
