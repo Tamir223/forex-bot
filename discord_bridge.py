@@ -1,11 +1,13 @@
 """
 Discord webhook delivery for TNL Trader signals.
-Mirrors the exact same content sent to Telegram — no separate message path.
+Telegram receives the original message with real calculated lots.
+Discord receives a transformed version with generic position-sizing guidance.
 """
 
 import asyncio
 import logging
 import os
+import re
 
 import httpx
 
@@ -13,6 +15,19 @@ logger = logging.getLogger(__name__)
 
 _DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
 _CHUNK_LIMIT = 1900  # Discord hard limit is 2000; stay 100 chars under
+
+_POSITION_SIZE_GUIDANCE = (
+    "📐 Position size: risk 0.5-1% of your account per trade. "
+    "Size = (Account × Risk%) ÷ (SL pips × pip value)."
+)
+
+# Matches both "📦 Lots:     0.05" (unified signal / ORB) and plain "Lots: 0.05" (execute_report).
+_LOTS_RE = re.compile(r"^(?:📦\s*)?Lots:.*$", re.MULTILINE)
+
+
+def strip_lots_for_discord(message: str) -> str:
+    """Replace the account-specific lots line with generic position-sizing guidance."""
+    return _LOTS_RE.sub(_POSITION_SIZE_GUIDANCE, message)
 
 
 async def send_to_discord(message: str) -> None:

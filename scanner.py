@@ -2957,8 +2957,8 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         )
 
                         if not _discord_sent_main:
-                            from discord_bridge import send_to_discord as _send_discord
-                            asyncio.create_task(_send_discord(msg))
+                            from discord_bridge import send_to_discord as _send_discord, strip_lots_for_discord as _strip_discord
+                            asyncio.create_task(_send_discord(_strip_discord(msg)))
                             _discord_sent_main = True
 
                         # Lock direction for 30 min after a signal fires
@@ -3028,8 +3028,8 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
 
                     await bot.send_message(chat_id=chat_id, text=_orb_msg)
                     if not _discord_sent_orb:
-                        from discord_bridge import send_to_discord as _send_discord_orb
-                        asyncio.create_task(_send_discord_orb(_orb_msg))
+                        from discord_bridge import send_to_discord as _send_discord_orb, strip_lots_for_discord as _strip_discord_orb
+                        asyncio.create_task(_send_discord_orb(_strip_discord_orb(_orb_msg)))
                         _discord_sent_orb = True
                     alerts_sent += 1
                     logger.info(f"[orb] {orb_symbol} ORB signal sent to {chat_id}")
