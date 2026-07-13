@@ -2489,6 +2489,34 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
             logger.info(f"[draw] {symbol} draw level {_draw_level} ({draw['type']}) — TP1={_sig_tp1} TP2={_sig_tp2} TP3={_sig_tp3}")
 
+            # ── POST-CAP GUARD 1: TP1 = TP2 collapse ──────────────────────────
+            # When draw level falls between natural TP1 and TP2, both get pinned
+            # to the same value. A signal with duplicate targets is invalid — block
+            # instead of dispatching. This is the same root-cause class as the
+            # ordering bugs fixed previously (validate-early, silently-invalidate-late).
+            if _sig_tp1 and _sig_tp2 and _sig_tp1 == _sig_tp2:
+                logger.info(
+                    f"[draw_cap] {symbol} draw too close for valid TP1/TP2 separation "
+                    f"(both collapsed to {_sig_tp1}) — blocking"
+                )
+                _last_signal_time[_sym_key] = _time.monotonic()
+                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+                return None
+
+            # ── POST-CAP GUARD 2: 1.5R minimum re-validation ──────────────────
+            # The cap may have moved TP1 close enough to entry that R:R falls
+            # below the 1.5R floor validated at signal build time. Re-check with
+            # the final capped TP1 before allowing dispatch.
+            if _sig_tp1 and _sig_sl:
+                _cap_rr_valid, _cap_rr = validate_risk_reward(_sig_entry, _sig_sl, _sig_tp1)
+                if not _cap_rr_valid:
+                    logger.info(
+                        f"[draw_cap] {symbol} post-cap R:R {_cap_rr:.2f} below 1.5R minimum — blocking"
+                    )
+                    _last_signal_time[_sym_key] = _time.monotonic()
+                    _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+                    return None
+
         # TP3 ordering validation — draw level must be further than TP2, not behind entry
         if _sig_tp3:
             if direction == "BUY":
