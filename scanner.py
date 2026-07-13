@@ -407,11 +407,13 @@ BASE_URL = "https://api.twelvedata.com"
 SYMBOLS = [
     'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY',
     'AUDUSD', 'USDCAD', 'NZDUSD', 'USDCHF',
-    'US100', 'US30', 'US500',
+    'USOIL',
+    # 'US100', 'US30', 'US500',  # disabled — zero fills to date
 ]
 
 # Default watchlist — users can customize with /watch command
-DEFAULT_WATCHLIST = ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "USDCHF", "AUDUSD", "NZDUSD", "XAUUSD", "USOIL", "US100", "US30", "US500"]
+DEFAULT_WATCHLIST = ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "USDCHF", "AUDUSD", "NZDUSD", "XAUUSD", "USOIL"]
+# Disabled: "US100", "US30", "US500" — zero fills to date; re-add here + SYMBOLS + _preferred_order to restore
 
 
 
@@ -2762,8 +2764,12 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
             if _wl_str:
                 _user_symbol_union.update(s.strip().upper() for s in _wl_str.split(","))
 
+    # Symbols excluded from active scanning — re-add to SYMBOLS and remove this line to restore
+    _user_symbol_union -= {"US100", "US30", "US500"}
+
     # Scan all pairs every cycle — XAUUSD always first, then remaining in preferred order
-    _preferred_order = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF", "US100", "US30", "US500"]
+    _preferred_order = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF", "USOIL"]
+    # Disabled: "US100", "US30", "US500" — zero fills to date
     pairs_this_cycle = [s for s in _preferred_order if s in _user_symbol_union]
     pairs_this_cycle += [s for s in _user_symbol_union if s not in _preferred_order]
 
