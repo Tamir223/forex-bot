@@ -2774,10 +2774,19 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                 })
 
                 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                signal_key = result.get("signal_key", "")
-                score = result.get("score", 0)
-                direction = result.get("direction", "")
-                symbol = result.get("symbol", "")
+                signal_key   = result.get("signal_key", "")
+                score        = result.get("score", 0)
+                direction    = result.get("direction", "")
+                symbol       = result.get("symbol", "")
+                # Extract result variables here so they are always bound before any
+                # per-user code runs. Without this, gate_details/ob/fvg/displacement
+                # are assigned inside the user loop (line ~2903) but read earlier
+                # (line ~2852), causing UnboundLocalError on the first signal of every
+                # scan cycle (Python treats them as local due to the later assignment).
+                gate_details = result.get("gate_details", {})
+                ob           = result.get("ob")
+                fvg          = result.get("fvg")
+                displacement = result.get("displacement")
 
                 _discord_sent_main = False
                 for chat_id in user_chat_ids:

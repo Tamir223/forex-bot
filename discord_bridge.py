@@ -32,8 +32,12 @@ def strip_lots_for_discord(message: str) -> str:
 
 async def send_to_discord(message: str) -> None:
     """POST message to Discord webhook. Never raises — errors are logged only."""
-    url = _DISCORD_WEBHOOK_URL
+    url = os.getenv("DISCORD_WEBHOOK_URL", "").strip() or _DISCORD_WEBHOOK_URL
     if not url:
+        logger.error(
+            "[discord] DISCORD_WEBHOOK_URL is not set or empty — message dropped. "
+            "Set the env var and restart to restore Discord delivery."
+        )
         return
 
     chunks = _split(message)
