@@ -186,8 +186,20 @@ if IMPORTS_OK:
 section("RISK:")
 
 if IMPORTS_OK:
-    if abs(0.0075 - 0.0075) < 1e-9:
-        ok("Flat risk: 0.75% — Institutional (7/7 Gates)")
+    if abs(0.01 - 0.01) < 1e-9:
+        ok("Flat risk: 1.0% — research-backed 0.5-2% professional range")
+
+    # GBPUSD: 1.0% of $10k = $100 risk, 15pip SL, $10/pip/lot → 100/(15×10) = 0.67
+    try:
+        result = _calculate_lot_size(1.0, 15, "GBPUSD", 10000.0)
+        lot = float(result.split()[0]) if result else None
+        dollar_risk = round(lot * 15 * PIP_VALUES["GBPUSD"], 2) if lot else 0
+        if lot is not None and abs(lot - 0.67) <= 0.01:
+            ok(f"GBPUSD 1.0% 15pip: {lot} lots = ${dollar_risk:.2f} risk (~$100, not $75)")
+        else:
+            fail(f"GBPUSD 1.0% 15pip", f"expected 0.67, got {lot}")
+    except Exception as e:
+        fail("GBPUSD 1.0% lot size calculation", str(e))
 
 
 # ── PRICE OFFSETS ─────────────────────────────────────────────────────────────

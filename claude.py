@@ -248,7 +248,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
         else:
             confidence_score = int(_raw_conf or 9)
         scanner_score = int(account_state.get('score', confidence_score))
-        risk_val = 0.0075  # Always 0.75% — all gate-passing signals are equal quality
+        risk_val = 0.01  # Always 1.0% — research-backed 0.5-2% professional range
         result['risk_percent'] = round(risk_val * 100, 4)
         logger.info(f"[risk] score={scanner_score} risk={result['risk_percent']}%")
         risk_percent = result['risk_percent']

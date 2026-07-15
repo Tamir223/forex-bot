@@ -7,7 +7,7 @@ import json
 import logging
 from datetime import datetime, date, timezone, timedelta
 from typing import Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 from prop_firm_profiles import PropFirmProfile, DrawdownType
 
@@ -54,6 +54,7 @@ class DrawdownState:
     breach_reason: str
     profit_hit: bool
     daily_pnl_history: dict
+    daily_loss_warn_sent: dict = field(default_factory=dict)
 
 
 def new_state(user_id: int, profile: PropFirmProfile) -> DrawdownState:
@@ -226,6 +227,39 @@ def get_status_report(state: DrawdownState, profile: PropFirmProfile) -> str:
         else:
             lines.append(f"\n⏳ Target hit — need {profile.min_trading_days - state.trading_days} more day(s)")
     return "\n".join(lines)
+
+
+def check_daily_loss_warnings(state: DrawdownState, profile: PropFirmProfile) -> list:
+    """Informational Telegram warnings at 60% and 80% of the daily loss limit.
+    Fires once per threshold per day. Completely separate from the compliance
+    hard-block in _check_daily_loss / check_signal_allowed — those are untouched."""
+    if profile.max_daily_loss <= 0 or state.today_pnl >= 0:
+        return []
+
+    today = state.today_date
+    daily_loss = -state.today_pnl
+    pct_used = daily_loss / profile.max_daily_loss
+
+    already_sent = state.daily_loss_warn_sent.get(today, [])
+    messages = []
+
+    if pct_used >= 0.80 and "80pct" not in already_sent:
+        state.daily_loss_warn_sent.setdefault(today, []).extend(
+            k for k in ("60pct", "80pct") if k not in already_sent
+        )
+        messages.append(
+            f"⚠️ Daily loss tracking: ${daily_loss:,.0f} of ${profile.max_daily_loss:,.0f} "
+            f"daily limit used today. Consider stopping for the day."
+        )
+    elif pct_used >= 0.60 and "60pct" not in already_sent:
+        state.daily_loss_warn_sent.setdefault(today, []).append("60pct")
+        messages.append(
+            f"⚠️ Daily loss tracking: ${daily_loss:,.0f} of ${profile.max_daily_loss:,.0f} "
+            f"daily limit used today. 2 more losing trades at current sizing would approach "
+            f"the limit. This is informational only — no signals are being blocked."
+        )
+
+    return messages
 
 
 def check_signal_allowed(state: DrawdownState, profile: PropFirmProfile, is_news: bool = False, is_overnight: bool = False, is_weekend: bool = False):

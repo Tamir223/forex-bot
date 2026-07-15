@@ -526,7 +526,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             trade_monitor.remove_trade(user.id)
             from database import load_challenge_state, save_challenge_state
             from prop_firm_profiles import get_profile as gp
-            from drawdown_tracker import state_from_json, state_to_json, record_trade
+            from drawdown_tracker import state_from_json, state_to_json, record_trade, check_daily_loss_warnings
             _state_json = load_challenge_state(user.id)
             _state = state_from_json(_state_json) if _state_json else None
             _profile = gp(_state.firm_code if _state else get_user_firm(user.id))
@@ -536,9 +536,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 update_trade_result(trade_id, "LOSS", pnl_amount=pnl_est)
             if _state and _profile:
                 _state, _warns = record_trade(_state, _profile, pnl_est)
+                _loss_warns = check_daily_loss_warnings(_state, _profile)
                 save_challenge_state(user.id, _state.firm_code, state_to_json(_state))
                 if _warns:
                     for w in _warns:
+                        await send(context, chat_id, w)
+                if _loss_warns:
+                    for w in _loss_warns:
                         await send(context, chat_id, w)
             await send(context, chat_id, trade_logged_loss())
         elif reply == "BREAKEVEN":
