@@ -67,7 +67,10 @@ PIP_VALUES = {
     "NAS100": 1.0,
     "US100":  1.0,    # $1 per point per lot (NQ proxy)
     "US500":  5.0,    # $5.00 per point per lot (SP500 CFD typical)
-    "USOIL":  1.0,    # $1 per pip per lot (100 barrels × $0.01)
+    # USOIL: MUST verify against broker MT5 spec before changing.
+    # In MT5: right-click USOIL → Specification → check Contract Size and Tick Value.
+    # Broker CFD contract sizes for WTI vary significantly — do NOT assume from generic research.
+    "USOIL":  1.0,
     "default": 10.0,
 }
 
@@ -79,7 +82,8 @@ USER_PIP_VALUES = {
         "US100":  1.0,  # $1/pt per lot
         "US30":   1.0,  # $1/pt per lot
         "US500":  5.0,  # $5.00/pt per lot
-        "USOIL":  1.0,  # $1/pip per lot (100 barrels)
+        # USOIL: verify Contract Size + Tick Value in MT5 spec before changing this value.
+        "USOIL":  1.0,
     },
     5803919273: {  # Donald - 5ers $25k TradeLocker
         # 5ers uses standard contract sizes: 100,000 units forex, 100oz gold
@@ -91,6 +95,7 @@ USER_PIP_VALUES = {
         "US100":  1.0,
         "US30":   1.0,
         "US500":  5.0,    # Updated from 0.5 — consistent with Tamir fix
+        # USOIL: verify Contract Size + Tick Value in MT5 spec before changing this value.
         "USOIL":  1.0,
     },
 }

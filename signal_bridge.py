@@ -19,6 +19,10 @@ _PIP_SIZE = {
     "USDJPY": 0.01, "EURJPY": 0.01, "GBPJPY": 0.01, "CADJPY": 0.01,
     "XAUUSD": 1.0,
     "US30": 1.0, "US100": 1.0, "NAS100": 1.0, "US500": 1.0,
+    # USOIL intentionally absent: pip_size and pip_value must be confirmed
+    # from broker MT5 spec (right-click USOIL → Specification → Contract Size
+    # and Tick Value) before adding here. Broker CFD contract sizes vary.
+    # Until confirmed, USOIL signals should NOT use auto_execute.
 }
 _DEFAULT_PIP_SIZE = 0.0001
 
@@ -28,6 +32,9 @@ _PIP_VALUE = {
     "AUDUSD": 10.0, "USDCAD": 7.50, "NZDUSD": 10.0,
     "USDCHF": 10.50, "XAUUSD": 100.0,
     "US30": 1.0, "US100": 1.0, "NAS100": 1.0, "US500": 1.0,
+    # USOIL intentionally absent: see _PIP_SIZE note above.
+    # If auto_execute fires for USOIL, _calc_lots falls back to wrong
+    # defaults (pip_size=0.0001, pip_value=10.0). Add confirmed values here.
     "default": 10.0,
 }
 
