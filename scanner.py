@@ -338,6 +338,13 @@ async def _update_asia_levels(symbol: str, candles: list = None) -> None:
                     _midnight_open_found = True
         except Exception:
             continue
+    if not _midnight_open_found:
+        _midnight_hour = 5 if sym in ("US100", "US30", "US500") else 0
+        if _midnight_open.get(sym, {}).get("date") != str(today):
+            logger.warning(
+                f"[midnight_open] {sym} no candle found for hour={_midnight_hour} "
+                f"— bias_shift unavailable this cycle"
+            )
     if asia_candles:
         asia_high = max(c["high"] for c in asia_candles)
         asia_low  = min(c["low"]  for c in asia_candles)
@@ -1643,7 +1650,7 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         else:
             gate_details['po3'] = f"📊 PO3: midnight open {_mo_display}"
     else:
-        gate_details['po3'] = "📊 PO3: midnight open not yet available (pre-00:00 UTC)"
+        gate_details['po3'] = "📊 PO3: midnight open unavailable — no reference set this session"
 
     all_passed = all(gates.values())
     failed = [k for k, v in gates.items() if not v]
@@ -3175,6 +3182,11 @@ async def check_bias_shifts(symbols: list, bot, user_chat_ids: list):
                         logger.error(f"[bias_shift] Send error to {chat_id}: {_se}")
                 _last_bias_shift[symbol] = time.time()
                 logger.info(f"[bias_shift] {symbol}: {old_bias} → {new_bias} (intraday {intraday_move_pct:.2f}%)")
+            else:
+                logger.info(
+                    f"[bias_shift] {symbol} move {intraday_move_pct:.2f}% — no shift "
+                    f"(bias={new_bias}, prev={old_bias})"
+                )
 
             _previous_bias[symbol] = new_bias
 
@@ -3191,8 +3203,11 @@ async def start_scanner(bot, get_active_users_fn):
     _bias_sent_date = None  # track last date bias report was sent
     _last_cleanup_time: float = 0.0  # epoch — track hourly PENDING cleanup
 
-    # Populate Asia levels on startup
-    for sym in ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','US100','US30','US500']:
+    # Populate Asia levels on startup for all active scan symbols.
+    # Uses SYMBOLS so any future additions are automatically covered —
+    # and so USOIL (and any other 24hr commodity) always gets its midnight
+    # reference set here, independent of whether scan_symbol fires later.
+    for sym in SYMBOLS:
         try:
             await _update_asia_levels(sym)
             logger.info(f"[startup] Asia levels initialized for {sym}")
