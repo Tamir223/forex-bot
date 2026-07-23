@@ -1304,7 +1304,7 @@ _DAILY_BIAS_FUTURES_MAP = {
     'RTY': 'RTY=F', 'YM': 'YM=F', 'CL': 'CL=F', 'MCL': 'MCL=F',
     'GC': 'GC=F', 'MGC': 'MGC=F', 'NG': 'NG=F', 'XAUUSD': 'GC=F',
     'US100': 'NQ=F', 'US30': 'YM=F',
-    'US500': 'ES=F',
+    'US500': 'ES=F', 'USOIL': 'CL=F',
 }
 
 _FOREX_YFINANCE_MAP = {

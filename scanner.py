@@ -84,7 +84,7 @@ _last_mitigation_clear_date: str = ""  # track when we last cleared FVG/OB mitig
 # For these symbols _update_asia_levels() uses the previous day's D1 high/low
 # instead of today's 00:00-07:00 UTC candles, which are empty (GER40) or very
 # thin overnight-futures prints (US100, US30, US500).
-_EQUITY_INDEX_SYMBOLS = {'US100', 'US30', 'US500', 'USOIL'}
+_EQUITY_INDEX_SYMBOLS = {'US100', 'US30', 'US500'}
 
 # Twelve Data circuit breaker — once daily credits are exhausted, skip TD calls
 # until the next UTC midnight rather than hitting the API on every scan cycle.
@@ -328,7 +328,7 @@ async def _update_asia_levels(symbol: str, candles: list = None) -> None:
                 # Midnight open = open price of the 00:00 UTC candle (first 15M candle of the day)
                 # For US indices, midnight reference is 05:00 UTC (00:00 ET summer)
                 # For forex/gold, midnight reference is 00:00 UTC
-                _is_index = sym in ("US100", "US30", "US500", "USOIL")
+                _is_index = sym in ("US100", "US30", "US500")
                 _midnight_hour = 5 if _is_index else 0
                 if dt.hour == _midnight_hour and dt.minute == 0 and not _midnight_open_found:
                     _mo_existing = _midnight_open.get(sym, {})
@@ -2438,7 +2438,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # For equity indices, the overnight swept level produces SLs of 200-500pts.
         # The 5M OB SL is far more appropriate for intraday index entries.
         # Skip swept-level SL override for indices — use 5M OB anchor instead.
-        _is_index = symbol.upper() in ("US100", "US30", "US500", "NAS100", "SP500", "USOIL")
+        _is_index = symbol.upper() in ("US100", "US30", "US500", "NAS100", "SP500")
         if _swept_level and not _is_index:
             _is_pts_sw = symbol.upper() in ("XAUUSD", "US30", "NAS100", "US100", "US500") or symbol.upper() in YFINANCE_FUTURES_MAP
             _dp_sw = 3 if _is_pts_sw else 5
