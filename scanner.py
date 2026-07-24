@@ -2457,6 +2457,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 _sig_sl  = round(_sig_entry - _sw_sl_dist, _dp_sw)
                 _sig_tp1 = round(_sig_entry + _sw_sl_dist * 2.0, _dp_sw)
                 _sig_tp2 = round(_sig_entry + _sw_sl_dist * 3.0, _dp_sw)
+                _sig_tp3 = round(_sig_entry + _sw_sl_dist * 5.0, _dp_sw)
             else:
                 _swept_raw_sl = _swept_level + _sw_buf
                 _sw_sl_dist = max(abs(_swept_raw_sl - _sig_entry), _min_sl_dist(symbol))
@@ -2464,6 +2465,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 _sig_sl  = round(_sig_entry + _sw_sl_dist, _dp_sw)
                 _sig_tp1 = round(_sig_entry - _sw_sl_dist * 2.0, _dp_sw)
                 _sig_tp2 = round(_sig_entry - _sw_sl_dist * 3.0, _dp_sw)
+                _sig_tp3 = round(_sig_entry - _sw_sl_dist * 5.0, _dp_sw)
             logger.info(
                 f"[scanner] {symbol} swept-level SL: swept={_swept_level} buffer={_sw_buf} "
                 f"sl={_sig_sl} entry={_sig_entry} sl_dist={_sw_sl_dist:.5f} tp1={_sig_tp1}"
