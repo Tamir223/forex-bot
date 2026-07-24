@@ -2327,7 +2327,10 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         # ── 5M ENTRY REFINEMENT ──────────────────────────────────────────────────
         candles_5m = _data.get("candles_5m", [])
-        _refinement_5m = refine_entry_5m(symbol, candles_5m, direction, ob) if (ob and candles_5m) else None
+        # C-tier OBs fail gate 5; if displacement FVG is the effective signal, skip the
+        # 5M OB refinement — it would anchor entry to the discarded OB, not the OTE zone.
+        _ob_eligible_5m = ob and ob.get('tier', '') != 'C-tier'
+        _refinement_5m = refine_entry_5m(symbol, candles_5m, direction, ob) if (_ob_eligible_5m and candles_5m) else None
         _entry_tf = "5M Entry" if _refinement_5m else "15M Entry"
         if _refinement_5m:
             logger.info(f"[scanner] {symbol} 5M OB found within 15M zone: entry={_refinement_5m['entry']} sl={_refinement_5m['sl']}")
@@ -2414,7 +2417,10 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # ── DISPLACEMENT FVG ENTRY OVERRIDE (OTE midpoint) ──────────────────────
         _raw_candle_price = float(candles[0]["close"]) if candles else 0.0
         _has_displacement_fvg = displacement and is_price_in_displacement_fvg(_raw_candle_price, displacement)
-        if _has_displacement_fvg and not ob and not fvg:
+        # Also apply OTE override when ob is C-tier (gate fail) — the displacement FVG
+        # is the effective signal in that case and its OTE must drive the entry.
+        _ob_c_tier = ob and ob.get('tier', '') == 'C-tier'
+        if _has_displacement_fvg and (not ob or _ob_c_tier) and not fvg:
             _is_pts_d = symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP
             _dp_d = 3 if _is_pts_d else 5
             _spot_off_d = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
@@ -2707,6 +2713,30 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     _last_signal_time[_sym_key] = _time.monotonic()
                     _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
                     return None
+
+        # ── ENTRY LIMIT VALIDITY SANITY CHECK ────────────────────────────────────
+        # All non-ORB signals are limit orders. For a Sell Limit, entry must sit ABOVE
+        # current price so MT5 accepts it; for a Buy Limit, entry must be BELOW current
+        # price. Validate against the fully-final _sig_entry (post all overrides) rather
+        # than the original build_auto_signal value, which may have been superseded.
+        if current_price and _sig_entry:
+            _cp_final = float(current_price)
+            if direction == "SELL" and _sig_entry < _cp_final:
+                logger.warning(
+                    f"[entry_validation] {symbol} entry {_sig_entry} is not a valid "
+                    f"Sell Limit relative to current price {_cp_final} — blocking"
+                )
+                _last_signal_time[_sym_key] = _time.monotonic()
+                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+                return None
+            elif direction == "BUY" and _sig_entry > _cp_final:
+                logger.warning(
+                    f"[entry_validation] {symbol} entry {_sig_entry} is not a valid "
+                    f"Buy Limit relative to current price {_cp_final} — blocking"
+                )
+                _last_signal_time[_sym_key] = _time.monotonic()
+                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+                return None
 
         # Record signal time for dedup cooldown
         _last_signal_time[_sym_key] = _time.monotonic()

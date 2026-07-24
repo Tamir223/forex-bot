@@ -48,8 +48,11 @@ def _calc_lots(symbol: str, entry: float, sl: float,
         if sl_pips <= 0:
             return 0.10
         risk_dollar = account_size * (risk_pct / 100)
-        pip_val = _PIP_VALUE.get(symbol.upper(), _PIP_VALUE["default"])
-        # JPY: pip_val varies with rate — approximate with standard value (close enough for lot sizing)
+        sym = symbol.upper()
+        if "JPY" in sym and entry > 0:
+            pip_val = (0.01 / entry) * 100000  # dynamic JPY pip value matches claude.py formula
+        else:
+            pip_val = _PIP_VALUE.get(sym, _PIP_VALUE["default"])
         lot = round(risk_dollar / (sl_pips * pip_val), 2)
         if symbol.upper() == "USDJPY":
             # Dynamic cap: $10k accounts → 1.00 lots, $25k accounts → 2.50 lots
