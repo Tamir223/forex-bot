@@ -1208,6 +1208,56 @@ def fetch_all_timeframes_sync(symbol: str) -> dict:
         return {}
 
 
+async def _fetch_live_price(symbol: str) -> float:
+    """Re-fetch the freshest available spot price for pre-dispatch entry_validation.
+
+    Uses yfinance fast_info.last_price (summary endpoint — real-time or very low latency
+    for most instruments) falling back to the most recent 1m close. Returns 0.0 on any
+    failure so the caller can retain the existing bundle price rather than crashing.
+
+    This exists because current_price in scan_symbol is captured once at the start of the
+    scan. For fast-moving instruments like XAUUSD the market can shift materially between
+    that fetch and the moment entry_validation runs, causing _sig_entry == current_price
+    (both stale) and making the Sell-above / Buy-below check a no-op.
+    """
+    sym = symbol.upper()
+    if sym in YFINANCE_FUTURES_MAP:
+        yf_sym = YFINANCE_FUTURES_MAP[sym]
+    elif sym == "XAUUSD":
+        yf_sym = "GC=F"
+    else:
+        from market import YFINANCE_FOREX_MAP as _fx
+        yf_sym = _fx.get(sym)
+    if not yf_sym:
+        return 0.0
+    _spot_off = FUTURES_SPOT_OFFSET.get(sym, 0)
+    try:
+        _loop = asyncio.get_event_loop()
+        def _do():
+            _t = yf.Ticker(yf_sym)
+            # fast_info.last_price uses Yahoo's summary endpoint — much lower latency
+            # than the historical-candle endpoint and typically real-time for futures.
+            try:
+                lp = _t.fast_info.last_price
+                if lp and float(lp) > 0:
+                    return float(lp)
+            except Exception:
+                pass
+            # fallback: most recent 1m bar close (oldest-to-newest in yfinance df, so iloc[-1])
+            try:
+                _h = _t.history(period="1d", interval="1m")
+                if _h is not None and not _h.empty:
+                    return float(_h["Close"].iloc[-1])
+            except Exception:
+                pass
+            return 0.0
+        raw = await _loop.run_in_executor(None, _do)
+        return round(raw + _spot_off, 3) if raw else 0.0
+    except Exception as e:
+        logger.debug(f"[entry_validation] {sym} live price re-fetch failed: {e}")
+        return 0.0
+
+
 def get_htf_bias(symbol: str, candles_1h: list = None, candles_4h: list = None, candles_daily: list = None) -> dict:
     """Get Daily, 4H, and 1H trend bias for multi-timeframe confirmation."""
     result = {"h1_trend": "unclear", "h4_trend": "unclear", "d1_trend": "unclear", "aligned": False, "bias": "unclear"}
@@ -2168,9 +2218,17 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         logger.info(f"[scanner] {symbol} direction {_gt_direction} ({_gt_strength})")
         market_structure = ms["structure"]  # "uptrend" or "downtrend" (ranging already gated)
 
-        price_data    = {"price": _data["price"]} if _data.get("price") else None
-        current_price = float(price_data["price"]) if price_data else (float(candles[0]["close"]) if candles else 0.0)
-        atr_data      = _data.get("atr") or None
+        price_data = {"price": _data["price"]} if _data.get("price") else None
+        if price_data:
+            current_price = float(price_data["price"])
+        else:
+            current_price = float(candles[0]["close"]) if candles else 0.0
+            if current_price:
+                logger.warning(
+                    f"[current_price] {symbol} live price unavailable — "
+                    f"using candle close fallback: {current_price}"
+                )
+        atr_data = _data.get("atr") or None
 
         # ── TIER 1: HARD BLOCKS ──────────────────────────────────────────────
         news_blocked, news_reason, news_warning = is_news_window(symbol)
@@ -2719,6 +2777,25 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # current price so MT5 accepts it; for a Buy Limit, entry must be BELOW current
         # price. Validate against the fully-final _sig_entry (post all overrides) rather
         # than the original build_auto_signal value, which may have been superseded.
+        #
+        # Re-fetch live price immediately before this check. The bundle price (current_price)
+        # was captured at scan start; for fast-moving instruments like XAUUSD the market
+        # can shift materially (today: +$18) between that fetch and dispatch. When the
+        # entry was derived from the same stale OB level, _sig_entry == bundle current_price,
+        # making _sig_entry < current_price = False and silently allowing an invalid order.
+        _ev_live = await _fetch_live_price(symbol)
+        if _ev_live and _ev_live > 0:
+            if abs(_ev_live - current_price) > 0.001:
+                logger.info(
+                    f"[current_price] {symbol} refreshed for entry_validation: "
+                    f"bundle={current_price} live={_ev_live} diff={_ev_live - current_price:+.3f}"
+                )
+            current_price = _ev_live
+        else:
+            logger.warning(
+                f"[current_price] {symbol} live price re-fetch failed — "
+                f"retaining bundle price {current_price} for entry_validation"
+            )
         if not current_price or not _sig_entry:
             logger.warning(
                 f"[entry_validation] {symbol} could not verify — "
