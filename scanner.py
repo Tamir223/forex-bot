@@ -994,11 +994,14 @@ def _try_reprice_stale_signal(
         _sl_dist = min(_sl_dist, _max_sl_dist(symbol))
         if direction == "BUY":
             _sl  = round(_entry - _sl_dist, _dp)
-            _tp1 = round(_entry + _sl_dist * 1.5, _dp)
+            # TP1 changed from 1.5R to 2.0R on 2026-07-27 — research-backed: 2:1 breakeven is 33.3% win rate,
+            # well below TNL Trader's confirmed 55-65%/45% setup win rates. NOT yet empirically re-verified
+            # against live results due to a logging gap — revisit once fresh trade data accumulates.
+            _tp1 = round(_entry + _sl_dist * 2.0, _dp)
             _tp2 = round(_entry + _sl_dist * 2.5, _dp)
         else:
             _sl  = round(_entry + _sl_dist, _dp)
-            _tp1 = round(_entry - _sl_dist * 1.5, _dp)
+            _tp1 = round(_entry - _sl_dist * 2.0, _dp)
             _tp2 = round(_entry - _sl_dist * 2.5, _dp)
         _valid, _rr = validate_risk_reward(_entry, _sl, _tp1)
         if _valid:
@@ -2461,11 +2464,14 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _5m_sl_dist = min(_5m_sl_dist, _max_sl_dist(symbol))
             if direction == "BUY":
                 _sig_sl  = round(_sig_entry - _5m_sl_dist, _dp_5m)
-                _sig_tp1 = round(_sig_entry + _5m_sl_dist * 1.5, _dp_5m)
+                # TP1 changed from 1.5R to 2.0R on 2026-07-27 — research-backed: 2:1 breakeven is 33.3% win rate,
+                # well below TNL Trader's confirmed 55-65%/45% setup win rates. NOT yet empirically re-verified
+                # against live results due to a logging gap — revisit once fresh trade data accumulates.
+                _sig_tp1 = round(_sig_entry + _5m_sl_dist * 2.0, _dp_5m)
                 _sig_tp2 = round(_sig_entry + _5m_sl_dist * 2.5, _dp_5m)
             else:
                 _sig_sl  = round(_sig_entry + _5m_sl_dist, _dp_5m)
-                _sig_tp1 = round(_sig_entry - _5m_sl_dist * 1.5, _dp_5m)
+                _sig_tp1 = round(_sig_entry - _5m_sl_dist * 2.0, _dp_5m)
                 _sig_tp2 = round(_sig_entry - _5m_sl_dist * 2.5, _dp_5m)
             logger.info(
                 f"[scanner] {symbol} 5M levels applied: entry={_sig_entry} sl={_sig_sl} "
@@ -2489,13 +2495,16 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 _sl_dist_d = max(abs(_sig_entry - round(displacement['fvg_bottom'] + _spot_off_d, _dp_d)), _min_sl_dist(symbol))
                 _sl_dist_d = min(_sl_dist_d, _max_sl_dist(symbol))
                 _sig_sl  = round(_sig_entry - _sl_dist_d, _dp_d)
-                _sig_tp1 = round(_sig_entry + _sl_dist_d * 1.5, _dp_d)
+                # TP1 changed from 1.5R to 2.0R on 2026-07-27 — research-backed: 2:1 breakeven is 33.3% win rate,
+                # well below TNL Trader's confirmed 55-65%/45% setup win rates. NOT yet empirically re-verified
+                # against live results due to a logging gap — revisit once fresh trade data accumulates.
+                _sig_tp1 = round(_sig_entry + _sl_dist_d * 2.0, _dp_d)
                 _sig_tp2 = round(_sig_entry + _sl_dist_d * 2.5, _dp_d)
             else:
                 _sl_dist_d = max(abs(round(displacement['fvg_top'] + _spot_off_d, _dp_d) - _sig_entry), _min_sl_dist(symbol))
                 _sl_dist_d = min(_sl_dist_d, _max_sl_dist(symbol))
                 _sig_sl  = round(_sig_entry + _sl_dist_d, _dp_d)
-                _sig_tp1 = round(_sig_entry - _sl_dist_d * 1.5, _dp_d)
+                _sig_tp1 = round(_sig_entry - _sl_dist_d * 2.0, _dp_d)
                 _sig_tp2 = round(_sig_entry - _sl_dist_d * 2.5, _dp_d)
             logger.info(
                 f"[displacement] {symbol} OTE entry override: entry={_sig_entry} sl={_sig_sl} tp1={_sig_tp1} "
@@ -2673,6 +2682,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             return None
 
         # OB-based RR hard check
+        # TP1 changed from 1.5R to 2.0R on 2026-07-27 — research-backed: 2:1 breakeven is 33.3% win rate,
+        # well below TNL Trader's confirmed 55-65%/45% setup win rates. NOT yet empirically re-verified
+        # against live results due to a logging gap — revisit once fresh trade data accumulates.
         _min_sl = _min_sl_dist(symbol)
         if direction == "BUY":
             _sl_rr = (round(ob["low"] - (ob["high"] - ob["low"]) * 0.1, 5) if ob and ob.get("type") == "bullish_ob"
@@ -2680,14 +2692,14 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                       else round(float(current_price) * 0.998, 5))
             _sl_dist_rr = max(abs(float(entry_check) - _sl_rr), _min_sl)
             _sl_rr   = round(float(entry_check) - _sl_dist_rr, 5)
-            _tp1_rr  = round(float(entry_check) + _sl_dist_rr * 1.5, 5)
+            _tp1_rr  = round(float(entry_check) + _sl_dist_rr * 2.0, 5)
         else:
             _sl_rr = (round(ob["high"] + (ob["high"] - ob["low"]) * 0.1, 5) if ob and ob.get("type") == "bearish_ob"
                       else round(fvg["top"] + (fvg["top"] - fvg["bottom"]) * 0.5, 5) if fvg
                       else round(float(current_price) * 1.002, 5))
             _sl_dist_rr = max(abs(_sl_rr - float(entry_check)), _min_sl)
             _sl_rr   = round(float(entry_check) + _sl_dist_rr, 5)
-            _tp1_rr  = round(float(entry_check) - _sl_dist_rr * 1.5, 5)
+            _tp1_rr  = round(float(entry_check) - _sl_dist_rr * 2.0, 5)
 
         _rr_valid, _actual_rr = validate_risk_reward(float(entry_check), _sl_rr, _tp1_rr)
         if not _rr_valid:
@@ -2832,6 +2844,25 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         _last_signal_time[_sym_key] = _time.monotonic()
         _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
         _last_signal_entry[_sym_key] = _sig_entry
+
+        # Audit log — captures grade/tier so outcomes can be reconstructed from
+        # journalctl without parsing the Telegram message (which isn't logged).
+        _gd_str = gate_details.get('ob_fvg', '') if gate_details else ''
+        if 'UNICORN' in _gd_str:
+            _dispatch_grade = 'Unicorn'
+        elif ob:
+            _dispatch_grade = ob.get('tier', 'B-tier')
+        elif fvg:
+            _dispatch_grade = fvg.get('strength_tier', 'B-tier')
+        elif displacement:
+            _dispatch_grade = 'Displacement'
+        else:
+            _dispatch_grade = 'Structure'
+        logger.info(
+            f"[signal_dispatch] {symbol} {direction} grade={_dispatch_grade} "
+            f"entry={_sig_entry} sl={_sig_sl} tp1={_sig_tp1} "
+            f"tp2={_sig_tp2} tp3={_sig_tp3 or 0.0}"
+        )
 
         return {
             "symbol": symbol,
@@ -3453,3 +3484,454 @@ async def start_scanner(bot, get_active_users_fn):
         except Exception as e:
             logger.error(f"[scanner] Loop error: {e}", exc_info=True)
             await asyncio.sleep(60)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SIGNAL OUTCOME RECONSTRUCTION
+# Run standalone:  python3 scanner.py [--days 60] [--tier S-tier]
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def reconstruct_s_tier_outcomes(days_back: int = 60, tier_filter: str = "S-tier") -> None:
+    """
+    Reconstruct real outcomes for dispatched signals using historical 5M price data.
+
+    TASK 1 — Extracts dispatched signals from journalctl.
+      New format: [signal_dispatch] lines include grade/tier (added by this commit).
+      Legacy format: [direction_lock] + nearby level logs (grade='unknown').
+
+    TASK 2 — Fetches 5M candle data via yfinance (same tickers as live system:
+      EURUSD=X for forex, GC=F for XAUUSD, CL=F for USOIL, etc.).
+      Applies FUTURES_SPOT_OFFSET so candle prices match stored signal levels.
+
+    TASK 3 — Walks candles sequentially per signal; checks SL before TP on each
+      candle; flags genuinely ambiguous same-candle cases explicitly.
+
+    TASK 4 — Computes win rate and average R for unambiguous outcomes.
+
+    TASK 5 — Prints analysis table and summary.
+    """
+    import subprocess
+    import re as _re
+    import math
+    from datetime import datetime, timezone, timedelta
+
+    _FUT_OFFSET = dict(FUTURES_SPOT_OFFSET)
+
+    def _ticker(sym: str):
+        s = sym.upper()
+        if s in YFINANCE_FUTURES_MAP:
+            return YFINANCE_FUTURES_MAP[s]
+        if s == "XAUUSD":
+            return "GC=F"
+        if s == "USOIL":
+            return "CL=F"
+        from market import YFINANCE_FOREX_MAP as _FX
+        return _FX.get(s)
+
+    def _dp(sym: str) -> int:
+        s = sym.upper()
+        return 2 if s in ("XAUUSD", "US100", "US30", "US500", "USOIL") else (3 if "JPY" in s else 5)
+
+    # ── TASK 1: Parse journalctl ──────────────────────────────────────────────
+    since_str = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n[reconstruct] Reading journalctl since {since_str} ...")
+    try:
+        proc = subprocess.run(
+            ['journalctl', '-u', 'apfee', '--since', since_str, '--no-pager'],
+            capture_output=True, text=True, timeout=180,
+        )
+        raw_lines = proc.stdout.splitlines()
+    except Exception as exc:
+        print(f"[reconstruct] journalctl error: {exc}")
+        return
+
+    LOGLINE = _re.compile(
+        r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ - \w+ - INFO - (.+)$'
+    )
+    events: list = []  # [(datetime_utc, message_str)]
+    for line in raw_lines:
+        m = LOGLINE.search(line)
+        if m:
+            try:
+                ts = datetime.strptime(m.group(1), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                events.append((ts, m.group(2)))
+            except Exception:
+                pass
+
+    print(f"[reconstruct] Parsed {len(events)} INFO log events.")
+    if not events:
+        print("[reconstruct] No log events found — check service name or date range.")
+        return
+
+    # Compiled extraction patterns
+    P_DISPATCH = _re.compile(
+        r'\[signal_dispatch\] (\w+) (BUY|SELL) grade=(\S+) '
+        r'entry=([\d.]+) sl=([\d.]+) tp1=([\d.]+) tp2=([\d.]+) tp3=([\d.]+)'
+    )
+    P_BUILD = _re.compile(
+        r'\[build_signal\] (\w+) (BUY|SELL) entry=([\d.]+) sl=([\d.]+) tp1=([\d.]+) domain=spot'
+    )
+    P_5M = _re.compile(
+        r'\[scanner\] (\w+) 5M levels applied: entry=([\d.]+) sl=([\d.]+) tp1=([\d.]+) tp2=([\d.]+)'
+    )
+    P_SWEPT = _re.compile(
+        r'\[scanner\] (\w+) swept-level SL: swept=[\d.]+ buffer=[\d.]+ '
+        r'sl=([\d.]+) entry=([\d.]+) sl_dist=([\d.]+) tp1=([\d.]+)'
+    )
+    P_DISP = _re.compile(
+        r'\[displacement\] (\w+) OTE entry override: entry=([\d.]+) sl=([\d.]+) tp1=([\d.]+)'
+    )
+    P_DRAW = _re.compile(
+        r'\[draw\] (\w+) draw level [\d.]+ \([^)]+\) — TP1=([\d.]+) TP2=([\d.]+) TP3=([\d.]+)'
+    )
+    P_DLOCK = _re.compile(r'\[direction_lock\] (\w+) locked (BUY|SELL) for 30 min')
+
+    # New-format signals from [signal_dispatch] lines
+    new_sigs: list = []
+    for ts, msg in events:
+        m = P_DISPATCH.search(msg)
+        if m:
+            sym, direction, grade, entry, sl, tp1, tp2, tp3 = m.groups()
+            new_sigs.append({
+                'ts': ts, 'symbol': sym.upper(), 'direction': direction,
+                'grade': grade, 'entry': float(entry), 'sl': float(sl),
+                'tp1': float(tp1), 'tp2': float(tp2), 'tp3': float(tp3),
+                'src': 'dispatch_log',
+            })
+
+    # Legacy signals from [direction_lock] + nearby level logs
+    dlock_evts = [
+        (ts, m.group(1).upper(), m.group(2))
+        for ts, msg in events
+        for m in [P_DLOCK.search(msg)] if m
+    ]
+    legacy_sigs: list = []
+    for dlock_ts, sym, direction in dlock_evts:
+        win_start = dlock_ts - timedelta(seconds=90)
+        b_entry = b_sl = b_tp1 = None
+        l5m = l_disp = l_swept = l_draw = None
+
+        for evt_ts, msg in events:
+            if evt_ts < win_start or evt_ts > dlock_ts:
+                continue
+            mm = P_BUILD.search(msg)
+            if mm and mm.group(1).upper() == sym and mm.group(2) == direction:
+                b_entry, b_sl, b_tp1 = float(mm.group(3)), float(mm.group(4)), float(mm.group(5))
+            mm = P_5M.search(msg)
+            if mm and mm.group(1).upper() == sym:
+                l5m = (float(mm.group(2)), float(mm.group(3)), float(mm.group(4)), float(mm.group(5)))
+            mm = P_SWEPT.search(msg)
+            if mm and mm.group(1).upper() == sym:
+                # groups: sl, entry, sl_dist, tp1
+                l_swept = (float(mm.group(2)), float(mm.group(3)), float(mm.group(4)), float(mm.group(5)))
+            mm = P_DISP.search(msg)
+            if mm and mm.group(1).upper() == sym:
+                l_disp = (float(mm.group(2)), float(mm.group(3)), float(mm.group(4)))
+            mm = P_DRAW.search(msg)
+            if mm and mm.group(1).upper() == sym:
+                l_draw = (float(mm.group(2)), float(mm.group(3)), float(mm.group(4)))
+
+        if b_entry is None:
+            continue
+
+        # Entry priority: displacement > 5M > build_signal
+        if l_disp:
+            e_f, sl_f, tp1_f = l_disp
+        elif l5m:
+            e_f, sl_f, tp1_f, tp2_f = l5m
+        else:
+            e_f, sl_f, tp1_f = b_entry, b_sl, b_tp1
+
+        # SL override: swept-level SL takes priority
+        if l_swept:
+            sl_f = l_swept[0]
+
+        sl_d = abs(e_f - sl_f)
+
+        # TP2/TP3: draw cap (final) > 5M > swept-level computed > build_signal default
+        if l_draw:
+            tp1_f, tp2_f, tp3_f = l_draw
+        elif l5m:
+            tp2_f = l5m[3]
+            tp3_f = 0.0
+        elif l_swept:
+            sd = l_swept[2]  # sl_dist from swept-level log
+            tp2_f = (e_f + sd * 3.0) if direction == 'BUY' else (e_f - sd * 3.0)
+            tp3_f = (e_f + sd * 5.0) if direction == 'BUY' else (e_f - sd * 5.0)
+        else:
+            tp2_f = (e_f + sl_d * 3.0) if direction == 'BUY' else (e_f - sl_d * 3.0)
+            tp3_f = 0.0
+
+        legacy_sigs.append({
+            'ts': dlock_ts, 'symbol': sym, 'direction': direction,
+            'grade': 'unknown', 'entry': e_f, 'sl': sl_f,
+            'tp1': tp1_f, 'tp2': tp2_f, 'tp3': tp3_f,
+            'src': 'legacy_lock',
+        })
+
+    # Merge and deduplicate (same symbol+direction+entry within 35-min direction-lock window)
+    all_raw = sorted(new_sigs + legacy_sigs, key=lambda s: s['ts'])
+    seen: dict = {}
+    for sig in all_raw:
+        e_key = round(sig['entry'], 3)
+        key = f"{sig['symbol']}_{sig['direction']}_{e_key}"
+        prev = seen.get(key)
+        if prev and (sig['ts'] - prev['ts']).total_seconds() < 35 * 60:
+            # Same setup — upgrade grade if new record has it
+            if prev['grade'] == 'unknown' and sig['grade'] != 'unknown':
+                prev['grade'] = sig['grade']
+            continue
+        seen[key] = sig
+
+    unique_sigs = sorted(seen.values(), key=lambda s: s['ts'])
+
+    n_total = len(unique_sigs)
+    n_tier = sum(1 for s in unique_sigs if s['grade'] == tier_filter)
+    n_unk = sum(1 for s in unique_sigs if s['grade'] == 'unknown')
+    print(f"[reconstruct] {n_total} unique dispatched signals found:")
+    print(f"  grade={tier_filter!r}:  {n_tier}  (from new [signal_dispatch] logging)")
+    print(f"  grade='unknown':   {n_unk}  (pre-logging — tier not recoverable from logs)")
+    print(f"  other grades:      {n_total - n_tier - n_unk}")
+    print(f"[reconstruct] Fetching 5M price data for all {n_total} signals ...")
+
+    # ── TASKS 2+3: Fetch price data and determine outcomes ────────────────────
+
+    def determine_outcome(direction, entry, sl, tp1, tp2, tp3, candles):
+        """
+        Walk candles sequentially. Returns (outcome, r_achieved, fill_idx, out_ts).
+
+        Ambiguity rule: if a single candle's range spans both the SL and the NEXT
+        pending TP level simultaneously, flag as AMBIGUOUS — do not guess order.
+        """
+        sl_dist = abs(entry - sl)
+        tps = [(n, v) for n, v in [(1, tp1), (2, tp2), (3, tp3)] if v and v != 0.0]
+
+        # Find entry fill (max 8 hours = 96 x 5M candles)
+        fill_idx = None
+        for i, c in enumerate(candles[:96]):
+            if (direction == 'BUY' and c['l'] <= entry) or \
+               (direction == 'SELL' and c['h'] >= entry):
+                fill_idx = i
+                break
+        if fill_idx is None:
+            return 'NEVER_FILLED', 0.0, None, None
+
+        tp_n_hit = 0  # number of TPs confirmed hit so far
+
+        for c in candles[fill_idx:]:
+            if tp_n_hit >= len(tps):
+                # All TPs hit
+                tn, tv = tps[-1]
+                r = round(abs(tv - entry) / sl_dist, 2) if sl_dist else 0.0
+                return f'TP{tn}', r, fill_idx, c['ts']
+
+            tn, tv = tps[tp_n_hit]
+            sl_hit = (direction == 'BUY' and c['l'] <= sl) or \
+                     (direction == 'SELL' and c['h'] >= sl)
+            tp_hit = (direction == 'BUY' and c['h'] >= tv) or \
+                     (direction == 'SELL' and c['l'] <= tv)
+
+            # Same-candle ambiguity check for the next pending TP
+            if sl_hit and tp_hit:
+                return f'AMBIGUOUS_SL_TP{tn}', float('nan'), fill_idx, c['ts']
+
+            if sl_hit:
+                if tp_n_hit > 0:
+                    # Earlier TPs were hit — highest TP achieved is the outcome
+                    pt, pv = tps[tp_n_hit - 1]
+                    r = round(abs(pv - entry) / sl_dist, 2) if sl_dist else 0.0
+                    return f'TP{pt}', r, fill_idx, c['ts']
+                return 'SL', -1.0, fill_idx, c['ts']
+
+            if tp_hit:
+                tp_n_hit += 1
+                # Check if higher TPs are also within this same candle (pass-through)
+                while tp_n_hit < len(tps):
+                    _, nv = tps[tp_n_hit]
+                    if (direction == 'BUY' and c['h'] >= nv) or \
+                       (direction == 'SELL' and c['l'] <= nv):
+                        tp_n_hit += 1
+                    else:
+                        break
+
+        # 48-hour window exhausted
+        if tp_n_hit > 0:
+            pt, pv = tps[tp_n_hit - 1]
+            r = round(abs(pv - entry) / sl_dist, 2) if sl_dist else 0.0
+            return f'TP{pt}', r, fill_idx, None
+
+        now_utc = datetime.now(timezone.utc)
+        outcome = 'PENDING' if candles and (now_utc - candles[-1]['ts']).total_seconds() < 3600 \
+                  else 'EXPIRED'
+        return outcome, 0.0, fill_idx, None
+
+    results: list = []
+    for sig in unique_sigs:
+        sym = sig['symbol']
+        direction = sig['direction']
+        entry = sig['entry']
+        sl_v = sig['sl']
+        tp1 = sig['tp1']
+        tp2 = sig['tp2']
+        tp3 = sig['tp3']
+        ts = sig['ts']
+        offset = _FUT_OFFSET.get(sym, 0)
+
+        ticker = _ticker(sym)
+        if not ticker:
+            results.append({**sig, 'outcome': 'NO_TICKER', 'r': float('nan'),
+                            'planned': {}, 'note': f'No yfinance ticker for {sym}'})
+            continue
+
+        try:
+            hist = yf.Ticker(ticker).history(
+                start=ts - timedelta(minutes=10),
+                end=ts + timedelta(hours=49),
+                interval='5m',
+            )
+        except Exception as exc:
+            results.append({**sig, 'outcome': 'FETCH_ERR', 'r': float('nan'),
+                            'planned': {}, 'note': str(exc)[:60]})
+            continue
+
+        if hist.empty:
+            results.append({**sig, 'outcome': 'NO_DATA', 'r': float('nan'),
+                            'planned': {}, 'note': 'yfinance returned empty'})
+            continue
+
+        # Build candle list from dispatch time forward; apply spot-price offset
+        candles = []
+        for idx_ts, row in hist.iterrows():
+            try:
+                c_ts = idx_ts.to_pydatetime()
+                if c_ts.tzinfo is None:
+                    c_ts = c_ts.replace(tzinfo=timezone.utc)
+                else:
+                    c_ts = c_ts.astimezone(timezone.utc)
+                if c_ts < ts:
+                    continue
+                candles.append({
+                    'ts': c_ts,
+                    'h': float(row['High']) + offset,
+                    'l': float(row['Low'])  + offset,
+                })
+            except Exception:
+                pass
+
+        if not candles:
+            results.append({**sig, 'outcome': 'NO_DATA', 'r': float('nan'),
+                            'planned': {}, 'note': 'No candles after dispatch'})
+            continue
+
+        outcome, r_val, fill_idx, out_ts = determine_outcome(
+            direction, entry, sl_v, tp1, tp2, tp3, candles
+        )
+
+        sl_dist = abs(entry - sl_v)
+        planned = {
+            f'tp{n}': round(abs(v - entry) / sl_dist, 2)
+            for n, v in [(1, tp1), (2, tp2), (3, tp3)]
+            if v and v != 0.0 and sl_dist > 0
+        }
+
+        results.append({
+            **sig,
+            'outcome': outcome,
+            'r': r_val,
+            'planned': planned,
+            'note': '',
+        })
+
+    # ── TASK 5: Print table ───────────────────────────────────────────────────
+    W = 122
+    sep = '═' * W
+    print(f"\n{sep}")
+    print(f"  SIGNAL OUTCOME RECONSTRUCTION │ tier_filter={tier_filter!r} "
+          f"│ yfinance 5M │ days_back={days_back}")
+    print(f"  '>>' marks {tier_filter} signals (pilot). 'unknown' = pre-logging gap.")
+    print(sep)
+
+    _FMT = "  {flag}{date:<12} {sym:<7} {dir:<5} {grade:<13} {entry:<10} {sl:<10} " \
+           "{tp1:<10} {tp2:<10} {tp3:<8} {outcome:<24} {r:>7}  {plan}"
+    print(_FMT.format(
+        flag='', date='Date', sym='Symbol', dir='Dir', grade='Grade',
+        entry='Entry', sl='SL', tp1='TP1', tp2='TP2', tp3='TP3',
+        outcome='Outcome', r='R', plan='Plan(R)',
+    ))
+    print('─' * W)
+
+    for rec in results:
+        sym = rec['symbol']
+        dp_sym = _dp(sym)
+        fmt_p = f'.{dp_sym}f'
+        is_t = rec['grade'] == tier_filter
+        flag = '>>' if is_t else '  '
+
+        tp3_str = f"{rec['tp3']:{fmt_p}}" if rec['tp3'] and rec['tp3'] != 0.0 else '-'
+        r_str = f"{rec['r']:+.2f}" if not (isinstance(rec['r'], float) and math.isnan(rec['r'])) \
+                else 'ambig.'
+        plan_str = ' '.join(f"tp{k[-1]}={v:.1f}R" for k, v in sorted(rec['planned'].items())) \
+                   if rec['planned'] else '-'
+
+        print(_FMT.format(
+            flag=flag,
+            date=rec['ts'].strftime('%m-%d %H:%M'),
+            sym=sym,
+            dir=rec['direction'],
+            grade=rec['grade'],
+            entry=f"{rec['entry']:{fmt_p}}",
+            sl=f"{rec['sl']:{fmt_p}}",
+            tp1=f"{rec['tp1']:{fmt_p}}",
+            tp2=f"{rec['tp2']:{fmt_p}}",
+            tp3=tp3_str,
+            outcome=rec['outcome'],
+            r=r_str,
+            plan=plan_str,
+        ))
+
+    print(sep)
+
+    # ── TASK 4: Summary stats ─────────────────────────────────────────────────
+    def _summary(label: str, subset: list) -> None:
+        resolved = [r for r in subset if r['outcome'] in ('SL', 'TP1', 'TP2', 'TP3')]
+        wins = [r for r in resolved if r['outcome'].startswith('TP')]
+        losses = [r for r in resolved if r['outcome'] == 'SL']
+        ambig = [r for r in subset if r['outcome'].startswith('AMBIGUOUS')]
+        nf = [r for r in subset if r['outcome'] == 'NEVER_FILLED']
+        exp = [r for r in subset if r['outcome'] in ('EXPIRED', 'PENDING')]
+        wr = len(wins) / len(resolved) * 100 if resolved else 0.0
+        avg_r_vals = [r['r'] for r in resolved if not math.isnan(r['r'])]
+        avg_r = sum(avg_r_vals) / len(avg_r_vals) if avg_r_vals else 0.0
+        print(f"\n  ── {label} ──")
+        print(f"    Dispatched signals:             {len(subset)}")
+        print(f"    Resolved (SL or TP, clear):     {len(resolved)}")
+        print(f"    Wins (TP1 or better):           {len(wins)}")
+        print(f"    Losses (SL):                    {len(losses)}")
+        print(f"    Win rate:                       {wr:.1f}%")
+        print(f"    Average R (unambiguous only):   {avg_r:+.2f}R")
+        print(f"    Ambiguous (same-candle SL+TP):  {len(ambig)}  ← excluded from stats above")
+        print(f"    Never filled:                   {len(nf)}")
+        print(f"    Expired / still pending:        {len(exp)}")
+
+    tier_recs = [r for r in results if r['grade'] == tier_filter]
+    if tier_recs:
+        _summary(f"{tier_filter} PILOT RESULTS", tier_recs)
+    else:
+        print(f"\n  ── {tier_filter} PILOT RESULTS ──")
+        print(f"    No {tier_filter} signals yet in the log window.")
+        print(f"    The [signal_dispatch] grade logging was added in this session.")
+        print(f"    Re-run in a few days once {tier_filter} signals accumulate.")
+
+    _summary("ALL-TIER CONTEXT (historical signals included for reference)", results)
+    print(f"\n{sep}\n")
+
+
+if __name__ == "__main__":
+    import argparse as _ap
+    _parser = _ap.ArgumentParser(description="Reconstruct signal outcomes from journalctl + yfinance")
+    _parser.add_argument("--days", type=int, default=60, help="Days of history to scan (default 60)")
+    _parser.add_argument("--tier", type=str, default="S-tier",
+                         help="Grade/tier to highlight in the pilot (default S-tier)")
+    _args = _parser.parse_args()
+    reconstruct_s_tier_outcomes(days_back=_args.days, tier_filter=_args.tier)
+
