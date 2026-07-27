@@ -55,13 +55,19 @@ _PIP_SIZE = {
 _DEFAULT_PIP_SIZE = 0.0001
 
 PIP_VALUES = {
+    # USD-as-quote pairs (USD is quote currency): pip_val = $10/pip fixed per standard lot.
+    # Verified: EBC Financial Group, Myfxbook, FXTM pip value documentation.
     "EURUSD": 10.0,
     "GBPUSD": 10.0,
-    "USDJPY": 9.30,
     "AUDUSD": 10.0,
-    "USDCAD": 7.50,
     "NZDUSD": 10.0,
-    "USDCHF": 10.50,
+    # USD-as-base pairs: pip_val = 10.0 / current_price — varies with rate.
+    # These fallback values are APPROXIMATIONS only and are only used when current_price=0.
+    # _calculate_lot_size uses the dynamic formula when current_price is provided.
+    # Verified: EBC Financial Group, Myfxbook, FXTM pip value documentation.
+    "USDJPY": 9.30,   # fallback only — dynamic formula: (0.01/price)×100,000
+    "USDCAD": 7.30,   # fallback only — dynamic formula: 10.0/price (≈7.09 at 1.41)
+    "USDCHF": 12.20,  # fallback only — dynamic formula: 10.0/price (≈12.22 at 0.818)
     "XAUUSD": 100.0,  # OANDA: $100/pt per lot
     "US30":   1.0,    # $1 per point per lot
     "NAS100": 1.0,
@@ -75,10 +81,13 @@ PIP_VALUES = {
 }
 
 USER_PIP_VALUES = {
+    # USDCAD and USDCHF are intentionally omitted — _calculate_lot_size uses
+    # the dynamic formula (10.0/current_price) for these USD-as-base pairs.
+    # Verified: EBC Financial Group, Myfxbook, FXTM pip value documentation.
     8647323622: {  # Tamir - OANDA FTMO $10k
-        "EURUSD": 10.0, "GBPUSD": 10.0, "USDJPY": 9.3,
-        "USDCAD": 7.5, "AUDUSD": 10.0, "NZDUSD": 10.0,
-        "USDCHF": 10.5, "XAUUSD": 100.0,  # OANDA: $100/pt
+        "EURUSD": 10.0, "GBPUSD": 10.0, "AUDUSD": 10.0, "NZDUSD": 10.0,
+        "USDJPY": 9.3,  # fallback only — overridden by dynamic formula when price is live
+        "XAUUSD": 100.0,  # OANDA: $100/pt
         "US100":  1.0,  # $1/pt per lot
         "US30":   1.0,  # $1/pt per lot
         "US500":  5.0,  # $5.00/pt per lot
@@ -88,9 +97,8 @@ USER_PIP_VALUES = {
     5803919273: {  # Donald - 5ers $25k TradeLocker
         # 5ers uses standard contract sizes: 100,000 units forex, 100oz gold
         # Source: the5ers.com/asset-specifications — standard pip values apply
-        "EURUSD": 10.0, "GBPUSD": 10.0, "USDJPY": 9.3,
-        "USDCAD": 7.5, "AUDUSD": 10.0, "NZDUSD": 10.0,
-        "USDCHF": 10.5,
+        "EURUSD": 10.0, "GBPUSD": 10.0, "AUDUSD": 10.0, "NZDUSD": 10.0,
+        "USDJPY": 9.3,  # fallback only — overridden by dynamic formula when price is live
         "XAUUSD": 100.0,  # 5ers standard: 100oz/lot = $100/pt (same as OANDA)
         "US100":  1.0,
         "US30":   1.0,
@@ -507,9 +515,14 @@ def _calculate_lot_size(risk_percent: float, sl_pts: float, pair: str,
 
         # Forex lot calculation — use user-specific pip values when available
         _user_pips = USER_PIP_VALUES.get(user_id, {}) if user_id else {}
-        # JPY pairs: pip value depends on current rate — compute dynamically when rate is available
+        # Price-dependent pip values: USD-as-base pairs must use current rate, never hardcode.
+        # JPY pairs (USDJPY etc.): pip_val = (pip_size / price) × contract = (0.01/price) × 100,000
+        # USDCAD, USDCHF: pip_val = (0.0001 / price) × 100,000 = 10.0 / price
+        # Verified: EBC Financial Group, Myfxbook, FXTM pip value documentation.
         if pair and "JPY" in pair.upper() and current_price > 0:
             pip_val = (0.01 / current_price) * 100000
+        elif pair and pair.upper() in {"USDCAD", "USDCHF"} and current_price > 0:
+            pip_val = 10.0 / current_price
         else:
             pip_val = _user_pips.get(pair) or PIP_VALUES.get(pair, PIP_VALUES["default"])
         lot = round(risk_dollar / (sl_pts * pip_val), 2)

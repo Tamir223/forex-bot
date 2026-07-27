@@ -1705,6 +1705,13 @@ _KILL_ZONES = {
     'evening':             (19, 22),  # 19:00-22:00 UTC — post-FOMC Asia-correlated pairs
     'silver_bullet_london': (7,  8),  # 07:00-08:00 UTC — ICT Silver Bullet
     'silver_bullet_ny':    (14, 15),  # 14:00-15:00 UTC — ICT Silver Bullet
+    # Gold-specific windows: log analysis confirmed ALL 22 XAUUSD 5M BOS events fell in the
+    # 10:00-12:00 and 16:00-17:00 UTC gaps, causing 100% kill_zone gate rejection (Jul 24-26).
+    # Root cause: standard london window ends 10:00 UTC; ny_open starts 12:00; london_close
+    # ends 16:00. These two windows cover the institutionally active London→NY transition and
+    # the Gold PM session where real 5M displacement is appearing in market data.
+    'xau_pre_ny':          (10, 12),  # 10:00-12:00 UTC — London close/Pre-NY transition, Gold only
+    'xau_pm':              (16, 17),  # 16:00-17:00 UTC — PM session continuation, Gold only
     'london_fix':          (9,  10),  # 09:00-10:00 UTC — Gold institutional fix
     'ny_indices':          (12, 16),  # 12:00-16:00 UTC — covers pre-market sweep + NYSE open
     # ICT research: indices kill zone starts at 8:30AM EST (12:30 UTC) not 9:00AM
@@ -1714,7 +1721,7 @@ _KILL_ZONES = {
 _PAIR_KILL_ZONES = {
     'EURUSD':  ['london', 'ny_open', 'london_close', 'silver_bullet_london', 'silver_bullet_ny'],
     'GBPUSD':  ['london', 'ny_open', 'london_close', 'silver_bullet_london', 'silver_bullet_ny'],
-    'XAUUSD':  ['london', 'ny_open', 'london_close', 'london_fix', 'silver_bullet_london', 'silver_bullet_ny'],
+    'XAUUSD':  ['london', 'ny_open', 'london_close', 'london_fix', 'silver_bullet_london', 'silver_bullet_ny', 'xau_pre_ny', 'xau_pm'],
     'USDJPY':  ['asian',  'london', 'ny_open', 'evening'],
     'AUDUSD':  ['asian',  'london', 'ny_open', 'evening'],
     'NZDUSD':  ['asian',  'london', 'ny_open', 'evening'],
@@ -1736,6 +1743,8 @@ _KILL_ZONE_LABELS = {
     'silver_bullet_ny':    "⭐ NY Silver Bullet",
     'london_fix':          "🏅 London Gold Fix",
     'ny_indices':          "NY Indices Open",
+    'xau_pre_ny':          "Gold Pre-NY Transition",
+    'xau_pm':              "Gold PM Session",
 }
 
 # Maps each news-adjacent kill zone to its documented ICT follow-through window.
