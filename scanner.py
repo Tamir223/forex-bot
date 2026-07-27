@@ -2168,8 +2168,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         logger.info(f"[scanner] {symbol} direction {_gt_direction} ({_gt_strength})")
         market_structure = ms["structure"]  # "uptrend" or "downtrend" (ranging already gated)
 
-        price_data = {"price": _data["price"]} if _data.get("price") else None
-        atr_data   = _data.get("atr") or None
+        price_data    = {"price": _data["price"]} if _data.get("price") else None
+        current_price = float(price_data["price"]) if price_data else (float(candles[0]["close"]) if candles else 0.0)
+        atr_data      = _data.get("atr") or None
 
         # ── TIER 1: HARD BLOCKS ──────────────────────────────────────────────
         news_blocked, news_reason, news_warning = is_news_window(symbol)
@@ -2360,7 +2361,6 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 return None  # do not update _last_signal_time — allow retry on next scan
 
         # ── BUILD SIGNAL LEVELS ─────────────────────────────────────────────────
-        current_price = price_data.get("price", 0) if price_data else 0
         _build_cp = float(current_price) - FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
 
         auto_signal = build_auto_signal(
@@ -2719,24 +2719,32 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # current price so MT5 accepts it; for a Buy Limit, entry must be BELOW current
         # price. Validate against the fully-final _sig_entry (post all overrides) rather
         # than the original build_auto_signal value, which may have been superseded.
-        if current_price and _sig_entry:
-            _cp_final = float(current_price)
-            if direction == "SELL" and _sig_entry < _cp_final:
-                logger.warning(
-                    f"[entry_validation] {symbol} entry {_sig_entry} is not a valid "
-                    f"Sell Limit relative to current price {_cp_final} — blocking"
-                )
-                _last_signal_time[_sym_key] = _time.monotonic()
-                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
-                return None
-            elif direction == "BUY" and _sig_entry > _cp_final:
-                logger.warning(
-                    f"[entry_validation] {symbol} entry {_sig_entry} is not a valid "
-                    f"Buy Limit relative to current price {_cp_final} — blocking"
-                )
-                _last_signal_time[_sym_key] = _time.monotonic()
-                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
-                return None
+        if not current_price or not _sig_entry:
+            logger.warning(
+                f"[entry_validation] {symbol} could not verify — "
+                f"current_price={current_price} sig_entry={_sig_entry} "
+                f"— blocking as a precaution"
+            )
+            _last_signal_time[_sym_key] = _time.monotonic()
+            _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+            return None
+        _cp_final = float(current_price)
+        if direction == "SELL" and _sig_entry < _cp_final:
+            logger.warning(
+                f"[entry_validation] {symbol} entry {_sig_entry} is not a valid "
+                f"Sell Limit relative to current price {_cp_final} — blocking"
+            )
+            _last_signal_time[_sym_key] = _time.monotonic()
+            _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+            return None
+        elif direction == "BUY" and _sig_entry > _cp_final:
+            logger.warning(
+                f"[entry_validation] {symbol} entry {_sig_entry} is not a valid "
+                f"Buy Limit relative to current price {_cp_final} — blocking"
+            )
+            _last_signal_time[_sym_key] = _time.monotonic()
+            _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+            return None
 
         # Record signal time for dedup cooldown
         _last_signal_time[_sym_key] = _time.monotonic()
