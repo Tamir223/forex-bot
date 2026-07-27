@@ -2785,11 +2785,13 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # making _sig_entry < current_price = False and silently allowing an invalid order.
         _ev_live = await _fetch_live_price(symbol)
         if _ev_live and _ev_live > 0:
-            if abs(_ev_live - current_price) > 0.001:
-                logger.info(
-                    f"[current_price] {symbol} refreshed for entry_validation: "
-                    f"bundle={current_price} live={_ev_live} diff={_ev_live - current_price:+.3f}"
-                )
+            # Always log the re-fetch so every signal that reaches this point has
+            # an audit record — previously only logged when diff > $0.001, which
+            # made validation look absent for signals where price barely moved.
+            logger.info(
+                f"[current_price] {symbol} refreshed for entry_validation: "
+                f"bundle={current_price} live={_ev_live} diff={_ev_live - current_price:+.3f}"
+            )
             current_price = _ev_live
         else:
             logger.warning(
@@ -2822,6 +2824,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _last_signal_time[_sym_key] = _time.monotonic()
             _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
             return None
+        logger.info(
+            f"[entry_validation] {symbol} {direction} entry {_sig_entry} valid vs live {_cp_final} — passing"
+        )
 
         # Record signal time for dedup cooldown
         _last_signal_time[_sym_key] = _time.monotonic()
