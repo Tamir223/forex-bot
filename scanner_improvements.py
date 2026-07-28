@@ -1697,14 +1697,31 @@ def check_premium_discount_zone(candles: list, entry: float, direction: str) -> 
 
 # ─── 20. KILL ZONE TIMING BONUS ──────────────────────────────────────────────
 
+# ── DST DISCLOSURE ────────────────────────────────────────────────────────────
+# All windows below are hardcoded UTC. No DST adjustment is applied here.
+# A _et_to_utc_minutes() helper (line ~98) exists and is used for news/FOMC
+# timing, but is NOT wired to this kill zone dict.
+# Consequence: every ET-anchored window below drifts by 1 hour between seasons:
+#   Summer (EDT, UTC-4): values listed are correct.
+#   Winter (EST, UTC-5): every ET-based window is 1 hour too early in UTC.
+# This is a known gap; proper DST-aware kill zones would require either
+# calling _et_to_utc_minutes() dynamically or maintaining two window sets.
+# Flagged as a future improvement — do not silently assume these are always right.
+# ──────────────────────────────────────────────────────────────────────────────
 _KILL_ZONES = {
     'asian':               (23,  2),  # 23:00-02:00 UTC wraps midnight — JPY, AUD, NZD only
     'london':              (6,  10),  # 06:00-10:00 UTC covers summer (6-9) and winter (7-10)
     'ny_open':             (12, 15),  # 12:00-15:00 UTC — all pairs
     'london_close':        (15, 16),  # 15:00-16:00 UTC — EUR, GBP bonus window
     'evening':             (19, 22),  # 19:00-22:00 UTC — post-FOMC Asia-correlated pairs
-    'silver_bullet_london': (7,  8),  # 07:00-08:00 UTC — ICT Silver Bullet
-    'silver_bullet_ny':    (14, 15),  # 14:00-15:00 UTC — ICT Silver Bullet
+    # ICT Silver Bullet windows — 3 daily sessions (ICT confirmed: London Open, NY AM, NY PM)
+    # Current UTC values are correct for EDT (summer, UTC-4). EST winter shift: each +1h.
+    #   silver_bullet_london: winter correct window = 08:00-09:00 UTC
+    #   silver_bullet_ny:     winter correct window = 15:00-16:00 UTC
+    #   silver_bullet_ny_pm:  winter correct window = 19:00-20:00 UTC
+    'silver_bullet_london': (7,  8),  # 3:00-4:00 AM EDT = 07:00-08:00 UTC (summer) ✓
+    'silver_bullet_ny':    (14, 15),  # 10:00-11:00 AM EDT = 14:00-15:00 UTC (summer) ✓
+    'silver_bullet_ny_pm': (18, 19),  # 2:00-3:00 PM EDT = 18:00-19:00 UTC (summer) ✓; EST winter: 19:00-20:00 UTC
     # Gold-specific windows: log analysis confirmed ALL 22 XAUUSD 5M BOS events fell in the
     # 10:00-12:00 and 16:00-17:00 UTC gaps, causing 100% kill_zone gate rejection (Jul 24-26).
     # Root cause: standard london window ends 10:00 UTC; ny_open starts 12:00; london_close
@@ -1712,16 +1729,27 @@ _KILL_ZONES = {
     # the Gold PM session where real 5M displacement is appearing in market data.
     'xau_pre_ny':          (10, 12),  # 10:00-12:00 UTC — London close/Pre-NY transition, Gold only
     'xau_pm':              (16, 17),  # 16:00-17:00 UTC — PM session continuation, Gold only
-    'london_fix':          (9,  10),  # 09:00-10:00 UTC — Gold institutional fix
+    # LBMA Gold Fix — set twice daily at 10:30 AM and 3:00 PM London time (source: LBMA + ICE).
+    # AM fix: 10:30 London BST = 09:30 UTC (summer); 10:30 London GMT = 10:30 UTC (winter, caught by xau_pre_ny).
+    # PM fix: 3:00 PM London BST = 14:00 UTC (summer); 3:00 PM London GMT = 15:00 UTC (winter, caught by london_close).
+    # These windows are correct for EDT/summer. In GMT/winter they drift 1h (see DST disclosure above).
+    'london_fix':          (9,  10),  # LBMA AM Gold Fix: 10:30 AM London = 09:30 UTC (BST/summer) ✓
+    'london_fix_pm':       (14, 15),  # LBMA PM Gold Fix: 3:00 PM London = 14:00 UTC (BST/summer) ✓; GMT winter: 15:00 UTC
     'ny_indices':          (12, 16),  # 12:00-16:00 UTC — covers pre-market sweep + NYSE open
     # ICT research: indices kill zone starts at 8:30AM EST (12:30 UTC) not 9:00AM
     # Pre-market 12:30-13:30 UTC is where the Judas Swing sweep happens on indices
 }
 
 _PAIR_KILL_ZONES = {
-    'EURUSD':  ['london', 'ny_open', 'london_close', 'silver_bullet_london', 'silver_bullet_ny'],
-    'GBPUSD':  ['london', 'ny_open', 'london_close', 'silver_bullet_london', 'silver_bullet_ny'],
-    'XAUUSD':  ['london', 'ny_open', 'london_close', 'london_fix', 'silver_bullet_london', 'silver_bullet_ny', 'xau_pre_ny', 'xau_pm'],
+    # Silver Bullet windows (london, ny_am, ny_pm) placed before generic ny_open/london_close
+    # so the specific label wins priority in is_kill_zone() which returns on first match.
+    'EURUSD':  ['london', 'silver_bullet_london', 'silver_bullet_ny', 'silver_bullet_ny_pm', 'ny_open', 'london_close'],
+    'GBPUSD':  ['london', 'silver_bullet_london', 'silver_bullet_ny', 'silver_bullet_ny_pm', 'ny_open', 'london_close'],
+    # XAUUSD: gold-specific Fix windows listed first so they win label over generic London/NY Open.
+    # london_fix (09-10) and london_fix_pm (14-15) must precede london (06-10) and ny_open (12-15)
+    # respectively, otherwise those broader windows shadow the Fix labels.
+    'XAUUSD':  ['london_fix', 'london_fix_pm', 'london', 'xau_pre_ny', 'ny_open', 'london_close',
+                'silver_bullet_london', 'silver_bullet_ny', 'silver_bullet_ny_pm', 'xau_pm'],
     'USDJPY':  ['asian',  'london', 'ny_open', 'evening'],
     'AUDUSD':  ['asian',  'london', 'ny_open', 'evening'],
     'NZDUSD':  ['asian',  'london', 'ny_open', 'evening'],
@@ -1740,8 +1768,10 @@ _KILL_ZONE_LABELS = {
     'london_close':        "London Close",
     'evening':             "Evening Session",
     'silver_bullet_london': "⭐ London Silver Bullet",
-    'silver_bullet_ny':    "⭐ NY Silver Bullet",
-    'london_fix':          "🏅 London Gold Fix",
+    'silver_bullet_ny':    "⭐ NY AM Silver Bullet",
+    'silver_bullet_ny_pm': "⭐ NY PM Silver Bullet",
+    'london_fix':          "🏅 Gold AM Fix",
+    'london_fix_pm':       "🏅 Gold PM Fix",
     'ny_indices':          "NY Indices Open",
     'xau_pre_ny':          "Gold Pre-NY Transition",
     'xau_pm':              "Gold PM Session",
