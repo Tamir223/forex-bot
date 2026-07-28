@@ -1460,7 +1460,11 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     # GATE 5 — OB or FVG present; C-tier OBs fail; Weak FVGs (C-tier after penalty) fail;
     # liquidity runs require OB+FVG confluence
     _has_ob = bool(ob) and ob.get('tier', '') != 'C-tier'
-    _has_fvg = bool(fvg) and fvg.get('strength_tier', 'B-tier') != 'C-tier'
+    _has_fvg = (
+        bool(fvg)
+        and fvg.get('strength_tier', 'B-tier') != 'C-tier'
+        and fvg.get('type') == ('bullish_fvg' if direction == 'BUY' else 'bearish_fvg')
+    )
     if fvg:
         if _has_fvg and fvg.get('strength') == "Exceptional":
             logger.info(
@@ -2275,6 +2279,16 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 if fvg['bottom'] <= float(_close_price) <= fvg['top']:
                     mark_fvg_mitigated(symbol, fvg['bottom'], fvg['top'])
                     fvg = None
+
+        # Direction filter: discard FVGs that oppose the trade direction.
+        # Symmetric with OB detection (line above uses _ob_trend = "bullish"/"bearish").
+        if fvg:
+            _expected_fvg = 'bullish_fvg' if _gt_direction == 'BUY' else 'bearish_fvg'
+            if fvg.get('type') != _expected_fvg:
+                logger.info(
+                    f"[fvg] {symbol} FVG type {fvg.get('type')} opposes {_gt_direction} — discarding"
+                )
+                fvg = None
 
         from scanner_improvements import get_daily_bias as _get_daily_bias
         daily_bias = _get_daily_bias(symbol, candles=_data.get("candles_daily"))
