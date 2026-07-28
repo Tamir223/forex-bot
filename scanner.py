@@ -261,7 +261,7 @@ async def _update_asia_levels(symbol: str, candles: list = None) -> None:
     """
     Set reference levels used for liquidity-sweep detection.
 
-    Forex / XAUUSD  — Asia session (00:00-07:00 UTC) high/low from today's 15M candles.
+    Forex / XAUUSD  — Asia session (21:00 UTC prev day – 09:00 UTC today) high/low from 15M candles.
     Equity indices (GER40, US100, US30, US500) — previous day's D1 high/low.
       GER40 is closed during Asian hours; US indices have only thin overnight-futures
       prints, making the prev-day session high/low a far more meaningful sweep reference.
@@ -306,7 +306,9 @@ async def _update_asia_levels(symbol: str, candles: list = None) -> None:
         except Exception as e:
             logger.warning(f"[asia] {sym} prev_day fetch failed: {e} — falling back to 15M")
 
-    # ── FOREX / XAUUSD: Asia session 00:00-07:00 UTC ─────────────────────────
+    # ── FOREX / XAUUSD: Asia session 21:00 UTC (prev day) – 09:00 UTC ──────────
+    # Covers full combined Sydney+Tokyo session (research: TMGM, Forex.com, Myfxbook).
+    # Kill zone gate uses a narrower 23:00-02:00 window; these are intentionally different.
     if candles is None:
         try:
             bundle = await fetch_all_timeframes(sym)
@@ -316,6 +318,7 @@ async def _update_asia_levels(symbol: str, candles: list = None) -> None:
             return
     asia_candles = []
     _midnight_open_found = False
+    yesterday = today - timedelta(days=1)
     for c in candles:
         try:
             dt = datetime.fromisoformat(str(c.get("datetime", "")))
@@ -323,7 +326,11 @@ async def _update_asia_levels(symbol: str, candles: list = None) -> None:
                 dt = dt.replace(tzinfo=timezone.utc)
             else:
                 dt = dt.astimezone(timezone.utc)
-            if dt.date() == today and 0 <= dt.hour < 7:
+            _in_asia = (
+                (dt.date() == yesterday and dt.hour >= 21) or
+                (dt.date() == today    and dt.hour < 9)
+            )
+            if _in_asia:
                 asia_candles.append(c)
                 # Midnight open = open price of the 00:00 UTC candle (first 15M candle of the day)
                 # For US indices, midnight reference is 05:00 UTC (00:00 ET summer)
