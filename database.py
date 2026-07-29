@@ -476,9 +476,12 @@ def update_trade_result(trade_id: int, result: str, pnl_amount: float = None):
         with get_conn() as conn:
             with conn.cursor() as cur:
                 if pnl_amount is not None:
+                    # Write to both columns: pnl_amount (read by stats) and pnl
+                    # (read by /history via get_recent_trades). Auto-executed closes
+                    # previously left pnl=NULL causing blank P&L in trade history.
                     cur.execute(
-                        "UPDATE trades SET result = %s, pnl_amount = %s WHERE id = %s",
-                        (result, pnl_amount, trade_id)
+                        "UPDATE trades SET result = %s, pnl_amount = %s, pnl = %s WHERE id = %s",
+                        (result, pnl_amount, pnl_amount, trade_id)
                     )
                 else:
                     cur.execute(

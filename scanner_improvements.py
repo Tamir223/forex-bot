@@ -2406,12 +2406,14 @@ def clear_daily_mitigation_state() -> None:
     logger.info("[mitigation] Daily state cleared — fresh start")
 
 
-def score_bos_quality(candles: list, direction: str) -> tuple[str, int, str]:
+def score_bos_quality(candles: list, direction: str, timeframe: str = "15M") -> tuple[str, int, str]:
     """
     Assess BOS displacement quality by counting consecutive candles in the BOS direction.
     Window tightened to 6 candles (90 min on 15M) — a BOS older than that is stale;
     the entry window has closed and any retrace to OB/FVG is likely to fail.
-    3+ = strong, 2 = moderate, 1 = weak (gate fails).
+    Thresholds: 15M requires 3+ consecutive for "strong"; 5M requires 4+ because
+    three consecutive 5M candles (15 min of one-way price) is producible from noise
+    whereas three 15M candles (45 min) implies genuine institutional displacement.
     Returns (quality, count, signal_label) where signal_label is Telegram-ready.
     """
     if not candles or len(candles) < 2:
@@ -2431,7 +2433,10 @@ def score_bos_quality(candles: list, direction: str) -> tuple[str, int, str]:
         else:
             break
 
-    if consecutive >= 3:
+    # 5M noise is higher — require one extra candle before calling "strong"
+    _strong_threshold = 4 if timeframe == "5M" else 3
+
+    if consecutive >= _strong_threshold:
         return "strong", consecutive, "✅ BOS: confirmed (strong displacement)"
     if consecutive >= 2:
         return "moderate", consecutive, "⚠️ BOS: confirmed (moderate displacement)"

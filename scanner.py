@@ -65,6 +65,23 @@ YFINANCE_FUTURES_MAP = {
 # reducing signal lag from ~30 min to ~10 min per innercircletrader.net guidance.
 FAST_INSTRUMENTS = {"USDJPY", "XAUUSD", "US100", "US30", "US500"}
 
+# Per-symbol TP1 target multiplier (R-multiple). Default 2.0 for all pairs;
+# override only where pair-specific data justifies a different level.
+TP1_MULTIPLIER: dict[str, float] = {
+    "default": 2.0,
+    # GBPUSD: widest SL band on watchlist (15-25 pips), requiring 30-50 pip raw move
+    # to reach 2.0R; independent research shows Sharpe 0.31 (sub-tradeable) for
+    # trend/structure-continuation strategies. Reverted to 1.5R pending further
+    # live data — not a permanent judgment.
+    "GBPUSD": 1.5,
+}
+
+
+def _tp1_mult(symbol: str) -> float:
+    """Return the TP1 R-multiple for the given symbol."""
+    return TP1_MULTIPLIER.get(symbol.upper(), TP1_MULTIPLIER["default"])
+
+
 logger = logging.getLogger(__name__)
 
 # Cache for auto-built signals — keyed by short ID
@@ -999,16 +1016,14 @@ def _try_reprice_stale_signal(
         _entry = round(raw_entry + _spot_off, _dp)
         _sl_dist = max(abs(raw_entry - raw_extreme), _min_sl_dist(symbol))
         _sl_dist = min(_sl_dist, _max_sl_dist(symbol))
+        _mult = _tp1_mult(symbol)
         if direction == "BUY":
             _sl  = round(_entry - _sl_dist, _dp)
-            # TP1 changed from 1.5R to 2.0R on 2026-07-27 — research-backed: 2:1 breakeven is 33.3% win rate,
-            # well below TNL Trader's confirmed 55-65%/45% setup win rates. NOT yet empirically re-verified
-            # against live results due to a logging gap — revisit once fresh trade data accumulates.
-            _tp1 = round(_entry + _sl_dist * 2.0, _dp)
+            _tp1 = round(_entry + _sl_dist * _mult, _dp)
             _tp2 = round(_entry + _sl_dist * 2.5, _dp)
         else:
             _sl  = round(_entry + _sl_dist, _dp)
-            _tp1 = round(_entry - _sl_dist * 2.0, _dp)
+            _tp1 = round(_entry - _sl_dist * _mult, _dp)
             _tp2 = round(_entry - _sl_dist * 2.5, _dp)
         _valid, _rr = validate_risk_reward(_entry, _sl, _tp1)
         if _valid:
@@ -1592,7 +1607,7 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
             # 15M failed — try 5M for fast instruments
             _candles_5m = (data.get("candles_5m") or []) if data else []
             if _candles_5m:
-                _bos_quality_5m, _bos_count_5m, _ = score_bos_quality(_candles_5m, direction)
+                _bos_quality_5m, _bos_count_5m, _ = score_bos_quality(_candles_5m, direction, timeframe="5M")
                 if _bos_quality_5m != "weak":
                     _bos_quality = _bos_quality_5m
                     _bos_count = _bos_count_5m
@@ -1751,8 +1766,9 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         sl_dist = max(sl_dist, _min_sl_dist(symbol))  # floor — never too tight
         sl_dist = min(sl_dist, _max_sl_dist(symbol))  # ceiling — never too wide
         _use_3dp = spec or symbol.upper() in ("XAUUSD", "US100", "US30", "NAS100")
+        _bs_mult = _tp1_mult(symbol)
         sl = round(entry - sl_dist, 3) if _use_3dp else round(entry - sl_dist, 5)
-        tp1 = round(entry + sl_dist * 2.0, 3 if _use_3dp else 5)
+        tp1 = round(entry + sl_dist * _bs_mult, 3 if _use_3dp else 5)
         tp2 = round(entry + sl_dist * 3.0, 3 if _use_3dp else 5)
         tp3 = round(entry + sl_dist * 5.0, 3 if _use_3dp else 5)
         logger.info(f"[build_signal] {symbol} BUY sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} max={_max_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
@@ -1773,8 +1789,9 @@ def build_auto_signal(symbol: str, direction: str, price: float,
         sl_dist = max(sl_dist, _min_sl_dist(symbol))  # floor — never too tight
         sl_dist = min(sl_dist, _max_sl_dist(symbol))  # ceiling — never too wide
         _use_3dp = spec or symbol.upper() in ("XAUUSD", "US100", "US30", "NAS100")
+        _bs_mult = _tp1_mult(symbol)
         sl = round(entry + sl_dist, 3) if _use_3dp else round(entry + sl_dist, 5)
-        tp1 = round(entry - sl_dist * 2.0, 3 if _use_3dp else 5)
+        tp1 = round(entry - sl_dist * _bs_mult, 3 if _use_3dp else 5)
         tp2 = round(entry - sl_dist * 3.0, 3 if _use_3dp else 5)
         tp3 = round(entry - sl_dist * 5.0, 3 if _use_3dp else 5)
         logger.info(f"[build_signal] {symbol} SELL sl_dist={sl_dist:.5f} min={_min_sl_dist(symbol):.5f} max={_max_sl_dist(symbol):.5f} entry={entry} sl={sl} tp1={tp1}")
@@ -1801,14 +1818,14 @@ def build_auto_signal(symbol: str, direction: str, price: float,
 
     trend_dir = "Bullish" if direction == "BUY" else "Bearish"
 
-    # Enforce minimum 2.0:1 TP1 floor
-    _tp1_min_dist = sl_dist * 2.0
+    # Enforce minimum TP1 floor using per-symbol multiplier
+    _tp1_min_dist = sl_dist * _tp1_mult(symbol)
     if direction == "BUY" and (tp1 - entry) < _tp1_min_dist - 0.0001:
         tp1 = round(entry + _tp1_min_dist, 3 if _use_3dp else 5)
-        logger.warning(f"[build_signal] {symbol} BUY TP1 corrected to 2.0R: tp1={tp1}")
+        logger.warning(f"[build_signal] {symbol} BUY TP1 corrected to {_tp1_mult(symbol)}R: tp1={tp1}")
     elif direction == "SELL" and (entry - tp1) < _tp1_min_dist - 0.0001:
         tp1 = round(entry - _tp1_min_dist, 3 if _use_3dp else 5)
-        logger.warning(f"[build_signal] {symbol} SELL TP1 corrected to 2.0R: tp1={tp1}")
+        logger.warning(f"[build_signal] {symbol} SELL TP1 corrected to {_tp1_mult(symbol)}R: tp1={tp1}")
 
     # Round prices cleanly and apply spot offset for instruments where yFinance
     # returns futures prices that differ from MT5 spot price
@@ -2483,16 +2500,14 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _raw_sl_5m = round(_refinement_5m["sl"] + _spot_offset_5m, _dp_5m)
             _5m_sl_dist = max(abs(_sig_entry - _raw_sl_5m), _min_sl_dist(symbol))
             _5m_sl_dist = min(_5m_sl_dist, _max_sl_dist(symbol))
+            _mult_5m = _tp1_mult(symbol)
             if direction == "BUY":
                 _sig_sl  = round(_sig_entry - _5m_sl_dist, _dp_5m)
-                # TP1 changed from 1.5R to 2.0R on 2026-07-27 — research-backed: 2:1 breakeven is 33.3% win rate,
-                # well below TNL Trader's confirmed 55-65%/45% setup win rates. NOT yet empirically re-verified
-                # against live results due to a logging gap — revisit once fresh trade data accumulates.
-                _sig_tp1 = round(_sig_entry + _5m_sl_dist * 2.0, _dp_5m)
+                _sig_tp1 = round(_sig_entry + _5m_sl_dist * _mult_5m, _dp_5m)
                 _sig_tp2 = round(_sig_entry + _5m_sl_dist * 2.5, _dp_5m)
             else:
                 _sig_sl  = round(_sig_entry + _5m_sl_dist, _dp_5m)
-                _sig_tp1 = round(_sig_entry - _5m_sl_dist * 2.0, _dp_5m)
+                _sig_tp1 = round(_sig_entry - _5m_sl_dist * _mult_5m, _dp_5m)
                 _sig_tp2 = round(_sig_entry - _5m_sl_dist * 2.5, _dp_5m)
             logger.info(
                 f"[scanner] {symbol} 5M levels applied: entry={_sig_entry} sl={_sig_sl} "
@@ -2512,20 +2527,18 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             # Use OTE midpoint (62-79% retracement) as entry; fall back to FVG mid (CE) if OTE absent
             _ote_entry = displacement.get('ote_mid') or displacement['fvg_mid']
             _sig_entry = round(_ote_entry + _spot_off_d, _dp_d)
+            _mult_d = _tp1_mult(symbol)
             if direction == "BUY":
                 _sl_dist_d = max(abs(_sig_entry - round(displacement['fvg_bottom'] + _spot_off_d, _dp_d)), _min_sl_dist(symbol))
                 _sl_dist_d = min(_sl_dist_d, _max_sl_dist(symbol))
                 _sig_sl  = round(_sig_entry - _sl_dist_d, _dp_d)
-                # TP1 changed from 1.5R to 2.0R on 2026-07-27 — research-backed: 2:1 breakeven is 33.3% win rate,
-                # well below TNL Trader's confirmed 55-65%/45% setup win rates. NOT yet empirically re-verified
-                # against live results due to a logging gap — revisit once fresh trade data accumulates.
-                _sig_tp1 = round(_sig_entry + _sl_dist_d * 2.0, _dp_d)
+                _sig_tp1 = round(_sig_entry + _sl_dist_d * _mult_d, _dp_d)
                 _sig_tp2 = round(_sig_entry + _sl_dist_d * 2.5, _dp_d)
             else:
                 _sl_dist_d = max(abs(round(displacement['fvg_top'] + _spot_off_d, _dp_d) - _sig_entry), _min_sl_dist(symbol))
                 _sl_dist_d = min(_sl_dist_d, _max_sl_dist(symbol))
                 _sig_sl  = round(_sig_entry + _sl_dist_d, _dp_d)
-                _sig_tp1 = round(_sig_entry - _sl_dist_d * 2.0, _dp_d)
+                _sig_tp1 = round(_sig_entry - _sl_dist_d * _mult_d, _dp_d)
                 _sig_tp2 = round(_sig_entry - _sl_dist_d * 2.5, _dp_d)
             logger.info(
                 f"[displacement] {symbol} OTE entry override: entry={_sig_entry} sl={_sig_sl} tp1={_sig_tp1} "
@@ -2702,25 +2715,23 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
             return None
 
-        # OB-based RR hard check
-        # TP1 changed from 1.5R to 2.0R on 2026-07-27 — research-backed: 2:1 breakeven is 33.3% win rate,
-        # well below TNL Trader's confirmed 55-65%/45% setup win rates. NOT yet empirically re-verified
-        # against live results due to a logging gap — revisit once fresh trade data accumulates.
+        # OB-based RR hard check — uses per-symbol TP1 multiplier
         _min_sl = _min_sl_dist(symbol)
+        _mult_rr = _tp1_mult(symbol)
         if direction == "BUY":
             _sl_rr = (round(ob["low"] - (ob["high"] - ob["low"]) * 0.1, 5) if ob and ob.get("type") == "bullish_ob"
                       else round(fvg["bottom"] - (fvg["top"] - fvg["bottom"]) * 0.5, 5) if fvg
                       else round(float(current_price) * 0.998, 5))
             _sl_dist_rr = max(abs(float(entry_check) - _sl_rr), _min_sl)
             _sl_rr   = round(float(entry_check) - _sl_dist_rr, 5)
-            _tp1_rr  = round(float(entry_check) + _sl_dist_rr * 2.0, 5)
+            _tp1_rr  = round(float(entry_check) + _sl_dist_rr * _mult_rr, 5)
         else:
             _sl_rr = (round(ob["high"] + (ob["high"] - ob["low"]) * 0.1, 5) if ob and ob.get("type") == "bearish_ob"
                       else round(fvg["top"] + (fvg["top"] - fvg["bottom"]) * 0.5, 5) if fvg
                       else round(float(current_price) * 1.002, 5))
             _sl_dist_rr = max(abs(_sl_rr - float(entry_check)), _min_sl)
             _sl_rr   = round(float(entry_check) + _sl_dist_rr, 5)
-            _tp1_rr  = round(float(entry_check) - _sl_dist_rr * 2.0, 5)
+            _tp1_rr  = round(float(entry_check) - _sl_dist_rr * _mult_rr, 5)
 
         _rr_valid, _actual_rr = validate_risk_reward(float(entry_check), _sl_rr, _tp1_rr)
         if not _rr_valid:
