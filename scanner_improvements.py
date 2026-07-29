@@ -39,6 +39,41 @@ PIP_SPECS = {
 
 _FOREX_PIP_SPEC_PAIRS = {k for k, v in PIP_SPECS.items() if v["pip"] <= 0.01 and k not in ("XAUUSD", "XAGUSD")}
 
+# Minimum wick pierce required to count as a genuine sweep (raw price units).
+# Scaled proportionally to each pair's real volatility (≈ 20% of min_sl reference).
+# Previously flat 1 pip for all forex, 0 for XAUUSD → false sweeps on GBPUSD/XAUUSD/USOIL.
+_SWEEP_PIERCE_BUFFER: dict[str, float] = {
+    "EURUSD": 0.0002,  # 2 pips  — 17% of 12-pip min SL
+    "GBPUSD": 0.0003,  # 3 pips  — 20% of 15-pip min SL; previously 1 pip caused false sweeps
+    "AUDUSD": 0.0002,  # 2 pips  — 20% of 10-pip min SL
+    "NZDUSD": 0.0002,  # 2 pips  — 20% of 10-pip min SL
+    "USDCAD": 0.0002,  # 2 pips  — 17% of 12-pip min SL
+    "USDCHF": 0.0002,  # 2 pips  — 20% of 10-pip min SL
+    "USDJPY": 0.02,    # 2 pips  — 25% of 8-pip min SL
+    "EURJPY": 0.02,    # 2 pips  — JPY pairs same scale
+    "GBPJPY": 0.02,    # 2 pips  — JPY pairs same scale
+    "XAUUSD": 3.0,     # 3 pts   — 10% of 30-pt min SL; previously 0, any wick qualified
+    "USOIL":  0.05,    # 5 cents — 12.5% of $0.40 min SL; previously $0.01 (too small at $65-85)
+}
+
+
+# ─── TP1 R-MULTIPLE TARGETS ───────────────────────────────────────────────────
+# Single source of truth for per-pair TP1 targets. validate_risk_reward() reads
+# this directly so the safety floor always matches the actual construction target.
+# Sub-threshold pairs (walk-forward FX study 2003-2025, 23 rolling windows —
+# Sharpe below 0.5): reverted to 1.5R pending live fills. Not permanent judgments.
+TP1_MULTIPLIER: dict[str, float] = {
+    "default": 2.0,
+    "GBPUSD": 1.5,   # Sharpe 0.31; widest SL band (15-25 pip) compounds the misfit
+    "AUDUSD": 1.5,   # Sharpe 0.09 — weakest pair tested, "weak across every strategy"
+    "USDCAD": 1.5,   # Sharpe 0.14 — carry-cost-eroded, sub-threshold all windows
+}
+
+
+def _tp1_mult(symbol: str) -> float:
+    """Return the TP1 R-multiple for the given symbol."""
+    return TP1_MULTIPLIER.get(symbol.upper(), TP1_MULTIPLIER["default"])
+
 
 def get_pip_spec(symbol: str) -> dict:
     """Return pip spec for symbol, defaulting to standard 4dp forex if unknown."""
@@ -705,9 +740,11 @@ def detect_liquidity_sweep(candles: list, direction: str, symbol: str = "") -> t
     if not candles or len(candles) < 8:
         return False, 0.0
 
-    # Minimum pierce distance — 1 pip in the pair's units — filters wicks that barely graze the level
+    # Minimum pierce distance — scaled per pair (see _SWEEP_PIERCE_BUFFER).
+    # Falls back to pip size for known forex pairs, 0 for unlisted instruments.
     sym = symbol.upper() if symbol else ""
-    min_pierce = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+    _fallback = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+    min_pierce = _SWEEP_PIERCE_BUFFER.get(sym, _fallback)
 
     recent = candles[:12]
 
@@ -759,7 +796,8 @@ def detect_liquidity_run(candles: list, direction: str, symbol: str = "") -> tup
         return False, 0.0
 
     sym = symbol.upper() if symbol else ""
-    min_pierce = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+    _fallback = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+    min_pierce = _SWEEP_PIERCE_BUFFER.get(sym, _fallback)
 
     recent = candles[:12]
 
@@ -1022,11 +1060,17 @@ def is_optimal_time_for_pair(symbol: str) -> tuple[bool, str]:
 
 # ─── 12. RISK REWARD MINIMUM FILTER ──────────────────────────────────────────
 
-def validate_risk_reward(entry: float, sl: float, tp1: float, min_rr: float = 1.5) -> tuple[bool, float]:
+def validate_risk_reward(entry: float, sl: float, tp1: float, symbol: str = "", min_rr: float | None = None) -> tuple[bool, float]:
     """
-    Validate actual risk/reward ratio meets minimum threshold.
+    Validate actual risk/reward ratio meets the pair's TP1 target floor.
+    min_rr defaults to the TP1_MULTIPLIER value for symbol (2.0 for most pairs,
+    1.5 for sub-threshold pairs). Pass symbol at every call site so the floor
+    always matches the actual construction target — one source of truth.
     Returns (is_valid, actual_rr).
     """
+    if min_rr is None:
+        min_rr = _tp1_mult(symbol) if symbol else TP1_MULTIPLIER["default"]
+
     sl_dist = abs(entry - sl)
     if sl_dist == 0:
         return False, 0.0
@@ -2242,7 +2286,8 @@ def detect_weekly_level_sweep(candles: list, direction: str, symbol: str = "") -
     if not weekly:
         return False, 0.0, ""
 
-    min_pierce = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+    _fallback = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+    min_pierce = _SWEEP_PIERCE_BUFFER.get(sym, _fallback)
     recent = candles[:12]
 
     if direction == "BUY":
@@ -2301,7 +2346,8 @@ def detect_round_number_sweep(candles: list, direction: str, symbol: str = "") -
     sym = symbol.upper() if symbol else ""
     interval = _ROUND_NUMBER_INTERVALS.get(sym, 0.0050)
     tolerance = interval * 0.10  # within 10% of interval counts as "touching"
-    min_pierce = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+    _fallback = PIP_SPECS[sym]["pip"] if sym in _FOREX_PIP_SPEC_PAIRS else 0.0
+    min_pierce = _SWEEP_PIERCE_BUFFER.get(sym, _fallback)
 
     current_price = candles[0]["close"]
     round_levels = get_nearest_round_numbers(sym, current_price, count=5)

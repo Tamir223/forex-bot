@@ -40,6 +40,8 @@ from scanner_improvements import (
     detect_orb_breakout,
     ORB_INSTRUMENTS,
     ORB_KILL_ZONES_FOR_SYMBOL,
+    TP1_MULTIPLIER,
+    _tp1_mult,
 )
 import requests
 import yfinance as yf
@@ -64,22 +66,6 @@ YFINANCE_FUTURES_MAP = {
 # For these symbols the BOS gate accepts 5M displacement as an alternative to 15M,
 # reducing signal lag from ~30 min to ~10 min per innercircletrader.net guidance.
 FAST_INSTRUMENTS = {"USDJPY", "XAUUSD", "US100", "US30", "US500"}
-
-# Per-symbol TP1 target multiplier (R-multiple). Default 2.0 for all pairs;
-# override only where pair-specific data justifies a different level.
-TP1_MULTIPLIER: dict[str, float] = {
-    "default": 2.0,
-    # GBPUSD: widest SL band on watchlist (15-25 pips), requiring 30-50 pip raw move
-    # to reach 2.0R; independent research shows Sharpe 0.31 (sub-tradeable) for
-    # trend/structure-continuation strategies. Reverted to 1.5R pending further
-    # live data — not a permanent judgment.
-    "GBPUSD": 1.5,
-}
-
-
-def _tp1_mult(symbol: str) -> float:
-    """Return the TP1 R-multiple for the given symbol."""
-    return TP1_MULTIPLIER.get(symbol.upper(), TP1_MULTIPLIER["default"])
 
 
 logger = logging.getLogger(__name__)
@@ -699,9 +685,13 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None, 
         _candles_since_open = int((_now - _session_open).total_seconds() / 60 / 15)
         max_candles_back = min(max(_candles_since_open, 5), 96)
 
-    # Per-pair displacement thresholds (raw price units — points for gold, price for forex)
+    # Per-pair displacement thresholds (raw price units — points for gold/oil, price for forex).
+    # USOIL: strong=0.60 ($0.60 ≈ 0.86% of $70 price) and valid=0.30 verified against typical
+    # 15M CL candles (active-session range $0.40-$0.80). Previously USOIL hit the YFINANCE_FUTURES_MAP
+    # branch (strong=15.0, valid=8.0 — equity-index point scale), making every USOIL OB "weak".
     _OB_THRESHOLDS = {
         "XAUUSD": {"strong": 25.0,  "valid": 12.0},
+        "USOIL":  {"strong": 0.60,  "valid": 0.30},  # dollar-scaled; 0.60=$0.60 per 15M candle
         "GBPUSD": {"strong": 0.0020, "valid": 0.0010},
         "EURUSD": {"strong": 0.0015, "valid": 0.0008},
         "USDJPY": {"strong": 0.15,   "valid": 0.08},
@@ -711,11 +701,13 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None, 
         "USDCHF": {"strong": 0.0010, "valid": 0.0005},
     }
     _sym_upper = symbol.upper() if symbol else ""
-    # Futures (non-XAUUSD) fall back to XAUUSD-style point thresholds
-    if _sym_upper in YFINANCE_FUTURES_MAP and _sym_upper != "XAUUSD":
+    # Explicit per-pair entries take priority; futures fallback only for unlisted instruments.
+    if _sym_upper in _OB_THRESHOLDS:
+        _thresholds = _OB_THRESHOLDS[_sym_upper]
+    elif _sym_upper in YFINANCE_FUTURES_MAP and _sym_upper != "XAUUSD":
         _thresholds = {"strong": 15.0, "valid": 8.0}
     else:
-        _thresholds = _OB_THRESHOLDS.get(_sym_upper, {"strong": 0.0015, "valid": 0.0008})
+        _thresholds = {"strong": 0.0015, "valid": 0.0008}
     _strong_disp = _thresholds["strong"]
     _valid_disp  = _thresholds["valid"]
 
@@ -1025,7 +1017,7 @@ def _try_reprice_stale_signal(
             _sl  = round(_entry + _sl_dist, _dp)
             _tp1 = round(_entry - _sl_dist * _mult, _dp)
             _tp2 = round(_entry - _sl_dist * 2.5, _dp)
-        _valid, _rr = validate_risk_reward(_entry, _sl, _tp1)
+        _valid, _rr = validate_risk_reward(_entry, _sl, _tp1, symbol=symbol)
         if _valid:
             return _entry, _sl, _tp1, _tp2, _rr
         return None
@@ -2152,9 +2144,9 @@ async def scan_orb_symbol(symbol: str) -> dict | None:
             tp2       = orb["tp2"]
 
             # RR validation (minimum 1.5R for TP1)
-            rr_valid, actual_rr = validate_risk_reward(entry, sl, tp1)
+            rr_valid, actual_rr = validate_risk_reward(entry, sl, tp1, symbol=sym)
             if not rr_valid:
-                logger.info(f"[orb] {sym} blocked — RR {actual_rr:.2f} < 1.5 minimum")
+                logger.info(f"[orb] {sym} blocked — RR {actual_rr:.2f} below {_tp1_mult(sym):.1f}R minimum")
                 continue
 
             # Lot sizing at 0.75% risk (same as OB Retracement signals)
@@ -2478,9 +2470,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _sig_entry = float(_sig_entry_m.group(1))
             _sig_sl    = float(_sig_sl_m.group(1))
             _sig_tp1   = float(_sig_tp1_m.group(1))
-            _sig_rr_valid, _sig_actual_rr = validate_risk_reward(_sig_entry, _sig_sl, _sig_tp1)
+            _sig_rr_valid, _sig_actual_rr = validate_risk_reward(_sig_entry, _sig_sl, _sig_tp1, symbol=symbol)
             if not _sig_rr_valid:
-                logger.info(f"[scanner] {symbol} blocked — TP1 RR {_sig_actual_rr:.2f} below minimum 1.5")
+                logger.info(f"[scanner] {symbol} blocked — TP1 RR {_sig_actual_rr:.2f} below {_tp1_mult(symbol):.1f}R minimum")
                 return None
         else:
             _sig_entry = float(current_price) if current_price else 0.0
@@ -2626,10 +2618,10 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             # below the 1.5R floor validated at signal build time. Re-check with
             # the final capped TP1 before allowing dispatch.
             if _sig_tp1 and _sig_sl:
-                _cap_rr_valid, _cap_rr = validate_risk_reward(_sig_entry, _sig_sl, _sig_tp1)
+                _cap_rr_valid, _cap_rr = validate_risk_reward(_sig_entry, _sig_sl, _sig_tp1, symbol=symbol)
                 if not _cap_rr_valid:
                     logger.info(
-                        f"[draw_cap] {symbol} post-cap R:R {_cap_rr:.2f} below 1.5R minimum — blocking"
+                        f"[draw_cap] {symbol} post-cap R:R {_cap_rr:.2f} below {_tp1_mult(symbol):.1f}R minimum — blocking"
                     )
                     _last_signal_time[_sym_key] = _time.monotonic()
                     _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
@@ -2733,9 +2725,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _sl_rr   = round(float(entry_check) + _sl_dist_rr, 5)
             _tp1_rr  = round(float(entry_check) - _sl_dist_rr * _mult_rr, 5)
 
-        _rr_valid, _actual_rr = validate_risk_reward(float(entry_check), _sl_rr, _tp1_rr)
+        _rr_valid, _actual_rr = validate_risk_reward(float(entry_check), _sl_rr, _tp1_rr, symbol=symbol)
         if not _rr_valid:
-            logger.info(f"[scanner] {symbol} blocked — TP1 RR {_actual_rr:.2f} below minimum 1.5")
+            logger.info(f"[scanner] {symbol} blocked — TP1 RR {_actual_rr:.2f} below {_tp1_mult(symbol):.1f}R minimum")
             return None
 
         # Correlation check
@@ -2788,7 +2780,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # minimum, try IOFED/IFVG re-pricing from a fresh structural
         # reference near current price before declaring the signal stale.
         if current_price and _sig_sl and _sig_tp1:
-            _remaining_valid, _remaining_rr = validate_risk_reward(float(current_price), _sig_sl, _sig_tp1)
+            _remaining_valid, _remaining_rr = validate_risk_reward(float(current_price), _sig_sl, _sig_tp1, symbol=symbol)
             if not _remaining_valid:
                 _repriced = _try_reprice_stale_signal(
                     symbol, direction, float(current_price),
