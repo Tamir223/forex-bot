@@ -3093,16 +3093,17 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                             _sig_source = "Structure Setup"
                             _sig_grade  = "B-tier"
                         _analysis = {
-                            "pair":          result["symbol"],
-                            "direction":     result["direction"],
-                            "entry_zone":    result.get("entry", 0),
-                            "stop_loss":     result.get("sl", 0),
-                            "tp1":           result.get("tp1", 0),
-                            "tp2":           result.get("tp2", 0),
-                            "risk_percent":  _risk_pct_val,
-                            "confidence":    score,
-                            "grade":         _sig_grade,
-                            "signal_source": _sig_source,
+                            "pair":             result["symbol"],
+                            "direction":        result["direction"],
+                            "entry_zone":       result.get("entry", 0),
+                            "stop_loss":        result.get("sl", 0),
+                            "tp1":              result.get("tp1", 0),
+                            "tp2":              result.get("tp2", 0),
+                            "risk_percent":     _risk_pct_val,
+                            "confidence":       score,
+                            "grade":            _sig_grade,
+                            "signal_source":    _sig_source,
+                            "had_draw_target":  bool(result.get("draw")),
                         }
 
                         # Store signal for YES/NO handler — do NOT log trade yet

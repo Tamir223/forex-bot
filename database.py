@@ -70,6 +70,7 @@ class Trade:
     entry_zone: Optional[str] = None
     stop_loss: Optional[str] = None
     result: str = "PENDING"   # PENDING, WIN, LOSS, SKIPPED
+    had_draw_target: bool = False
     id: Optional[int] = None
     created_at: Optional[datetime] = None
 
@@ -107,18 +108,25 @@ CREATE TABLE IF NOT EXISTS user_state (
 );
 
 CREATE TABLE IF NOT EXISTS trades (
-    id              SERIAL PRIMARY KEY,
-    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    pair            TEXT,
-    direction       TEXT,
-    grade           TEXT,
-    confidence      INTEGER,
-    risk_percent    FLOAT,
-    signal_source   TEXT,
-    entry_zone      TEXT,
-    stop_loss       TEXT,
-    result          TEXT NOT NULL DEFAULT 'PENDING',
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                  SERIAL PRIMARY KEY,
+    user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    pair                TEXT,
+    direction           TEXT,
+    grade               TEXT,
+    confidence          INTEGER,
+    risk_percent        FLOAT,
+    signal_source       TEXT,
+    entry_zone          TEXT,
+    stop_loss           TEXT,
+    result              TEXT NOT NULL DEFAULT 'PENDING',
+    had_draw_target     BOOLEAN NOT NULL DEFAULT FALSE,
+    firm_code           VARCHAR,
+    pnl                 NUMERIC,
+    pnl_amount          NUMERIC DEFAULT 0,
+    hold_minutes        INTEGER DEFAULT 0,
+    session             TEXT,
+    tp_level            TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS provider_stats (
@@ -144,18 +152,58 @@ CREATE TABLE IF NOT EXISTS activation_tokens (
 
 
 def init_db():
-    """Create all tables if they don't exist"""
+    """Create tables and run all schema migrations on every startup.
+
+    Each migration uses ADD COLUMN IF NOT EXISTS so it is idempotent —
+    safe to re-run on every boot. Each statement is committed independently
+    so one failure does not roll back the others, and every outcome
+    (applied / already present / error) is explicitly logged.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(SCHEMA)
-            # Add challenge columns to existing tables
-            cur.execute("ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_target FLOAT DEFAULT 10.0")
-            cur.execute("ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_start_balance FLOAT DEFAULT 10000.0")
-            cur.execute("ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_pnl FLOAT DEFAULT 0.0")
-            cur.execute("ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_start_date DATE")
-            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_execute BOOLEAN DEFAULT FALSE")
         conn.commit()
-    logger.info("Database initialized")
+    logger.info("[init_db] Base schema applied (CREATE TABLE IF NOT EXISTS)")
+
+    # Each entry: (description, SQL)
+    _migrations = [
+        ("user_state.challenge_target",
+         "ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_target FLOAT DEFAULT 10.0"),
+        ("user_state.challenge_start_balance",
+         "ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_start_balance FLOAT DEFAULT 10000.0"),
+        ("user_state.challenge_pnl",
+         "ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_pnl FLOAT DEFAULT 0.0"),
+        ("user_state.challenge_start_date",
+         "ALTER TABLE user_state ADD COLUMN IF NOT EXISTS challenge_start_date DATE"),
+        ("users.auto_execute",
+         "ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_execute BOOLEAN DEFAULT FALSE"),
+        ("trades.had_draw_target",
+         "ALTER TABLE trades ADD COLUMN IF NOT EXISTS had_draw_target BOOLEAN NOT NULL DEFAULT FALSE"),
+        ("trades.firm_code",
+         "ALTER TABLE trades ADD COLUMN IF NOT EXISTS firm_code VARCHAR"),
+        ("trades.pnl",
+         "ALTER TABLE trades ADD COLUMN IF NOT EXISTS pnl NUMERIC"),
+        ("trades.pnl_amount",
+         "ALTER TABLE trades ADD COLUMN IF NOT EXISTS pnl_amount NUMERIC DEFAULT 0"),
+        ("trades.hold_minutes",
+         "ALTER TABLE trades ADD COLUMN IF NOT EXISTS hold_minutes INTEGER DEFAULT 0"),
+        ("trades.session",
+         "ALTER TABLE trades ADD COLUMN IF NOT EXISTS session TEXT"),
+        ("trades.tp_level",
+         "ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp_level TEXT"),
+    ]
+
+    for col_desc, sql in _migrations:
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql)
+                conn.commit()
+            logger.info(f"[init_db] Migration OK: {col_desc}")
+        except Exception as _e:
+            logger.error(f"[init_db] Migration FAILED: {col_desc} — {_e}")
+
+    logger.info("[init_db] All migrations complete — database ready")
 
 
 # ─── USER FUNCTIONS ───────────────────────────────────────────────────────────
@@ -457,11 +505,13 @@ def log_trade(trade: Trade) -> Optional[int]:
                 cur.execute(
                     """INSERT INTO trades
                        (user_id, pair, direction, grade, confidence,
-                        risk_percent, signal_source, entry_zone, stop_loss, result)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                        risk_percent, signal_source, entry_zone, stop_loss, result,
+                        had_draw_target)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                     (trade.user_id, trade.pair, trade.direction, trade.grade,
                      trade.confidence, trade.risk_percent, trade.signal_source,
-                     trade.entry_zone, trade.stop_loss, trade.result)
+                     trade.entry_zone, trade.stop_loss, trade.result,
+                     trade.had_draw_target)
                 )
                 trade_id = cur.fetchone()["id"]
             conn.commit()

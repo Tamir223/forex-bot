@@ -680,6 +680,24 @@ async def callback_trade_button(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_reply_markup(reply_markup=None)
 
     if action == "trade_yes":
+        if not trade_id:
+            # Scanner signals defer logging until YES — log the trade row now
+            # so had_draw_target (and later WIN/LOSS results) are persisted.
+            _scanner_trade = Trade(
+                user_id=user.id,
+                pair=analysis.get("pair", ""),
+                direction=analysis.get("direction", ""),
+                grade=analysis.get("grade", "B-tier"),
+                confidence=int(analysis.get("confidence", 10)),
+                risk_percent=float(analysis.get("risk_percent", 0.75)),
+                signal_source=analysis.get("signal_source", "TNL Scanner"),
+                entry_zone=str(analysis.get("entry_zone", "")),
+                stop_loss=str(analysis.get("stop_loss", "")),
+                had_draw_target=bool(analysis.get("had_draw_target", False)),
+            )
+            trade_id = log_trade(_scanner_trade)
+            if trade_id:
+                last_trade_id[chat_id] = trade_id
         if trade_id:
             update_trade_result(trade_id, "PENDING")
         log_trade_opened(user.id, risk)

@@ -31,8 +31,7 @@ async def run_webhook_server():
 
 async def main():
     logger.info("Starting TNL Trader SaaS...")
-    init_db()
-    logger.info("Database ready")
+    init_db()  # runs every startup — idempotent migrations with explicit logging
 
     await asyncio.gather(
         start_bot(),
