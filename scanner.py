@@ -2014,7 +2014,7 @@ def format_unified_signal(symbol: str, direction: str,
         f"🛑 SL:       {sl:.{_dp}f}  ({_sl_display})",
         f"🎯 TP1:      {tp1:.{_dp}f}  ({_tp1_r:.1f}R)",
         f"🎯 TP2:      {tp2:.{_dp}f}  ({_tp2_r:.1f}R)",
-    ] + ([f"🎯 TP3:      {tp3:.{_dp}f}  (Draw)"] if tp3 else []) + [
+    ] + ([f"🎯 TP3:      {tp3:.{_dp}f}  {'(Draw)' if draw else '(5R)'}"] if tp3 else []) + [
         f"📦 Lots:     {lot_str}",
         f"⚡ Type:     {_type_str}",
     ] + _ote_lines + [
