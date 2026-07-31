@@ -2798,6 +2798,33 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     _sig_sl    = _new_sl
                     _sig_tp1   = _new_tp1
                     _sig_tp2   = _new_tp2
+                    # The repriced entry may come from a fresh 5M OB/FVG that is far from
+                    # the original 15M zone that qualified the setup. If the new entry falls
+                    # outside the original OB/FVG zone, clear that reference so the dispatched
+                    # signal does not display a mismatched confirmation source (label bug fix).
+                    _rp_spot = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+                    _rp_pip  = get_pip_spec(symbol.upper()).get("pip", 0.0001)
+                    _rp_tol  = _rp_pip * 2  # 2-pip tolerance at zone edge
+                    if ob and _sig_entry:
+                        _rp_ob_lo = ob["low"]  + _rp_spot
+                        _rp_ob_hi = ob["high"] + _rp_spot
+                        if not (_rp_ob_lo - _rp_tol <= _sig_entry <= _rp_ob_hi + _rp_tol):
+                            logger.warning(
+                                f"[ob_entry_sanity] {symbol} repriced entry {_sig_entry} outside "
+                                f"cited OB {_rp_ob_lo:.5f}-{_rp_ob_hi:.5f} ({_ref_type}) "
+                                f"— clearing OB label to prevent mislabeled signal"
+                            )
+                            ob = None
+                    if fvg and _sig_entry:
+                        _rp_fvg_lo = fvg.get("bottom", 0) + _rp_spot
+                        _rp_fvg_hi = fvg.get("top", 0)    + _rp_spot
+                        if not (_rp_fvg_lo - _rp_tol <= _sig_entry <= _rp_fvg_hi + _rp_tol):
+                            logger.warning(
+                                f"[fvg_entry_sanity] {symbol} repriced entry {_sig_entry} outside "
+                                f"cited FVG {_rp_fvg_lo:.5f}-{_rp_fvg_hi:.5f} ({_ref_type}) "
+                                f"— clearing FVG label to prevent mislabeled signal"
+                            )
+                            fvg = None
                 else:
                     logger.info(
                         f"[staleness] {symbol} {direction} blocked — remaining R:R "
@@ -2807,6 +2834,36 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     _last_signal_time[_sym_key] = _time.monotonic()
                     _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
                     return None
+
+        # ── OB RETRACEMENT CONSISTENCY GUARD ────────────────────────────────────
+        # For OB Retracement signals, the final entry must fall within or at the
+        # edge of the cited OB zone. Any path (5M refinement, displacement FVG,
+        # repricing) that moves entry outside the zone should have already cleared
+        # the ob reference above. This guard catches any residual cases.
+        if ob and _sig_entry:
+            _gs_spot = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+            _gs_pip  = get_pip_spec(symbol.upper()).get("pip", 0.0001)
+            _gs_tol  = _gs_pip * 2
+            _gs_lo   = ob["low"]  + _gs_spot
+            _gs_hi   = ob["high"] + _gs_spot
+            if not (_gs_lo - _gs_tol <= _sig_entry <= _gs_hi + _gs_tol):
+                logger.warning(
+                    f"[ob_entry_sanity] {symbol} FINAL entry {_sig_entry} outside "
+                    f"cited OB {_gs_lo:.5f}-{_gs_hi:.5f} — clearing OB label"
+                )
+                ob = None
+        if fvg and _sig_entry:
+            _gs_spot = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+            _gs_pip  = get_pip_spec(symbol.upper()).get("pip", 0.0001)
+            _gs_tol  = _gs_pip * 2
+            _gs_lo   = fvg.get("bottom", 0) + _gs_spot
+            _gs_hi   = fvg.get("top", 0)    + _gs_spot
+            if not (_gs_lo - _gs_tol <= _sig_entry <= _gs_hi + _gs_tol):
+                logger.warning(
+                    f"[fvg_entry_sanity] {symbol} FINAL entry {_sig_entry} outside "
+                    f"cited FVG {_gs_lo:.5f}-{_gs_hi:.5f} — clearing FVG label"
+                )
+                fvg = None
 
         # ── ENTRY LIMIT VALIDITY SANITY CHECK ────────────────────────────────────
         # All non-ORB signals are limit orders. For a Sell Limit, entry must sit ABOVE
