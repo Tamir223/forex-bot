@@ -27,6 +27,7 @@ from report import (
     trade_logged_loss, not_subscribed_message, status_report
 )
 from trading_calendar import is_friday_close_warning
+from scanner import DISCORD_SYMBOL_WHITELIST
 from trade_monitor import trade_monitor
 import os
 from bot_commands_phase1 import (
@@ -455,8 +456,9 @@ async def process_signal_queue():
                     [InlineKeyboardButton("❌ Limit Not Filled", callback_data="trade_limit_not_filled")],
                 ])
                 await bot.send_message(chat_id=int(chat_id), text=report, reply_markup=_grade_keyboard)
-                from discord_bridge import send_to_discord as _send_discord_sq, strip_lots_for_discord as _strip_discord_sq
-                asyncio.create_task(_send_discord_sq(_strip_discord_sq(report)))
+                if analysis.get("pair", "").upper() in DISCORD_SYMBOL_WHITELIST:
+                    from discord_bridge import send_to_discord as _send_discord_sq, strip_lots_for_discord as _strip_discord_sq
+                    asyncio.create_task(_send_discord_sq(_strip_discord_sq(report)))
         except Exception as e:
             logger.error(f"Signal queue worker error: {e}")
         finally:
@@ -886,8 +888,9 @@ async def callback_autograde(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 parse_mode="Markdown",
                 reply_markup=execute_keyboard
             )
-            from discord_bridge import send_to_discord as _send_discord_ag, strip_lots_for_discord as _strip_discord_ag
-            asyncio.create_task(_send_discord_ag(_strip_discord_ag(report_text)))
+            if analysis.get("pair", "").upper() in DISCORD_SYMBOL_WHITELIST:
+                from discord_bridge import send_to_discord as _send_discord_ag, strip_lots_for_discord as _strip_discord_ag
+                asyncio.create_task(_send_discord_ag(_strip_discord_ag(report_text)))
 
     except Exception as e:
         logger.error(f"callback_autograde error: {e}")

@@ -67,6 +67,10 @@ YFINANCE_FUTURES_MAP = {
 # reducing signal lag from ~30 min to ~10 min per innercircletrader.net guidance.
 FAST_INSTRUMENTS = {"USDJPY", "XAUUSD", "US100", "US30", "US500"}
 
+# Discord broadcast whitelist — scanner and Telegram are unaffected.
+# Only signals for these symbols are forwarded to send_to_discord().
+DISCORD_SYMBOL_WHITELIST = {"EURUSD", "XAUUSD", "USDJPY", "GBPUSD", "USOIL"}
+
 
 logger = logging.getLogger(__name__)
 
@@ -3241,7 +3245,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                             reply_markup=keyboard,
                         )
 
-                        if not _discord_sent_main:
+                        if not _discord_sent_main and symbol.upper() in DISCORD_SYMBOL_WHITELIST:
                             from discord_bridge import send_to_discord as _send_discord, strip_lots_for_discord as _strip_discord
                             asyncio.create_task(_send_discord(_strip_discord(msg)))
                             _discord_sent_main = True
@@ -3312,7 +3316,7 @@ async def run_scan(watchlist: list, bot, user_chat_ids: list, force: bool = Fals
                         logger.error(f"[orb] drawdown guard error for user {_orb_user.id}: {_dg_orb_err}")
 
                     await bot.send_message(chat_id=chat_id, text=_orb_msg)
-                    if not _discord_sent_orb:
+                    if not _discord_sent_orb and orb_symbol.upper() in DISCORD_SYMBOL_WHITELIST:
                         from discord_bridge import send_to_discord as _send_discord_orb, strip_lots_for_discord as _strip_discord_orb
                         asyncio.create_task(_send_discord_orb(_strip_discord_orb(_orb_msg)))
                         _discord_sent_orb = True
