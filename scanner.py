@@ -69,7 +69,7 @@ FAST_INSTRUMENTS = {"USDJPY", "XAUUSD", "US100", "US30", "US500"}
 
 # Discord broadcast whitelist — scanner and Telegram are unaffected.
 # Only signals for these symbols are forwarded to send_to_discord().
-DISCORD_SYMBOL_WHITELIST = {"EURUSD", "XAUUSD", "USDJPY", "GBPUSD", "USOIL"}
+DISCORD_SYMBOL_WHITELIST = {"EURUSD", "XAUUSD", "USDJPY", "GBPUSD"}
 
 
 logger = logging.getLogger(__name__)
@@ -202,6 +202,20 @@ def _min_sl_dist(symbol: str) -> float:
     if "JPY" in sym:
         return MIN_SL_DISTANCE["jpy_forex"]
     return MIN_SL_DISTANCE["default_forex"]
+
+
+_TIER_RANK = {"S-tier": 0, "A-tier": 1, "B-tier": 2, "C-tier": 3}
+
+MIN_OB_TIER: dict[str, str] = {
+    "default": "B-tier",
+    "GBPUSD": "A-tier",   # 0.31 Sharpe (sub-threshold) + documented false-breakout tendency
+}
+
+def _min_ob_tier_ok(tier: str, symbol: str) -> bool:
+    if not tier:
+        return False
+    _min = MIN_OB_TIER.get(symbol.upper(), MIN_OB_TIER["default"])
+    return _TIER_RANK.get(tier, 99) <= _TIER_RANK.get(_min, 2)
 
 
 def _max_sl_dist(symbol: str) -> float:
@@ -427,13 +441,12 @@ BASE_URL = "https://api.twelvedata.com"
 
 SYMBOLS = [
     'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY',
-    'AUDUSD', 'USDCAD', 'NZDUSD', 'USDCHF',
-    'USOIL',
+    # 'AUDUSD', 'USDCAD', 'NZDUSD', 'USDCHF', 'USOIL',  # disabled — narrowed to the 4 pairs actually being watched
     # 'US100', 'US30', 'US500',  # disabled — zero fills to date
 ]
 
 # Default watchlist — users can customize with /watch command
-DEFAULT_WATCHLIST = ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "USDCHF", "AUDUSD", "NZDUSD", "XAUUSD", "USOIL"]
+DEFAULT_WATCHLIST = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD"]
 # Disabled: "US100", "US30", "US500" — zero fills to date; re-add here + SYMBOLS + _preferred_order to restore
 
 
@@ -1500,7 +1513,7 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
 
     # GATE 5 — OB or FVG present; C-tier OBs fail; Weak FVGs (C-tier after penalty) fail;
     # liquidity runs require OB+FVG confluence
-    _has_ob = bool(ob) and ob.get('tier', '') != 'C-tier'
+    _has_ob = bool(ob) and _min_ob_tier_ok(ob.get('tier', ''), symbol)
     _has_fvg = (
         bool(fvg)
         and fvg.get('strength_tier', 'B-tier') != 'C-tier'
@@ -1696,7 +1709,7 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
                 f" per continuation/reversal reliability research"
             )
             # Re-evaluate Gate 5 with the downgraded effective tier
-            _has_ob_eff = _eff_tier != 'C-tier'
+            _has_ob_eff = _min_ob_tier_ok(_eff_tier, symbol)
             if _is_liquidity_run:
                 gates['ob_fvg'] = (_has_ob_eff and _has_fvg) or _has_displacement_fvg
             else:
@@ -2468,7 +2481,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         candles_5m = _data.get("candles_5m", [])
         # C-tier OBs fail gate 5; if displacement FVG is the effective signal, skip the
         # 5M OB refinement — it would anchor entry to the discarded OB, not the OTE zone.
-        _ob_eligible_5m = ob and ob.get('tier', '') != 'C-tier'
+        _ob_eligible_5m = ob and _min_ob_tier_ok(ob.get('tier', ''), symbol)
         _refinement_5m = refine_entry_5m(symbol, candles_5m, direction, ob) if (_ob_eligible_5m and candles_5m) else None
         _entry_tf = "5M Entry" if _refinement_5m else "15M Entry"
         if _refinement_5m:
@@ -2558,7 +2571,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         _has_displacement_fvg = displacement and is_price_in_displacement_fvg(_raw_candle_price, displacement)
         # Also apply OTE override when ob is C-tier (gate fail) — the displacement FVG
         # is the effective signal in that case and its OTE must drive the entry.
-        _ob_c_tier = ob and ob.get('tier', '') == 'C-tier'
+        _ob_c_tier = ob and not _min_ob_tier_ok(ob.get('tier', ''), symbol)
         if _has_displacement_fvg and (not ob or _ob_c_tier) and not fvg:
             _is_pts_d = symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP
             _dp_d = 3 if _is_pts_d else 5
