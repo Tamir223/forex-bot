@@ -119,8 +119,13 @@ def is_asia_range_tight(symbol: str, asia_high: float, asia_low: float) -> tuple
 
 # ─── 1. NEWS FILTER ───────────────────────────────────────────────────────────
 
-NEWS_BLOCK_MINUTES_BEFORE = 45
-NEWS_BLOCK_MINUTES_AFTER  = 30
+# Shrunk from 45/30 (75 min total self-imposed buffer). FTMO's Challenge/Verification
+# phase has zero news-trading restriction; the funded Standard-account rule (2 min
+# each side) is the only compliance requirement that will ever apply. 5/5 covers real
+# execution/slippage risk around the release itself without eating legitimate
+# news-driven setups the old window blocked. Revisit if funded on Standard.
+NEWS_BLOCK_MINUTES_BEFORE = 5
+NEWS_BLOCK_MINUTES_AFTER  = 5
 
 # Minimal fallback — only used when ALL live feeds fail
 FALLBACK_NEWS = []

@@ -1281,7 +1281,8 @@ async def _fetch_live_price(symbol: str) -> float:
 
 def get_htf_bias(symbol: str, candles_1h: list = None, candles_4h: list = None, candles_daily: list = None) -> dict:
     """Get Daily, 4H, and 1H trend bias for multi-timeframe confirmation."""
-    result = {"h1_trend": "unclear", "h4_trend": "unclear", "d1_trend": "unclear", "aligned": False, "bias": "unclear"}
+    result = {"h1_trend": "unclear", "h4_trend": "unclear", "d1_trend": "unclear", "aligned": False, "bias": "unclear",
+              "h4_current_direction": "unclear", "h4_current_strong": False}
     try:
         # Fast path — use pre-fetched candles (newest-first) from the unified bundle
         if candles_1h and candles_4h and candles_daily:
@@ -1301,6 +1302,17 @@ def get_htf_bias(symbol: str, candles_1h: list = None, candles_4h: list = None, 
             all_aligned = h1_trend == h4_trend == d1_trend
             result["aligned"] = all_aligned
             result["bias"] = h1_trend if all_aligned else ("mixed" if h1_trend != h4_trend else h4_trend)
+
+            # Current/most-recent H4 candle's OWN body direction — h4_trend above is a
+            # lagging "close now vs close 20h ago" read, which can and does disagree with
+            # what the immediate, still-forming H4 candle is visibly doing (e.g. a sharp
+            # reversal starting mid-candle). "Strong" = decisive body (>=50% of range),
+            # same bar used elsewhere in this codebase for displacement candles.
+            _cur = _h4_window[0]
+            _cur_range = _cur["high"] - _cur["low"]
+            if _cur_range > 0:
+                result["h4_current_direction"] = "bullish" if _cur["close"] >= _cur["open"] else "bearish"
+                result["h4_current_strong"] = (abs(_cur["close"] - _cur["open"]) / _cur_range) >= 0.5
             return result
     except Exception as _e:
         logger.debug(f"[get_htf_bias] pre-fetch path failed for {symbol}: {_e} — falling back to fetch")
@@ -1415,12 +1427,23 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     _htf_dir = "bullish" if direction == "BUY" else "bearish"
     # G2: weighted daily bias scoring covers D1 — only require 4H from get_htf_bias
     # Raw 5-candle D1 comparison gets distorted by prior week highs (e.g. gold at 4224 last week)
-    _htf_ok = htf_bias.get("h4_trend") == _htf_dir  # 4H must align
+    _htf_ok = htf_bias.get("h4_trend") == _htf_dir  # 4H must align (lagging 5-candle window)
+    # Real-time override: the lagging 4H read above can disagree with what the current,
+    # still-forming H4 candle is visibly doing — e.g. a big reversal candle mid-formation
+    # that the 20-hour window hasn't caught up to yet. Block if that current candle is a
+    # strong, decisive move directly against the trade direction, regardless of the lagging read.
+    _h4_cur_dir = htf_bias.get("h4_current_direction", "unclear")
+    _h4_cur_strong = htf_bias.get("h4_current_strong", False)
+    _h4_cur_conflict = _h4_cur_strong and _h4_cur_dir != "unclear" and _h4_cur_dir != _htf_dir
+    if _h4_cur_conflict:
+        _htf_ok = False
     _bias_aligned, _bias_msg = check_daily_bias_alignment(symbol, direction, _prefetched=daily_bias)
     gates['htf_bias'] = _htf_ok and _bias_aligned
     _d1 = htf_bias.get("d1_trend", "unclear")
     _h4 = htf_bias.get("h4_trend", "unclear")
-    if _htf_ok and _bias_aligned:
+    if _h4_cur_conflict:
+        gate_details['htf_bias'] = f"current H4 candle strongly {_h4_cur_dir} vs needed {_htf_dir} — blocked"
+    elif _htf_ok and _bias_aligned:
         gate_details['htf_bias'] = f"Daily/4H {_htf_dir}"
     elif not _bias_aligned:
         gate_details['htf_bias'] = _bias_msg or "daily bias unconfirmed"
@@ -1552,7 +1575,10 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
             _fvg_low  = fvg['bottom']
             _fvg_high = fvg['top']
             if _b_low <= _fvg_high and _b_high >= _fvg_low:
-                gate_details['ob_fvg'] = "🦄 UNICORN (Breaker+FVG)"
+                # Show the actual breaker zone on the signal — previously just a text tag
+                # with no numbers, so the person receiving it couldn't see where the
+                # zone actually was or judge whether the entry sat inside it.
+                gate_details['ob_fvg'] = f"🦄 UNICORN (Breaker+FVG): {_b_low:.5f}-{_b_high:.5f}"
                 logger.info(
                     f"[breaker] {symbol} UNICORN — breaker {_b_low}-{_b_high} overlaps "
                     f"FVG {_fvg_low}-{_fvg_high}"
@@ -2147,6 +2173,23 @@ async def scan_orb_symbol(symbol: str) -> dict | None:
             tp1       = orb["tp1"]
             tp2       = orb["tp2"]
 
+            # Structure confluence check — ORB previously accepted any confirmed close
+            # beyond the opening range with zero connection to OB/FVG or liquidity-sweep
+            # concepts the rest of the system requires. Now require the entry to sit near
+            # a real OB/FVG zone, or the breakout to correspond to a swept Asia level.
+            _orb_trend = "bullish" if direction == "BUY" else "bearish"
+            _orb_ob  = detect_order_block(candles_15m, _orb_trend, symbol=sym)
+            _orb_fvg = detect_fvg(candles_15m, sym)
+            _orb_sweep_ok, _, _ = _detect_asia_sweep_or_recent(sym, candles_15m, direction)
+            _orb_tol = _min_sl_dist(sym) * 0.5  # breakout model, not a retracement — generous vs Bug #1's tolerance
+            _orb_near_zone = bool(
+                (_orb_ob and (_orb_ob["low"] - _orb_tol) <= entry <= (_orb_ob["high"] + _orb_tol)) or
+                (_orb_fvg and (_orb_fvg["bottom"] - _orb_tol) <= entry <= (_orb_fvg["top"] + _orb_tol))
+            )
+            if not (_orb_near_zone or _orb_sweep_ok):
+                logger.info(f"[orb] {sym} blocked — breakout at {entry} has no OB/FVG confluence and no Asia-level sweep")
+                continue
+
             # RR validation (minimum 1.5R for TP1)
             rr_valid, actual_rr = validate_risk_reward(entry, sl, tp1, symbol=sym)
             if not rr_valid:
@@ -2673,23 +2716,28 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         if _sig_entry_m and current_price:
             _spot_entry_for_dir = float(_sig_entry_m.group(1))
             _spot_price_for_dir = float(current_price)
-            _pip_size_dir = get_pip_spec(symbol.upper()).get("pip", 0.0001)
-            _entry_vs_price_pips = (_spot_entry_for_dir - _spot_price_for_dir) / _pip_size_dir
+            _price_dist_dir = abs(_spot_entry_for_dir - _spot_price_for_dir)
+            # Tolerance scaled to this pair's own SL floor (15%) instead of a flat 25
+            # pips/points for every instrument — the flat value let a genuinely broken
+            # zone through on wide-SL pairs (e.g. consumed 80%+ of XAUUSD's 30pt SL,
+            # which is how a BUY entry landed above current price after price had
+            # already fallen well past the OB — Bug #1).
+            _break_tolerance = _min_sl_dist(symbol) * 0.15
 
             if direction == "SELL" and _spot_price_for_dir > _spot_entry_for_dir:
                 # Price ABOVE entry on a SELL — bearish OB has been broken to the upside
-                if abs(_entry_vs_price_pips) <= 25:
-                    logger.info(f"[scanner] {symbol} SELL entry {_spot_entry_for_dir} slightly above price {_spot_price_for_dir} ({abs(_entry_vs_price_pips):.1f}p) — allowing as market entry")
+                if _price_dist_dir <= _break_tolerance:
+                    logger.info(f"[scanner] {symbol} SELL entry {_spot_entry_for_dir} slightly above price {_spot_price_for_dir} ({_price_dist_dir:.5f}, tol={_break_tolerance:.5f}) — allowing as market entry")
                 else:
-                    logger.info(f"[scanner] {symbol} SELL OB broken — price {_spot_price_for_dir} already {abs(_entry_vs_price_pips):.1f}p above entry {_spot_entry_for_dir} — setup invalidated")
+                    logger.info(f"[scanner] {symbol} SELL OB broken — price {_spot_price_for_dir} already {_price_dist_dir:.5f} above entry {_spot_entry_for_dir} (tol={_break_tolerance:.5f}) — setup invalidated")
                     return None
             if direction == "BUY" and _spot_price_for_dir < _spot_entry_for_dir:
                 # Price BELOW entry on a BUY — OB has been broken to the downside
                 # This means the bullish OB was violated and the setup is invalid
-                if abs(_entry_vs_price_pips) <= 25:
-                    logger.info(f"[scanner] {symbol} BUY entry {_spot_entry_for_dir} slightly below price {_spot_price_for_dir} ({abs(_entry_vs_price_pips):.1f}p) — allowing as market entry")
+                if _price_dist_dir <= _break_tolerance:
+                    logger.info(f"[scanner] {symbol} BUY entry {_spot_entry_for_dir} slightly below price {_spot_price_for_dir} ({_price_dist_dir:.5f}, tol={_break_tolerance:.5f}) — allowing as market entry")
                 else:
-                    logger.info(f"[scanner] {symbol} BUY OB broken — price {_spot_price_for_dir} already {abs(_entry_vs_price_pips):.1f}p below entry {_spot_entry_for_dir} — setup invalidated")
+                    logger.info(f"[scanner] {symbol} BUY OB broken — price {_spot_price_for_dir} already {_price_dist_dir:.5f} below entry {_spot_entry_for_dir} (tol={_break_tolerance:.5f}) — setup invalidated")
                     return None
 
         # Entry zone proximity check
