@@ -278,7 +278,7 @@ def get_cached_score(key: str) -> int | None:
     return entry.get("score")
 
 
-async def _update_asia_levels(symbol: str, candles: list = None) -> None:
+async def _update_asia_levels(symbol: str, candles: list = None, as_of: datetime = None) -> None:
     """
     Set reference levels used for liquidity-sweep detection.
 
@@ -286,10 +286,14 @@ async def _update_asia_levels(symbol: str, candles: list = None) -> None:
     Equity indices (GER40, US100, US30, US500) — previous day's D1 high/low.
       GER40 is closed during Asian hours; US indices have only thin overnight-futures
       prints, making the prev-day session high/low a far more meaningful sweep reference.
+
+    as_of: reference datetime for "today" — defaults to live now(). This function's
+    Asia-session date filtering was wall-clock-only, same class of bug as
+    is_kill_zone() etc. Pass a historical timestamp for backtesting.
     """
     global _last_mitigation_clear_date
     sym = symbol.upper()
-    today = datetime.now(timezone.utc).date()
+    today = (as_of or datetime.now(timezone.utc)).date()
 
     # Clear FVG/OB mitigation state once per day on new session
     today_str = str(today)
@@ -1419,7 +1423,8 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
                     htf_bias: dict, market_structure: str, daily_bias: dict,
                     atr_data: dict, direction: str, structure: dict, ms: dict,
                     data: dict = None, displacement: dict = None,
-                    current_price: float = 0.0, draw: dict = None) -> tuple:
+                    current_price: float = 0.0, draw: dict = None,
+                    as_of: datetime = None) -> tuple:
     """
     7 binary gates — all must pass for a signal to fire.
     Returns (all_passed, gates, gate_details, failed, kz_label, swept_level).
@@ -1480,7 +1485,7 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     )
 
     # GATE 4 — Liquidity sweep detected (Asia range or recent swing)
-    await _update_asia_levels(symbol, candles)
+    await _update_asia_levels(symbol, candles, as_of=as_of)
     _sweep_ok, _swept_level, _sweep_type = _detect_asia_sweep_or_recent(symbol, candles, direction)
 
     # Asia range size check: wide ranges degrade Judas Swing edge significantly.
