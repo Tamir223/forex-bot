@@ -2635,6 +2635,51 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 f"sl={_sig_sl} entry={_sig_entry} sl_dist={_sw_sl_dist:.5f} tp1={_sig_tp1}"
             )
 
+            # ── ZONE-CLEARANCE GUARD ─────────────────────────────────────────
+            # Research-backed placement (ICT order block / FVG stop rules): a stop
+            # must sit beyond the FAR edge of the entry's own OB/FVG zone, never
+            # inside it — a stop inside the zone gets tagged by the exact
+            # retracement the trade is betting on, before the zone is actually
+            # invalidated. The swept-level anchor above can, after the
+            # max_sl_dist cap, land back inside that same zone (confirmed live:
+            # XAUUSD Displacement FVG entry 4438.3, zone 4388.0-4469.2, capped
+            # SL 4408.3 — inside the zone). Detect that and push the stop back
+            # outside the zone with a small buffer, even if that means exceeding
+            # max_sl_dist — a stop that isn't actually outside the zone isn't a
+            # real risk control, it just fails silently. Widening here should
+            # reduce lot size via the existing risk-based sizing, not shrink back
+            # into the zone.
+            _zone_lo = _zone_hi = None
+            if ob:
+                _zone_lo, _zone_hi = ob["low"], ob["high"]
+            elif fvg:
+                _zone_lo, _zone_hi = fvg.get("bottom", fvg.get("low")), fvg.get("top", fvg.get("high"))
+            elif displacement:
+                _zone_lo = displacement.get("fvg_bottom")
+                _zone_hi = displacement.get("fvg_top")
+            if _zone_lo is not None and _zone_hi is not None:
+                _zone_buf = _swept_sl_buffer(symbol)
+                if direction == "BUY" and _sig_sl > (_zone_lo - _zone_buf) and _sig_sl < _zone_hi:
+                    _old_sl = _sig_sl
+                    _sig_sl = round(_zone_lo - _zone_buf, _dp_sw)
+                    _sw_sl_dist = abs(_sig_entry - _sig_sl)
+                    _sig_tp1 = round(_sig_entry + _sw_sl_dist * _tp1_mult(symbol), _dp_sw)
+                    logger.warning(
+                        f"[scanner] {symbol} SL zone-clearance override — capped SL {_old_sl} sat "
+                        f"inside entry zone {_zone_lo}-{_zone_hi}; moved to {_sig_sl} (beyond zone, "
+                        f"may exceed max_sl_dist — lot size should absorb this via risk sizing)"
+                    )
+                elif direction == "SELL" and _sig_sl < (_zone_hi + _zone_buf) and _sig_sl > _zone_lo:
+                    _old_sl = _sig_sl
+                    _sig_sl = round(_zone_hi + _zone_buf, _dp_sw)
+                    _sw_sl_dist = abs(_sig_sl - _sig_entry)
+                    _sig_tp1 = round(_sig_entry - _sw_sl_dist * _tp1_mult(symbol), _dp_sw)
+                    logger.warning(
+                        f"[scanner] {symbol} SL zone-clearance override — capped SL {_old_sl} sat "
+                        f"inside entry zone {_zone_lo}-{_zone_hi}; moved to {_sig_sl} (beyond zone, "
+                        f"may exceed max_sl_dist — lot size should absorb this via risk sizing)"
+                    )
+
         # ── DRAW-ON-LIQUIDITY CAP — applied after all TP overrides so every
         # signal type (OB Retracement, FVG Fill, Displacement FVG, Structure
         # Setup) is capped equally before final dispatch.
