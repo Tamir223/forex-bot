@@ -2650,13 +2650,13 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             # reduce lot size via the existing risk-based sizing, not shrink back
             # into the zone.
             _zone_lo = _zone_hi = None
-            if ob:
+            if _has_displacement_fvg and (not ob or _ob_below_bar) and not fvg:
+                _zone_lo = displacement.get("fvg_bottom")
+                _zone_hi = displacement.get("fvg_top")
+            elif ob:
                 _zone_lo, _zone_hi = ob["low"], ob["high"]
             elif fvg:
                 _zone_lo, _zone_hi = fvg.get("bottom", fvg.get("low")), fvg.get("top", fvg.get("high"))
-            elif displacement:
-                _zone_lo = displacement.get("fvg_bottom")
-                _zone_hi = displacement.get("fvg_top")
             if _zone_lo is not None and _zone_hi is not None:
                 _zone_buf = _swept_sl_buffer(symbol)
                 if direction == "BUY" and _sig_sl > (_zone_lo - _zone_buf) and _sig_sl < _zone_hi:
