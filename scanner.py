@@ -2602,6 +2602,20 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 f"ote_zone={round(displacement.get('ote_low', 0) + _spot_off_d, _dp_d)}"
                 f"-{round(displacement.get('ote_high', 0) + _spot_off_d, _dp_d)}"
             )
+            # The display line ('gate_details[ob_fvg]') was already set during gate
+            # evaluation — showing whatever OB was found there, including a rejected
+            # C-tier one when that's the reason this displacement path is even active.
+            # That leaves the actual driving zone invisible on the dispatched signal,
+            # making it impossible to visually verify entry/SL placement. Overwrite it
+            # with the real zone now that it's known.
+            _fvg_bot_disp = round(displacement['fvg_bottom'] + _spot_off_d, _dp_d)
+            _fvg_top_disp = round(displacement['fvg_top'] + _spot_off_d, _dp_d)
+            _ce_disp = round(displacement['fvg_mid'] + _spot_off_d, _dp_d)
+            gate_details['ob_fvg'] = (
+                f"Displacement FVG {_fvg_bot_disp}-{_fvg_top_disp} | CE={_ce_disp} | "
+                f"OTE={round(displacement.get('ote_low', 0) + _spot_off_d, _dp_d)}"
+                f"-{round(displacement.get('ote_high', 0) + _spot_off_d, _dp_d)}"
+            )
 
         # ── SWEPT-LEVEL SL ANCHOR (Gate 4) ─────────────────────────────────────
         # Anchor SL to the swept liquidity level + buffer rather than OB/FVG geometry.
