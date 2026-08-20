@@ -8,7 +8,6 @@ import logging
 import re
 import time
 import anthropic
-import groq
 from google import genai as google_genai
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS
 from market import get_live_price, get_atr, check_entry_validity
@@ -35,9 +34,6 @@ All signals that pass the 7 gates are grade A+ with confidence 10. Never set gra
 
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
-GROQ_API_KEY = "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"
-groq_client = groq.Groq(api_key=GROQ_API_KEY)
 
 GEMINI_API_KEY = "AQ.Ab8RN6JEDbtxxD0Sppau03P0YVMDHXo7W5SXu0ibe22H-s2Wlw"
 gemini_client = google_genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -179,23 +175,8 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
 
         raw = None
 
-        # 1. Try Groq (primary — free and fast)
-        try:
-            _groq_response = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": GRADE_PROMPT},
-                    {"role": "user", "content": full_message},
-                ],
-                max_tokens=1000,
-            )
-            raw = _groq_response.choices[0].message.content
-            logger.info("[claude] Groq response received")
-        except Exception as _groq_err:
-            logger.warning(f"[claude] Groq failed, falling back to Gemini: {_groq_err}")
-
-        # 2. Gemini fallback (free tier — 1,500 req/day, 1M tokens/day)
-        if raw is None and gemini_client:
+        # 1. Try Gemini (primary — free tier, 1,500 req/day, 1M tokens/day)
+        if gemini_client:
             try:
                 _gemini_prompt = f"{GRADE_PROMPT}\n\n{full_message}"
                 _gemini_response = gemini_client.models.generate_content(
@@ -231,7 +212,7 @@ def analyze_signal(signal_text: str, account_state: dict, user_id: int = None) -
                         logger.error("[claude] All Anthropic attempts failed")
 
         if raw is None:
-            logger.error("[claude] All providers failed (Groq, Gemini, Anthropic) — returning None")
+            logger.error("[claude] All providers failed (Gemini, Anthropic) — returning None")
             return None
         cleaned = re.sub(r"```json|```", "", raw).strip()
         result = json.loads(cleaned)
