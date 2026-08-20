@@ -1016,7 +1016,7 @@ def _try_reprice_stale_signal(
     2. 5M FVG aligned with direction
     3. IFVG — original FVG zone that price has broken through and returned to
 
-    Returns (new_entry, new_sl, new_tp1, new_tp2, ref_type, new_rr) or None.
+    Returns (new_entry, new_sl, new_tp1, new_tp2, ref_type, new_rr, zone_lo, zone_hi) or None.
     """
     _sym_u = symbol.upper()
     _spot_off = FUTURES_SPOT_OFFSET.get(_sym_u, 0)
@@ -1043,6 +1043,11 @@ def _try_reprice_stale_signal(
             return _entry, _sl, _tp1, _tp2, _rr
         return None
 
+    def _zone_bounds(raw_lo: float, raw_hi: float) -> tuple[float, float]:
+        # Same rounding/spot-offset treatment as _entry so the returned zone
+        # lines up with the entry price it's meant to describe.
+        return (round(raw_lo + _spot_off, _dp), round(raw_hi + _spot_off, _dp))
+
     # ── PRIORITY 1: 5M OB near current price ──────────────────────────────────
     if candles_5m and len(candles_5m) >= 5:
         _5m_ob = detect_order_block(candles_5m, trend, symbol=symbol)
@@ -1055,7 +1060,8 @@ def _try_reprice_stale_signal(
                 _raw_x = _5m_ob["high"] + _min_sl_dist(symbol)
             _res = _compute(_raw_e, _raw_x)
             if _res:
-                return (_res[0], _res[1], _res[2], _res[3], "5M OB", _res[4])
+                return (_res[0], _res[1], _res[2], _res[3], "5M OB", _res[4],
+                        *_zone_bounds(min(_5m_ob["low"], _5m_ob["high"]), max(_5m_ob["low"], _5m_ob["high"])))
 
         # ── PRIORITY 1b: 5M FVG aligned with direction ──────────────────────
         _5m_fvg = detect_fvg(candles_5m, symbol)
@@ -1063,11 +1069,13 @@ def _try_reprice_stale_signal(
             if direction == "BUY" and _5m_fvg["type"] == "bullish_fvg":
                 _res = _compute(_5m_fvg["mid"], _5m_fvg["bottom"])
                 if _res:
-                    return (_res[0], _res[1], _res[2], _res[3], "5M FVG", _res[4])
+                    return (_res[0], _res[1], _res[2], _res[3], "5M FVG", _res[4],
+                            *_zone_bounds(_5m_fvg["bottom"], _5m_fvg["top"]))
             elif direction == "SELL" and _5m_fvg["type"] == "bearish_fvg":
                 _res = _compute(_5m_fvg["mid"], _5m_fvg["top"])
                 if _res:
-                    return (_res[0], _res[1], _res[2], _res[3], "5M FVG", _res[4])
+                    return (_res[0], _res[1], _res[2], _res[3], "5M FVG", _res[4],
+                            *_zone_bounds(_5m_fvg["bottom"], _5m_fvg["top"]))
 
     # ── PRIORITY 2: IFVG — original zone role-flipped after break-and-return ──
     if fvg:
@@ -1082,7 +1090,8 @@ def _try_reprice_stale_signal(
             if _broke_up and _in_zone:
                 _res = _compute((_fvg_top + _fvg_bot) / 2.0, _fvg_bot)
                 if _res:
-                    return (_res[0], _res[1], _res[2], _res[3], "IFVG", _res[4])
+                    return (_res[0], _res[1], _res[2], _res[3], "IFVG", _res[4],
+                            *_zone_bounds(_fvg_bot, _fvg_top))
 
         elif direction == "SELL" and fvg.get("type") == "bullish_fvg":
             # Bullish FVG price broke down through → now potential supply (IFVG for SELL)
@@ -1091,7 +1100,8 @@ def _try_reprice_stale_signal(
             if _broke_dn and _in_zone:
                 _res = _compute((_fvg_top + _fvg_bot) / 2.0, _fvg_top)
                 if _res:
-                    return (_res[0], _res[1], _res[2], _res[3], "IFVG", _res[4])
+                    return (_res[0], _res[1], _res[2], _res[3], "IFVG", _res[4],
+                            *_zone_bounds(_fvg_bot, _fvg_top))
 
     return None
 
@@ -2917,7 +2927,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     ob, fvg,
                 )
                 if _repriced:
-                    _new_entry, _new_sl, _new_tp1, _new_tp2, _ref_type, _new_rr = _repriced
+                    _new_entry, _new_sl, _new_tp1, _new_tp2, _ref_type, _new_rr, _new_zone_lo, _new_zone_hi = _repriced
                     logger.info(
                         f"[staleness] {symbol} original entry stale — re-priced via fresh "
                         f"{_ref_type} reference, entry={_new_entry} sl={_new_sl} "
@@ -2927,6 +2937,11 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     _sig_sl    = _new_sl
                     _sig_tp1   = _new_tp1
                     _sig_tp2   = _new_tp2
+                    # Show the REAL zone the repriced entry actually came from, not the
+                    # original (now-stale) OB/FVG text frozen at Gate 5 evaluation time.
+                    # Clearing ob/fvg alone (below) never changed this string — the label
+                    # kept shipping the old zone next to the new entry regardless.
+                    gate_details['ob_fvg'] = f"{_ref_type}: {_new_zone_lo:.5f}-{_new_zone_hi:.5f} (repriced)"
                     # The repriced entry may come from a fresh 5M OB/FVG that is far from
                     # the original 15M zone that qualified the setup. If the new entry falls
                     # outside the original OB/FVG zone, clear that reference so the dispatched
