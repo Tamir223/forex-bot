@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>TNL Trader — AI-Powered Signal Filter</title>
+  <title>TNL Trader — 7-Gate ICT/SMC Signal System</title>
+  <meta name="description" content="TNL Trader scans XAUUSD, EURUSD, GBPUSD and USDJPY around the clock and only sends a signal when all 7 institutional-order-flow confirmations align. Join the free Discord or get full access with the Whop membership."/>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@300;400;500&display=swap" rel="stylesheet"/>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -20,7 +21,6 @@
     .nav-links a{color:var(--gray);text-decoration:none;font-size:13px;font-weight:500;letter-spacing:1.5px;text-transform:uppercase;transition:color .2s}
     .nav-links a:hover{color:var(--white)}
     .nav-cta{background:var(--blue);color:var(--black)!important;padding:10px 24px;border-radius:4px;font-weight:700!important}
-    /* HAMBURGER */
     .hamburger{display:none;flex-direction:column;gap:5px;cursor:pointer;padding:4px;background:none;border:none}
     .hamburger span{display:block;width:24px;height:2px;background:var(--white);border-radius:2px;transition:all .3s}
     .hamburger.open span:nth-child(1){transform:translateY(7px) rotate(45deg)}
@@ -32,7 +32,6 @@
     .mobile-menu a:hover{color:var(--blue)}
     .mobile-menu .mobile-cta{background:var(--blue);color:var(--black)!important;padding:16px 40px;border-radius:4px;font-size:24px}
     .mobile-close{position:absolute;top:24px;right:24px;background:none;border:none;color:var(--white);font-size:28px;cursor:pointer}
-    /* HERO */
     .hero{position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:80px 24px 60px;overflow:hidden}
     .hero::before{content:'';position:absolute;top:20%;left:50%;transform:translateX(-50%);width:700px;height:700px;background:radial-gradient(circle,rgba(0,100,200,.12) 0%,transparent 70%);pointer-events:none}
     .hero-badge{display:inline-flex;align-items:center;gap:8px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.25);color:var(--blue);font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase;padding:6px 16px;border-radius:20px;margin-bottom:24px;animation:fadeUp .9s .1s ease both}
@@ -40,16 +39,15 @@
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
     .hero h1{font-family:'Bebas Neue',sans-serif;font-size:clamp(52px,9vw,96px);line-height:.95;letter-spacing:2px;margin-bottom:20px;animation:fadeUp .9s .2s ease both}
     .hero h1 em{font-style:normal;color:var(--blue);text-shadow:0 0 40px rgba(0,212,255,.4)}
-    .hero-sub{font-size:clamp(16px,2.5vw,20px);color:var(--gray);max-width:540px;line-height:1.6;margin-bottom:40px;font-weight:300;animation:fadeUp .9s .3s ease both}
+    .hero-sub{font-size:clamp(16px,2.5vw,20px);color:var(--gray);max-width:560px;line-height:1.6;margin-bottom:40px;font-weight:300;animation:fadeUp .9s .3s ease both}
     .hero-ctas{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;animation:fadeUp .9s .4s ease both}
     .btn-primary{background:var(--blue);color:var(--black);font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;letter-spacing:2px;text-transform:uppercase;padding:16px 40px;border-radius:4px;text-decoration:none;border:none;cursor:pointer;transition:all .2s;box-shadow:0 0 30px rgba(0,212,255,.25)}
     .btn-primary:hover{background:#33ddff;box-shadow:0 0 50px rgba(0,212,255,.5);transform:translateY(-1px)}
     .btn-outline{background:transparent;color:var(--white);font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:600;letter-spacing:2px;text-transform:uppercase;padding:16px 40px;border-radius:4px;text-decoration:none;border:1px solid var(--border);cursor:pointer;transition:all .2s}
     .btn-outline:hover{border-color:var(--gray)}
-    .live-stats{display:flex;gap:48px;margin-top:60px;padding-top:40px;border-top:1px solid var(--border);animation:fadeUp .9s .5s ease both}
+    .live-stats{display:flex;gap:48px;margin-top:60px;padding-top:40px;border-top:1px solid var(--border);animation:fadeUp .9s .5s ease both;flex-wrap:wrap;justify-content:center}
     .stat-item{text-align:center}
     .stat-num{font-family:'Bebas Neue',sans-serif;font-size:42px;color:var(--blue);line-height:1;letter-spacing:2px}
-    .stat-num.live{color:var(--green)}
     .stat-label{font-size:11px;color:var(--gray);letter-spacing:2px;text-transform:uppercase;margin-top:4px}
     .trust-bar{position:relative;z-index:1;border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:24px;display:flex;align-items:center;justify-content:center;gap:48px;flex-wrap:wrap;background:rgba(255,255,255,.01)}
     .trust-item{display:flex;align-items:center;gap:10px;color:var(--gray);font-size:13px}
@@ -57,11 +55,10 @@
     .section{position:relative;z-index:1;padding:90px 24px;max-width:1100px;margin:0 auto}
     .section-label{font-size:11px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:var(--blue);margin-bottom:12px}
     .section-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(36px,5vw,56px);letter-spacing:1px;line-height:1;margin-bottom:14px}
-    .section-sub{color:var(--gray);font-size:17px;font-weight:300;max-width:500px;line-height:1.6;margin-bottom:50px}
+    .section-sub{color:var(--gray);font-size:17px;font-weight:300;max-width:560px;line-height:1.6;margin-bottom:50px}
     .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px;background:var(--border);border:1px solid var(--border);border-radius:8px;overflow:hidden}
     .step{background:var(--card);padding:36px 28px;transition:background .2s}
     .step:hover{background:#0f0f28}
-    .step-num{font-family:'Bebas Neue',sans-serif;font-size:56px;color:#00d4ff;line-height:1;margin-bottom:12px}
     .step-icon{font-size:26px;margin-bottom:14px}
     .step h3{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
     .step p{font-size:14px;color:var(--gray);line-height:1.6}
@@ -69,37 +66,29 @@
     .demo-card{background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden}
     .demo-header{background:#0a0a20;padding:12px 20px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)}
     .demo-dot{width:10px;height:10px;border-radius:50%}
-    .demo-body{padding:24px 20px;font-family:'Courier New',monospace;font-size:13px;line-height:1.8}
-    .demo-label{color:var(--gray);font-size:10px;letter-spacing:1px;text-transform:uppercase;margin-top:14px;margin-bottom:4px}
+    .demo-body{padding:24px 20px;font-family:'Courier New',monospace;font-size:12.5px;line-height:1.75}
     .demo-in{color:#aac4ff}
-    .demo-grade{color:#00ff88;font-weight:bold;font-size:15px}
+    .demo-grade{color:#00ff88;font-weight:bold;font-size:14px}
     .demo-blue{color:var(--blue)}
     .demo-gold{color:var(--gold)}
+    .demo-gray{color:var(--gray);font-size:11px}
     .features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:8px;overflow:hidden}
     .feature{background:var(--card);padding:32px;transition:background .2s}
     .feature:hover{background:#0f0f28}
     .feature-icon{width:44px;height:44px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.2);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:18px}
     .feature h3{font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
     .feature p{font-size:14px;color:var(--gray);line-height:1.6}
-    .testimonials-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
-    .testimonial{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:32px;position:relative}
-    .testimonial::before{content:'"';font-family:'Bebas Neue',sans-serif;font-size:80px;color:rgba(0,212,255,.1);position:absolute;top:12px;left:24px;line-height:1}
-    .testimonial-text{font-size:15px;color:var(--white);line-height:1.7;margin-bottom:20px;padding-top:20px;font-style:italic}
-    .testimonial-author{display:flex;align-items:center;gap:12px}
-    .testimonial-avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#003a6e,#0060b0);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--blue);flex-shrink:0}
-    .testimonial-name{font-weight:600;font-size:14px}
-    .testimonial-detail{font-size:12px;color:var(--gray)}
-    .stars-rating{color:var(--gold);font-size:13px;margin-bottom:12px}
-    .pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}
+    .pairs-strip{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;margin-top:40px}
+    .pair-chip{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:20px 28px;text-align:center;min-width:130px}
+    .pair-chip .p-name{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:1px;color:var(--white)}
+    .pair-chip .p-note{font-size:11px;color:var(--gray);margin-top:4px;letter-spacing:.5px}
+    .access-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}
     .plan{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:36px 28px;position:relative;transition:transform .2s,border-color .2s}
     .plan:hover{transform:translateY(-4px);border-color:rgba(0,212,255,.3)}
     .plan.featured{border-color:rgba(0,212,255,.4);background:#0e0e26}
-    .plan.featured::before{content:'MOST POPULAR';position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--blue);color:var(--black);font-size:10px;font-weight:700;letter-spacing:2px;padding:4px 16px;border-radius:20px;white-space:nowrap}
+    .plan.featured::before{content:'FULL ACCESS';position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--blue);color:var(--black);font-size:10px;font-weight:700;letter-spacing:2px;padding:4px 16px;border-radius:20px;white-space:nowrap}
     .plan-name{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--gray);margin-bottom:14px}
-    .plan-price{display:flex;align-items:baseline;gap:4px;margin-bottom:6px}
-    .plan-price .dollar{font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:600;color:var(--gray);margin-top:6px}
-    .plan-price .amount{font-family:'Bebas Neue',sans-serif;font-size:60px;letter-spacing:1px;line-height:1}
-    .plan-price .period{font-size:14px;color:var(--gray)}
+    .plan-price{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:1px;line-height:1;margin-bottom:6px}
     .plan-trial{font-size:12px;color:var(--blue);margin-bottom:24px;font-weight:500}
     .plan-divider{height:1px;background:var(--border);margin-bottom:24px}
     .plan-features{list-style:none;margin-bottom:32px}
@@ -123,6 +112,7 @@
     .faq-item{border-bottom:1px solid var(--border);padding:22px 0}
     .faq-q{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;margin-bottom:8px}
     .faq-a{font-size:15px;color:var(--gray);line-height:1.7}
+    .disclaimer-box{max-width:680px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:24px 28px;font-size:13px;color:var(--gray);line-height:1.7}
     footer{position:relative;z-index:1;border-top:1px solid var(--border);padding:36px 48px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:20px}
     .footer-brand{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:4px}
     .footer-brand span{color:var(--blue)}
@@ -143,16 +133,17 @@
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-K7CMMZ8ZB5"></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag("js",new Date());gtag("config","G-K7CMMZ8ZB5");</script></head>
 <body>
 <div class="stars"></div>
-<div class="urgency-bar">🔥 Built for traders who have the skill but not the capital — <span>14 days free</span> on all plans.</div>
+<div class="urgency-bar">📡 Signals fire only when all 7 gates align — <span>quality over quantity, always.</span></div>
 
 <nav>
   <a href="#" class="nav-logo">TNL <span>TRADER</span></a>
   <ul class="nav-links">
     <li><a href="#how">How It Works</a></li>
+    <li><a href="#pairs">Pairs</a></li>
     <li><a href="#features">Features</a></li>
-    <li><a href="#pricing">Pricing</a></li>
+    <li><a href="#access">Join</a></li>
     <li><a href="#faq">FAQ</a></li>
-    <li><a href="#pricing" class="nav-cta">Start Free Trial</a></li>
+    <li><a href="https://discord.gg/tsD85wYhm" class="nav-cta" target="_blank" rel="noopener">Join Discord</a></li>
   </ul>
   <button class="hamburger" id="hamburger" aria-label="Menu">
     <span></span><span></span><span></span>
@@ -162,186 +153,148 @@
 <div class="mobile-menu" id="mobileMenu">
   <button class="mobile-close" id="mobileClose">✕</button>
   <a href="#how" onclick="closeMobile()">How It Works</a>
+  <a href="#pairs" onclick="closeMobile()">Pairs</a>
   <a href="#features" onclick="closeMobile()">Features</a>
-  <a href="#pricing" onclick="closeMobile()">Pricing</a>
+  <a href="#access" onclick="closeMobile()">Join</a>
   <a href="#faq" onclick="closeMobile()">FAQ</a>
-  <a href="#pricing" class="mobile-cta" onclick="closeMobile()">Start Free Trial</a>
+  <a href="https://discord.gg/tsD85wYhm" class="mobile-cta" onclick="closeMobile()" target="_blank" rel="noopener">Join Discord</a>
 </div>
 
 <section class="hero">
-  <div class="hero-badge">Now Live — Built for Prop Firm Traders</div>
-  <h1>YOU HAVE THE SKILL.<br/><em>DON'T BLOW<br/>YOUR ONLY SHOT.</em></h1>
-  <p class="hero-sub">TNL Trader analyzes every signal you receive, grades the setup, checks your prop firm rules, and tells you exactly whether to take the trade.</p>
+  <div class="hero-badge">Now Live — XAUUSD · EURUSD · GBPUSD · USDJPY</div>
+  <h1>SEVEN GATES.<br/><em>ONE SIGNAL<br/>WHEN IT COUNTS.</em></h1>
+  <p class="hero-sub">TNL Trader watches four pairs around the clock for the institutional footprints ICT/SMC traders look for — session timing, higher-timeframe bias, structure, liquidity sweeps, order blocks, break of structure, and volatility. A signal only fires when all seven agree.</p>
   <div class="hero-ctas">
-    <a href="#pricing" class="btn-primary">Start 14-Day Free Trial</a>
-    <a href="#how" class="btn-outline">See How It Works</a>
+    <a href="https://discord.gg/tsD85wYhm" class="btn-primary" target="_blank" rel="noopener">Join Free Discord</a>
+    <a href="https://whop.com/tnl-trader-academy/tnl-trader-academy-membership/" class="btn-outline" target="_blank" rel="noopener">Get Full Access</a>
   </div>
   <div class="live-stats">
-    <div class="stat-item"><div class="stat-num" id="signalCount">—</div><div class="stat-label">Signals Analyzed</div></div>
-    <div class="stat-item"><div class="stat-num live" id="traderCount">—</div><div class="stat-label">Active Traders</div></div>
-    <div class="stat-item"><div class="stat-num">7</div><div class="stat-label">Filter Gates</div></div>
-    <div class="stat-item"><div class="stat-num">24/7</div><div class="stat-label">Monitoring</div></div>
+    <div class="stat-item"><div class="stat-num">7</div><div class="stat-label">Confirmation Gates</div></div>
+    <div class="stat-item"><div class="stat-num">4</div><div class="stat-label">Pairs Watched</div></div>
+    <div class="stat-item"><div class="stat-num">24/5</div><div class="stat-label">Market Coverage</div></div>
+    <div class="stat-item"><div class="stat-num live">Live</div><div class="stat-label">Signal Engine</div></div>
   </div>
 </section>
 
 <div class="trust-bar">
-  <div class="trust-item"><span>🔒</span> Prop Firm Compliant</div>
-  <div class="trust-item"><span>⚡</span> Real-Time Analysis</div>
-  <div class="trust-item"><span>🤖</span> Claude AI Engine</div>
-  <div class="trust-item"><span>📊</span> All Signal Formats</div>
-  <div class="trust-item"><span>📱</span> Telegram Delivery</div>
+  <div class="trust-item"><span>🎯</span> All 7 Gates Required</div>
+  <div class="trust-item"><span>📰</span> News-Event Aware</div>
+  <div class="trust-item"><span>🔍</span> Full Zone Transparency</div>
+  <div class="trust-item"><span>📱</span> Telegram + Discord Delivery</div>
 </div>
 
-
-<!-- PAIN POINT SECTION -->
 <section class="section" style="padding-bottom:0">
   <div style="background:linear-gradient(135deg,rgba(0,212,255,0.05),rgba(0,50,100,0.08));border:1px solid rgba(0,212,255,0.15);border-radius:12px;padding:48px 40px;text-align:center;max-width:800px;margin:0 auto">
-    <div class="section-label" style="margin-bottom:16px">The Reality</div>
-    <div class="section-title" style="font-size:clamp(32px,4vw,48px);margin-bottom:20px">PROP FIRMS ARE YOUR<br/><span style="color:var(--blue)">ONLY WAY IN.</span></div>
-    <p style="color:var(--gray);font-size:17px;line-height:1.8;max-width:600px;margin:0 auto 32px;font-weight:300">
-      If you do not have $10,000-$50,000 sitting in a trading account, a prop firm challenge is the only path to trading real capital. That is why every signal matters. Every rule violation matters. Every bad trade matters.
+    <div class="section-label" style="margin-bottom:16px">The Problem With Most Signal Groups</div>
+    <div class="section-title" style="font-size:clamp(32px,4vw,48px);margin-bottom:20px">EVERY SETUP LOOKS GOOD<br/><span style="color:var(--blue)">IN THE MOMENT.</span></div>
+    <p style="color:var(--gray);font-size:17px;line-height:1.8;max-width:600px;margin:0 auto;font-weight:300">
+      Most signal calls are one person's read on a chart, sent the moment they see it. TNL Trader doesn't work that way — it's a rules-based system that checks the same seven conditions every single time, with no exceptions and no "gut feel" overrides. If a setup is missing even one confirmation, nothing gets sent.
     </p>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.15);border-radius:8px;overflow:hidden;max-width:700px;margin:0 auto">
-      <div style="background:var(--card);padding:28px 20px;text-align:center">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;color:var(--blue)">$155</div>
-        <div style="font-size:12px;color:var(--gray);letter-spacing:1px;text-transform:uppercase;margin-top:4px">FTMO Challenge Cost</div>
-      </div>
-      <div style="background:var(--card);padding:28px 20px;text-align:center">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;color:#ff5060">80%</div>
-        <div style="font-size:12px;color:var(--gray);letter-spacing:1px;text-transform:uppercase;margin-top:4px">Of Traders Fail</div>
-      </div>
-      <div style="background:var(--card);padding:28px 20px;text-align:center">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;color:var(--green)">#1</div>
-        <div style="font-size:12px;color:var(--gray);letter-spacing:1px;text-transform:uppercase;margin-top:4px">Reason: Bad Signals</div>
-      </div>
-    </div>
   </div>
 </section>
 
 <section class="section" id="how">
   <div class="section-label">The Process</div>
   <div class="section-title">HOW IT WORKS</div>
-  <p class="section-sub">Forward any signal from any group. TNL Trader analyzes it, enforces your prop firm rules, and tells you whether to take the trade — in under 3 seconds.</p>
+  <p class="section-sub">The system scans continuously. When all 7 gates align on one of the 4 watched pairs, a full trade plan is dispatched — entry, stop, and targets already calculated.</p>
   <div class="steps">
-    <div class="step"><div class="step-num">01</div><div class="step-icon">📨</div><h3>Forward Signal</h3><p>Copy any signal from any Telegram group and forward it to your TNL Trader bot. Works with any format.</p></div>
-    <div class="step"><div class="step-num">02</div><div class="step-icon">🧠</div><h3>AI Analysis</h3><p>Claude AI reads the signal, grades the setup quality, checks confluence, and evaluates the risk/reward.</p></div>
-    <div class="step"><div class="step-num">03</div><div class="step-icon">🛡️</div><h3>Rule Check</h3><p>7 automatic gates verify your daily limits, session rules, news events, and prop firm restrictions.</p></div>
-    <div class="step"><div class="step-num">04</div><div class="step-icon">✅</div><h3>YES or NO</h3><p>You get a clear report with a grade. Reply YES to take it, NO to skip. Your account state updates automatically.</p></div>
+    <div class="step"><div class="step-icon">📡</div><h3>Continuous Scan</h3><p>XAUUSD, EURUSD, GBPUSD and USDJPY are checked on a short cycle across multiple timeframes throughout the trading week.</p></div>
+    <div class="step"><div class="step-icon">🧩</div><h3>7-Gate Check</h3><p>Session timing, HTF bias, structure, liquidity sweep, order block / FVG, break of structure, and volatility — all seven have to agree.</p></div>
+    <div class="step"><div class="step-icon">🚫</div><h3>News Aware</h3><p>High-impact releases like FOMC and CPI pause new signals in a window around the event automatically — no manual toggling.</p></div>
+    <div class="step"><div class="step-icon">📨</div><h3>Full Trade Plan</h3><p>When a signal fires, you get entry, stop loss, and multiple take-profit levels, with the exact zone and reasoning shown — not just a call.</p></div>
+  </div>
+</section>
+
+<section class="section" id="pairs">
+  <div class="section-label">Watchlist</div>
+  <div class="section-title">FOUR PAIRS.<br/>NOTHING SPREAD THIN.</div>
+  <p class="section-sub">Every pair on the list gets its own calibration — stop-distance floors, confirmation thresholds, and session windows tuned to how that specific instrument actually trades, not one generic setting applied everywhere.</p>
+  <div class="pairs-strip">
+    <div class="pair-chip"><div class="p-name">XAUUSD</div><div class="p-note">Gold Fix + Silver Bullet windows</div></div>
+    <div class="pair-chip"><div class="p-name">EURUSD</div><div class="p-note">London + NY sessions</div></div>
+    <div class="pair-chip"><div class="p-name">GBPUSD</div><div class="p-note">Tighter confirmation bar</div></div>
+    <div class="pair-chip"><div class="p-name">USDJPY</div><div class="p-note">Asian + London + NY</div></div>
   </div>
 </section>
 
 <section class="section">
   <div class="two-col">
     <div>
-      <div class="section-label">Live Example</div>
-      <div class="section-title">SIGNAL IN.<br/>DECISION OUT.</div>
-      <p class="section-sub">The system reads the signal, scores it A+ through F, and delivers a clear report with all levels pre-populated in seconds.</p>
+      <div class="section-label">What You Receive</div>
+      <div class="section-title">NOTHING<br/>HIDDEN.</div>
+      <p class="section-sub">Every signal shows the actual zone and levels it was built from — not just a call to trust. This is the exact format delivered to Telegram and Discord.</p>
     </div>
     <div class="demo-card">
       <div class="demo-header">
         <div class="demo-dot" style="background:#ff5f57"></div>
         <div class="demo-dot" style="background:#febc2e"></div>
         <div class="demo-dot" style="background:#28c840"></div>
-        <span style="color:var(--gray);font-size:12px;margin-left:8px">TNL Trader Bot</span>
+        <span style="color:var(--gray);font-size:12px;margin-left:8px">TNL Trader Signal</span>
       </div>
       <div class="demo-body">
-        <div class="demo-label">Signal received</div>
-        <div class="demo-in">💎 DON PIPS VIP SIGNAL</div>
-        <div class="demo-in">PAIR: XAUUSD | TYPE: SELL</div>
-        <div class="demo-in">ENTRY: 2,347.50 | SL: 15pts</div>
-        <div class="demo-in">TP1: 2,318 · TP2: 2,300</div>
+        <div>🏆 <span class="demo-grade">TNL TRADER SIGNAL</span></div>
+        <div class="demo-in">XAUUSD | BUY | 7/7 Gates Confirmed | 15M</div>
         <br/>
-        <div class="demo-label">TNL Trader Report</div>
-        <div>Grade: <span class="demo-grade">A+</span></div>
-        <div>Signal: <span class="demo-blue">XAUUSD SELL</span></div>
-        <div>Timeframe: <span class="demo-blue">M15</span></div>
-        <div>Setup: <span class="demo-blue">BOS + FVG</span></div>
-        <div>Confidence: <span class="demo-gold">8/10</span></div>
-        <div>Confluence: <span class="demo-gold">5/6</span></div>
-        <div>News: <span class="demo-grade">Clear ✓</span></div>
-        <div>Session: <span class="demo-blue">London ✅</span></div>
-        <div>Entry: <span class="demo-blue">2,347.50</span> · Risk: <span class="demo-gold">1%</span></div>
-        <div>SL: <span class="demo-blue">2,362.50</span></div>
-        <div>TP1: <span class="demo-blue">2,318</span> · TP2: <span class="demo-blue">2,300</span></div><br/>
-        <div style="color:#00ff88;font-weight:bold">✅ EXECUTE — Reply YES or NO</div>
+        <div>Entry: <span class="demo-blue">4438.300</span></div>
+        <div>SL: <span class="demo-gold">4408.300</span> (30.0 pts)</div>
+        <div>TP1: <span class="demo-blue">4498.300</span> (2.0R)</div>
+        <div>TP2: <span class="demo-blue">4513.300</span> (2.5R)</div>
+        <br/>
+        <div class="demo-gray">✅ Kill zone · ✅ HTF bias · ✅ Structure</div>
+        <div class="demo-gray">✅ Liquidity sweep · ✅ OB/FVG zone shown</div>
+        <div class="demo-gray">✅ BOS confirmed · ✅ Volatility healthy</div>
+        <br/>
+        <div style="color:var(--gray);font-size:11px;font-style:italic">Illustrative example — actual entry, stop and targets vary with live market structure.</div>
       </div>
     </div>
   </div>
 </section>
 
 <section class="section" id="features">
-  <div class="section-label">What You Get</div>
-  <div class="section-title">YOUR FUNDED<br/>ACCOUNT PROTECTED</div>
-  <p class="section-sub">Every feature designed around one goal — protecting your challenge so you get funded and stay funded.</p>
+  <div class="section-label">What's Actually Different</div>
+  <div class="section-title">BUILT ON RULES,<br/>NOT RELAYED CALLS</div>
+  <p class="section-sub">Every feature exists because it closes a specific way signal groups usually go wrong.</p>
   <div class="features-grid">
-    <div class="feature"><div class="feature-icon">🤖</div><h3>AI Signal Grading</h3><p>Every signal graded A+ through F using Claude AI, evaluating trend, structure, confluence, and timing.</p></div>
-    <div class="feature"><div class="feature-icon">🛡️</div><h3>Prop Firm Rules</h3><p>Automatic daily loss limits, max trades, session restrictions, and weekly circuit breakers built in.</p></div>
-    <div class="feature"><div class="feature-icon">📰</div><h3>News Filter</h3><p>Automatically blocks signals during NFP, CPI, FOMC, and other high-impact news events.</p></div>
-    <div class="feature"><div class="feature-icon">📊</div><h3>Trade Tracking</h3><p>Every trade logged with grade, result, and provider. See which signal sources are actually profitable.</p></div>
-    <div class="feature"><div class="feature-icon">📱</div><h3>Telegram Native</h3><p>Works where you already trade. No new apps, no dashboards. Everything in your Telegram.</p></div>
-    <div class="feature"><div class="feature-icon">⚡</div><h3>All Signal Formats</h3><p>Reads structured signals and plain text freeform signals from any provider automatically.</p></div>
+    <div class="feature"><div class="feature-icon">🧩</div><h3>7-Gate Confirmation</h3><p>Kill zone, HTF bias, structure, liquidity sweep, OB/FVG, break of structure, and volatility — every gate has to pass, every time.</p></div>
+    <div class="feature"><div class="feature-icon">⚙️</div><h3>Per-Pair Calibration</h3><p>Stop distances, confirmation tiers, and session windows are tuned individually per pair — not one setting forced onto four different instruments.</p></div>
+    <div class="feature"><div class="feature-icon">📰</div><h3>News-Event Blackout</h3><p>Signals pause automatically around high-impact releases like FOMC, CPI, and NFP, then resume once the window clears.</p></div>
+    <div class="feature"><div class="feature-icon">🔍</div><h3>Zone Transparency</h3><p>Every signal shows the actual order block, FVG, or sweep level it's built from — you can see the reasoning, not just the call.</p></div>
+    <div class="feature"><div class="feature-icon">🎯</div><h3>Real Risk Levels</h3><p>Stop-loss placement is built to sit beyond the zone that defines the trade, with take-profits set at fixed R-multiples from entry.</p></div>
+    <div class="feature"><div class="feature-icon">📱</div><h3>Telegram + Discord</h3><p>Signals land where you already are — react manually, or connect optional auto-execution if you want it handled for you.</p></div>
   </div>
 </section>
 
-<section class="section" id="testimonials">
-  <div class="section-label">Real Results</div>
-  <div class="section-title">TRADERS ARE<br/>PASSING.</div>
-  <p class="section-sub">What prop firm traders are saying after using TNL Trader on their challenges.</p>
-  <div class="testimonials-grid">
-    <div class="testimonial">
-      <div class="stars-rating">★★★★★</div>
-      <div class="testimonial-text">Failed 3 FTMO challenges before this. The problem was always taking bad signals during news or near my daily limit. TNL Trader handles both automatically. Passed my fourth challenge.</div>
-      <div class="testimonial-author"><div class="testimonial-avatar">MK</div><div><div class="testimonial-name">Marcus K.</div><div class="testimonial-detail">FTMO $10k Passed · XAUUSD Trader</div></div></div>
-    </div>
-    <div class="testimonial">
-      <div class="stars-rating">★★★★★</div>
-      <div class="testimonial-text">I do not have the capital to trade my own account. FTMO was my only shot. TNL Trader made sure I did not blow it on a bad signal. Passed in 18 days.</div>
-      <div class="testimonial-author"><div class="testimonial-avatar">JR</div><div><div class="testimonial-name">James R.</div><div class="testimonial-detail">The5%ers $25k Funded · Forex</div></div></div>
-    </div>
-    <div class="testimonial">
-      <div class="stars-rating">★★★★★</div>
-      <div class="testimonial-text">The AI blocked my revenge trade after a loss and saved my challenge. I would have blown it right there. Stayed disciplined, finished the challenge, got funded.</div>
-      <div class="testimonial-author"><div class="testimonial-avatar">DT</div><div><div class="testimonial-name">Dara T.</div><div class="testimonial-detail">Apex Trader · ES Futures</div></div></div>
-    </div>
-  </div>
-</section>
-
-<section class="section" id="pricing">
-  <div class="section-label">Plans</div>
-  <div class="section-title">START FREE.<br/>CANCEL ANYTIME.</div>
-  <p class="section-sub">Try TNL Trader free for 14 days. No charge until the trial ends.</p>
-  <div class="pricing-grid">
+<section class="section" id="access">
+  <div class="section-label">Join</div>
+  <div class="section-title">FREE DISCORD.<br/>FULL ACCESS ON WHOP.</div>
+  <p class="section-sub">Start in the free community to see how the system runs, then upgrade whenever you're ready for full signal access.</p>
+  <div class="access-grid">
     <div class="plan">
-      <div class="plan-name">Basic</div>
-      <div class="plan-price"><span class="dollar">$</span><span class="amount">47</span><span class="period">/mo</span></div>
-      <div class="plan-trial">✦ 14 days free to start</div>
+      <div class="plan-name">Free Discord</div>
+      <div class="plan-price">Free</div>
+      <div class="plan-trial">✦ No card required</div>
       <div class="plan-divider"></div>
       <ul class="plan-features">
-        <li>Up to 10 signals per day</li><li>AI signal grading</li><li>Prop firm rule gates</li><li>News filter</li><li>Trade history (30 days)</li>
-        <li class="locked">Provider performance stats</li><li class="locked">Priority analysis</li>
+        <li>Community access</li>
+        <li>See how the system runs</li>
+        <li>Market discussion</li>
+        <li class="locked">Full signal delivery</li>
+        <li class="locked">Priority support</li>
       </ul>
-      <a href="/checkout?plan=basic" class="btn-plan btn-plan-outline">Start Free Trial</a>
+      <a href="https://discord.gg/tsD85wYhm" class="btn-plan btn-plan-outline" target="_blank" rel="noopener">Join Free Discord</a>
     </div>
     <div class="plan featured">
-      <div class="plan-name">Pro</div>
-      <div class="plan-price"><span class="dollar">$</span><span class="amount">97</span><span class="period">/mo</span></div>
-      <div class="plan-trial">✦ 14 days free to start</div>
+      <div class="plan-name">TNL Trader Academy</div>
+      <div class="plan-price">See pricing on Whop</div>
+      <div class="plan-trial">✦ Full membership</div>
       <div class="plan-divider"></div>
       <ul class="plan-features">
-        <li>Unlimited signals</li><li>AI signal grading</li><li>Prop firm rule gates</li><li>News filter</li><li>Full trade history</li><li>Provider performance stats</li>
-        <li class="locked">Priority analysis</li>
+        <li>Full signal delivery</li>
+        <li>All 4 pairs, all sessions</li>
+        <li>Full trade plans (entry/SL/TP)</li>
+        <li>Community + support</li>
       </ul>
-      <a href="/checkout?plan=pro" class="btn-plan btn-plan-primary">Start Free Trial</a>
-    </div>
-    <div class="plan">
-      <div class="plan-name">Elite</div>
-      <div class="plan-price"><span class="dollar">$</span><span class="amount">197</span><span class="period">/mo</span></div>
-      <div class="plan-trial">✦ 14 days free to start</div>
-      <div class="plan-divider"></div>
-      <ul class="plan-features">
-        <li>Unlimited signals</li><li>AI signal grading</li><li>Prop firm rule gates</li><li>News filter</li><li>Full trade history</li><li>Provider performance stats</li><li>Priority analysis</li>
-      </ul>
-      <a href="/checkout?plan=elite" class="btn-plan btn-plan-outline">Start Free Trial</a>
+      <a href="https://whop.com/tnl-trader-academy/tnl-trader-academy-membership/" class="btn-plan btn-plan-primary" target="_blank" rel="noopener">View Membership</a>
     </div>
   </div>
 </section>
@@ -350,14 +303,18 @@
   <div class="section-label">Questions</div>
   <div class="section-title">FAQ</div>
   <div class="faq-list">
-    <div class="faq-item"><div class="faq-q">Do I need any coding or technical knowledge?</div><div class="faq-a">No. Everything runs through Telegram. You forward signals, the bot replies. That is it.</div></div>
-    <div class="faq-item"><div class="faq-q">Does it work with my prop firm?</div><div class="faq-a">Yes. The rule gates are configurable to match FTMO, MyForexFunds, The5%ers, Apex, and most other funded account providers.</div></div>
-    <div class="faq-item"><div class="faq-q">What signal groups does it support?</div><div class="faq-a">Any group. The AI reads both structured formats (like DON PIPS) and plain text freeform signals from any provider.</div></div>
-    <div class="faq-item"><div class="faq-q">Does it execute trades automatically?</div><div class="faq-a">No — and that is intentional. TNL Trader gives you the analysis and decision. You reply YES or NO. You stay in control and compliant with prop firm rules.</div></div>
-    <div class="faq-item"><div class="faq-q">Can I cancel anytime?</div><div class="faq-a">Yes. Cancel before your 14-day trial ends and you are never charged. Cancel anytime after that and access continues until the end of the billing period.</div></div>
-    <div class="faq-item"><div class="faq-q">What if a signal comes in during news time?</div><div class="faq-a">TNL Trader automatically blocks signals during high-impact news events like NFP, CPI, and FOMC. The system handles it silently.</div></div>
-    <div class="faq-item"><div class="faq-q">Do I need a funded account to use TNL Trader?</div><div class="faq-a">No — TNL Trader works during your prop firm challenge. That is exactly when you need it most. Every signal graded, every rule enforced, before you have a single dollar at risk.</div></div>
-    <div class="faq-item"><div class="faq-q">What if I am on my first challenge?</div><div class="faq-a">Perfect timing. TNL Trader is most valuable during your first challenge when the rules are new and the pressure is high. The AI enforces your limits automatically so you can focus on trading.</div></div>
+    <div class="faq-item"><div class="faq-q">Where do the signals come from?</div><div class="faq-a">TNL Trader generates its own signals — it isn't relaying calls from other providers. Every signal is the output of the same 7-gate check run automatically against live price data.</div></div>
+    <div class="faq-item"><div class="faq-q">Which pairs does it cover?</div><div class="faq-a">XAUUSD, EURUSD, GBPUSD, and USDJPY — each with its own session windows and confirmation thresholds.</div></div>
+    <div class="faq-item"><div class="faq-q">Do I have to execute manually?</div><div class="faq-a">You can review and act on each signal yourself, or connect the optional MT5 auto-execution so qualifying signals place the order for you.</div></div>
+    <div class="faq-item"><div class="faq-q">What happens during major news events?</div><div class="faq-a">New signals pause automatically around high-impact releases like FOMC, CPI, and NFP, then resume once the window clears.</div></div>
+    <div class="faq-item"><div class="faq-q">Is this financial advice?</div><div class="faq-a">No. Signals are standardized and delivered the same way to every member — they aren't tailored to your account, risk tolerance, or goals. Trading involves substantial risk of loss, and the decision to act on any signal is yours alone.</div></div>
+    <div class="faq-item"><div class="faq-q">What's the difference between the free Discord and the Whop membership?</div><div class="faq-a">The free Discord gives you community access and visibility into how the system runs. The Whop membership adds full signal delivery across all 4 pairs with complete trade plans.</div></div>
+  </div>
+</section>
+
+<section class="section" style="padding-top:0">
+  <div class="disclaimer-box">
+    Signals from TNL Trader are standardized and not tailored to any individual's account, financial situation, or risk tolerance. This is not financial advice. Trading foreign exchange and CFDs carries a high level of risk and may not be suitable for all investors. Past setups are not a guarantee of future results. You are solely responsible for your own trading decisions.
   </div>
 </section>
 
@@ -374,20 +331,13 @@
 <div class="exit-overlay" id="exitOverlay">
   <div class="exit-modal">
     <button class="exit-close" onclick="document.getElementById('exitOverlay').classList.remove('show')">✕</button>
-    <h2>DON'T RISK<br/><span>YOUR SHOT.</span></h2>
-    <p>Your prop firm challenge is too important to risk on bad signals. Try TNL Trader free for 14 days — no charge, cancel anytime.</p>
-    <a href="#pricing" class="btn-primary" onclick="document.getElementById('exitOverlay').classList.remove('show')" style="display:inline-block">Claim Free Trial</a>
+    <h2>BEFORE YOU GO —<br/><span>SEE IT LIVE.</span></h2>
+    <p>The free Discord shows you exactly how signals look before you commit to anything. No card, no pressure.</p>
+    <a href="https://discord.gg/tsD85wYhm" class="btn-primary" target="_blank" rel="noopener" onclick="document.getElementById('exitOverlay').classList.remove('show')" style="display:inline-block">Join Free Discord</a>
   </div>
 </div>
 
 <script>
-  fetch('/api/stats').then(r=>r.json()).then(d=>{
-    if(d.signals!==undefined)document.getElementById('signalCount').textContent=d.signals.toLocaleString();
-    if(d.traders!==undefined)document.getElementById('traderCount').textContent=d.traders.toLocaleString();
-  }).catch(()=>{
-    document.getElementById('signalCount').textContent='2';
-    document.getElementById('traderCount').textContent='1';
-  });
   function closeMobile(){document.getElementById('mobileMenu').classList.remove('open');document.getElementById('hamburger').classList.remove('open');}
   document.getElementById('hamburger').addEventListener('click',()=>{document.getElementById('mobileMenu').classList.toggle('open');document.getElementById('hamburger').classList.toggle('open');});
   document.getElementById('mobileClose').addEventListener('click',closeMobile);
@@ -397,7 +347,7 @@
 </script>
 <script>
 document.addEventListener("DOMContentLoaded",()=>{
-const els=document.querySelectorAll(".section,.plan,.feature,.step,.testimonial,.trust-item,.faq-item");
+const els=document.querySelectorAll(".section,.plan,.feature,.step,.pair-chip,.trust-item,.faq-item");
 const obs=new IntersectionObserver((entries)=>{entries.forEach(e=>{if(e.isIntersecting){e.target.style.opacity="1";e.target.style.transform="translateY(0)";}});},{threshold:0.1});
 els.forEach(el=>{el.style.opacity="0";el.style.transform="translateY(30px)";el.style.transition="opacity 0.6s ease, transform 0.6s ease";obs.observe(el);});
 });
