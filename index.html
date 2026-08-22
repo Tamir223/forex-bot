@@ -5,20 +5,51 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
   <title>TNL Trader Academy — Institutional Forex & Gold Signals</title>
-  <meta name="description" content="Master institutional price action with TNL Trader Academy. Access 7-Gate forex & gold signals, daily market bias reports, and step-by-step trade breakdowns.">
+  <meta name="description" content="Master institutional price action, Fair Value Gaps, and Judas Swings with TNL Trader Academy. Get 7-Gate forex & gold signals and daily market bias reports.">
 
+  <!-- Open Graph / Social Media Preview -->
   <meta property="og:title" content="TNL Trader Academy — Institutional Forex & Gold Signals">
   <meta property="og:description" content="Master institutional price action with TNL Trader Academy. Access 7-Gate forex & gold signals, daily market bias reports, and step-by-step trade breakdowns.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://tnltrader.com">
 
+  <!-- Structured Data (JSON-LD) for E-E-A-T and Search Features -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "EducationalOrganization",
-    "name": "TNL Trader Academy",
-    "url": "https://tnltrader.com",
-    "description": "Institutional forex & gold trading education, daily market bias reports, and 7-Gate signal alerts.",
-    "sameAs": [
-      "https://whop.com/tnl-trader-academy"
+    "@graph": [
+      {
+        "@type": "EducationalOrganization",
+        "@id": "https://tnltrader.com/#organization",
+        "name": "TNL Trader Academy",
+        "url": "https://tnltrader.com",
+        "description": "Institutional forex and gold market research, technical analysis training, and trading signal alerts.",
+        "sameAs": [
+          "https://whop.com/tnl-trader-academy"
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://tnltrader.com/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What markets does TNL Trader Academy cover?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "We cover major foreign exchange currency pairs including EURUSD, GBPUSD, and USDJPY, as well as commodities like Gold (XAUUSD)."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is the 7-Gate trading framework?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The 7-Gate framework is an institutional price action model that validates market setups using liquidity sweeps, Fair Value Gaps (FVG), Breaker Blocks, and time-of-day alignment before executing trades."
+            }
+          }
+        ]
+      }
     ]
   }
   </script>
@@ -41,11 +72,10 @@
       color: var(--text-main);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       line-height: 1.6;
-      padding: 0;
     }
 
     .container {
-      max-width: 1100px;
+      max-width: 1000px;
       margin: 0 auto;
       padding: 0 24px;
     }
@@ -62,14 +92,13 @@
       font-size: 1.25rem;
       font-weight: 800;
       color: #fff;
-      letter-spacing: -0.5px;
     }
     .brand span { color: var(--accent-blue); }
 
     /* HERO */
     .hero {
       text-align: center;
-      padding: 80px 0 60px;
+      padding: 70px 0 50px;
     }
     .tag {
       background: rgba(59, 130, 246, 0.1);
@@ -85,18 +114,18 @@
       margin-bottom: 24px;
     }
     .hero h1 {
-      font-size: 3rem;
+      font-size: 2.8rem;
       font-weight: 800;
-      line-height: 1.15;
+      line-height: 1.2;
       margin-bottom: 20px;
       background: linear-gradient(180deg, #FFFFFF 0%, #94A3B8 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
     .hero p {
-      font-size: 1.15rem;
+      font-size: 1.1rem;
       color: var(--text-muted);
-      max-width: 650px;
+      max-width: 680px;
       margin: 0 auto 36px;
     }
     .btn-group {
@@ -116,35 +145,34 @@
       color: #fff;
       box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
     }
-    .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn-primary:hover { opacity: 0.9; }
     .btn-secondary {
       background-color: var(--card-bg);
       color: var(--text-main);
       border: 1px solid var(--border-color);
     }
-    .btn-secondary:hover { border-color: var(--accent-blue); }
 
-    /* FEATURES GRID */
-    .features {
+    /* SECTIONS */
+    .section-title {
+      text-align: center;
+      font-size: 1.75rem;
+      font-weight: 800;
+      margin: 60px 0 32px;
+    }
+
+    .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 24px;
-      margin: 60px 0;
     }
     .card {
       background-color: var(--card-bg);
       border: 1px solid var(--border-color);
       border-radius: 12px;
-      padding: 32px;
-      transition: border 0.2s ease;
-    }
-    .card:hover { border-color: var(--accent-blue); }
-    .card-icon {
-      font-size: 2rem;
-      margin-bottom: 16px;
+      padding: 28px;
     }
     .card h3 {
-      font-size: 1.25rem;
+      font-size: 1.2rem;
       margin-bottom: 12px;
     }
     .card p {
@@ -152,10 +180,33 @@
       font-size: 0.95rem;
     }
 
+    /* E-E-A-T & TRUST BOX */
+    .trust-box {
+      background-color: var(--card-bg);
+      border-left: 4px solid var(--accent-blue);
+      padding: 24px;
+      border-radius: 8px;
+      margin: 50px 0;
+    }
+    .trust-box h3 { margin-bottom: 8px; font-size: 1.1rem; }
+    .trust-box p { color: var(--text-muted); font-size: 0.9rem; margin: 0; }
+
+    /* FAQ SECTION */
+    .faq-item {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 16px;
+    }
+    .faq-item h3 { font-size: 1.05rem; margin-bottom: 8px; color: var(--text-main); }
+    .faq-item p { color: var(--text-muted); font-size: 0.92rem; margin: 0; }
+
     /* FOOTER */
     footer {
       border-top: 1px solid var(--border-color);
       padding: 40px 0;
+      margin-top: 60px;
       text-align: center;
       font-size: 0.85rem;
       color: var(--text-muted);
@@ -164,7 +215,7 @@
     footer a:hover { color: var(--accent-blue); }
 
     @media (max-width: 768px) {
-      .hero h1 { font-size: 2.2rem; }
+      .hero h1 { font-size: 2.1rem; }
       .btn-group { flex-direction: column; }
     }
   </style>
@@ -179,34 +230,57 @@
 
     <section class="hero">
       <div class="tag">INSTITUTIONAL PRICE ACTION</div>
-      <h1>Trade With Precision.<br>Master The 7-Gate System.</h1>
-      <p>High-probability Forex and Gold market intelligence. Real-time signal execution backed by liquidity sweeps, FVG rebalancing, and strict risk rules.</p>
+      <h1>Forex & Gold Intelligence.<br>Master The 7-Gate System.</h1>
+      <p>Precision-driven technical analysis for EURUSD, GBPUSD, USDJPY, and XAUUSD. Built on algorithmic price delivery, Fair Value Gaps, and liquidity sweep confirmations.</p>
       
       <div class="btn-group">
-        <a href="https://whop.com/tnl-trader-academy" class="btn btn-primary" target="_blank">Get Started on Whop</a>
-        <a href="https://discord.gg/your-invite-link" class="btn btn-secondary" target="_blank">Join Free Discord</a>
+        <a href="https://whop.com/tnl-trader-academy" class="btn btn-primary" target="_blank">Access VIP Signals</a>
+        <a href="https://discord.gg/your-invite-link" class="btn btn-secondary" target="_blank">Join Community</a>
       </div>
     </section>
 
-    <section class="features">
+    <!-- TRUST & E-E-A-T SECTION -->
+    <div class="trust-box">
+      <h3>Algorithmic Market Execution & Mentorship</h3>
+      <p>At TNL Trader Academy, we don't rely on lagging indicators. Our methodology centers around smart money concepts, analyzing liquidity sweeps, Judas Swings, Order Blocks, and Breakers to deliver objective market bias and signal alerts.</p>
+    </div>
+
+    <!-- FEATURES SECTION -->
+    <h2 class="section-title">Core Academy Features</h2>
+    <div class="grid">
       <div class="card">
-        <div class="card-icon">🎯</div>
-        <h3>7-Gate Signal Alerts</h3>
-        <p>Every setup undergoes strict verification through our 7-Gate checklist before dispatch. Complete with exact SL, TP, and R:R parameters.</p>
+        <h3>7-Gate Signal Verification</h3>
+        <p>Every alert is routed through a 7-checkpoint system to confirm higher timeframe bias, liquidity draws, and risk-to-reward ratios before dispatching.</p>
       </div>
 
       <div class="card">
-        <div class="card-icon">📊</div>
-        <h3>Daily Market Intelligence</h3>
-        <p>Stay ahead of London and NY open with automated daily bias reports, structure checks, and intraday CHoCH trend shift notifications.</p>
+        <h3>Daily Bias & Market Reports</h3>
+        <p>Receive comprehensive structural breakdowns before London and New York sessions across key forex pairs and gold (XAUUSD).</p>
       </div>
 
       <div class="card">
-        <div class="card-icon">🎓</div>
         <h3>Institutional Curriculum</h3>
-        <p>Step-by-step masterclasses covering Judas Swings, Order Blocks, Fair Value Gaps, Breakers, and the Unicorn Model.</p>
+        <p>Master advanced concepts like the Unicorn Model, liquidity pools, displacement, and intraday CHoCH trend changes.</p>
       </div>
-    </section>
+    </div>
+
+    <!-- FAQ SECTION FOR SEARCH RANKING -->
+    <h2 class="section-title">Frequently Asked Questions</h2>
+    
+    <div class="faq-item">
+      <h3>What financial instruments are analyzed in TNL Trader Academy?</h3>
+      <p>We specialize in foreign exchange markets (EURUSD, GBPUSD, USDJPY) and gold (XAUUSD), providing institutional bias reports and signal alerts across major market sessions.</p>
+    </div>
+
+    <div class="faq-item">
+      <h3>What is the 7-Gate framework?</h3>
+      <p>The 7-Gate framework is our proprietary analysis model that validates setups using strict criteria: Higher Timeframe Bias, Liquidity Sweeps, Displacement, Fair Value Gap (FVG) rebalancing, Risk-to-Reward parameters, and Session Timing.</p>
+    </div>
+
+    <div class="faq-item">
+      <h3>Can I use these signals for prop firm evaluations?</h3>
+      <p>Yes. Our signals provide clear entry, stop-loss, and take-profit targets, making them compatible with risk management rules required by top prop trading firms.</p>
+    </div>
 
     <footer>
       <p>© 2026 TNL Trader Academy. All rights reserved.</p>
