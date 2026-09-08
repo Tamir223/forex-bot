@@ -24,19 +24,19 @@ logger = logging.getLogger(__name__)
 # which is the only value the scanner actually reads at runtime.
 
 PIP_SPECS = {
-    "EURUSD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.00035},  # 12 pips
+    "EURUSD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.00022},  # 12 pips; min_atr p25 of 6,563 real readings (was 0.00035, sat between p50/p75 — blocked 64%)
     "GBPUSD": {"pip": 0.0001, "min_sl": 0.0015, "min_atr": 0.00042},  # 15 pips — most volatile forex
     "AUDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.00035},  # 10 pips
     "NZDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.00035},  # 10 pips
     "USDCAD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.00049},  # 12 pips
     "USDCHF": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.00049},  # 10 pips
-    "USDJPY": {"pip": 0.01,   "min_sl": 0.08,   "min_atr": 0.035, "max_lots": 0.50},    # 8 pips JPY
+    "USDJPY": {"pip": 0.01,   "min_sl": 0.08,   "min_atr": 0.12, "max_lots": 0.50},    # 8 pips JPY; min_atr p25 of 13,108 real readings (was 0.035, blocked only 1.1% — effectively no filter)
     "EURJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.08},
     "GBPJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.10},
-    "XAUUSD": {"pip": 0.01,   "min_sl": 12.0,   "min_atr": 15.0},    # 12 points — gold needs room;
-                                                                     # min_atr raised 2.0->15.0, see
-                                                                     # scanner.py _futures_thr comment
-                                                                     # for the research this matches
+    "XAUUSD": {"pip": 0.01,   "min_sl": 12.0,   "min_atr": 8.046},   # 12 points — gold needs room;
+                                                                     # min_atr 8.046 = p25 of 13,114
+                                                                     # real ATR_CALIBRATION_LOG readings
+                                                                     # (15.0 blocked 100%, max=12.793)
     "XAGUSD": {"pip": 0.001,  "min_sl": 0.05,   "min_atr": 0.03},
     "US100":  {"pip": 1.0, "min_sl": 80.0,  "min_atr": 20.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 80,  "max_sl_pips": 300, "digits": 2, "unit": "pts"},
     "US30":   {"pip": 1.0, "min_sl": 60.0,  "min_atr": 17.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 60,  "max_sl_pips": 250, "digits": 2, "unit": "pts"},

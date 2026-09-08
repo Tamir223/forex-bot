@@ -1283,22 +1283,15 @@ async def fetch_all_timeframes(symbol: str) -> dict:
                     "ES": 5.0, "MES": 5.0, "NQ": 20.0, "MNQ": 20.0,
                     "CL": 0.3, "MCL": 0.3, "GC": 5.0, "MGC": 5.0,
                     "RTY": 3.0, "YM": 50.0,
-                    # XAUUSD raised 3.0 -> 15.0 (Sep 2026). CORRECTION: this was originally
-                    # justified citing "1H ATR(14)" research (20-35 normal, 15-20 low,
-                    # <15 dead market) — but that research is for real Wilder ATR on 1-HOUR
-                    # candles, and this calculation is a simple mean of high-low range over
-                    # the first 14 15-MINUTE candles (3.5 hours of data, no smoothing). That
-                    # citation does not actually describe this metric. get_atr() in market.py
-                    # implements genuine 1H/14-period ATR matching that research but is never
-                    # called anywhere in the codebase — dead code. 15.0 is a placeholder:
-                    # very likely still an improvement (3.0 was barely wider than one 15M
-                    # candle's range, so it was almost certainly non-functional as a filter
-                    # regardless of the "right" number), but NOT independently verified for
-                    # this exact calculation. ATR_CALIBRATION_LOG below is recording real
-                    # readings so this can be properly calibrated once genuine data exists,
-                    # the same evidentiary standard the xau_pre_ny/xau_pm kill-zone windows
-                    # already have (built from 22 real logged BOS events, not estimated).
-                    "XAUUSD": 15.0,
+                    # XAUUSD: 8.046 = p25 of 379 distinct ATR regimes over 3 days of real
+                    # ATR_CALIBRATION_LOG data (13,114 raw readings, deduplicated to scan
+                    # frequency before computing percentiles). Previous value 15.0 blocked
+                    # 100% of all observed readings (max ever seen: 12.793) — it was a
+                    # placeholder that never passed any signal through. 8.046 is real but
+                    # still a limited sample: re-verify in 1-2 weeks once more session
+                    # variety (weekend gaps, high-impact news, holiday sessions) has
+                    # accumulated. Do not treat 8.046 as final.
+                    "XAUUSD": 8.046,
                 }
                 threshold = _futures_thr.get(sym, _get_pip_spec(sym).get("min_atr", 0.0007))
                 atr_data = {"atr": atr_val, "is_low_volatility": atr_val < threshold}
