@@ -16,8 +16,12 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # ─── PIP SPECIFICATION SYSTEM ────────────────────────────────────────────────
-# Single source of truth for pip size, minimum SL distance, and ATR threshold.
-# All functions that need pair-specific tolerances should call get_pip_spec().
+# Single source of truth for pip size and ATR threshold. All functions that
+# need pair-specific tolerances should call get_pip_spec().
+# NOTE: the min_sl field in each entry is vestigial dead code — confirmed via
+# exhaustive grep, it has zero real call sites in the live signal path.
+# The authoritative source is MIN_SL_DISTANCE in scanner.py (e.g. XAUUSD: 30.0),
+# which is the only value the scanner actually reads at runtime.
 
 PIP_SPECS = {
     "EURUSD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.00035},  # 12 pips

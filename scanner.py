@@ -2492,6 +2492,12 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         structure = detect_structure(candles)
         trend = structure.get("trend", "unclear")
         if trend == "unclear":
+            _ms_structure = ms.get("structure", "ranging")
+            if _ms_structure != "ranging":
+                logger.info(
+                    f"[structure_veto_diag] {symbol} detect_structure=unclear vetoed exit, "
+                    f"but analyze_market_structure would have read {_ms_structure} — signal never reached Gate 3"
+                )
             return None
 
         # OB detection uses direction from the primary gate (not detect_structure trend)
