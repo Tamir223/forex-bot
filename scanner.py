@@ -655,6 +655,27 @@ def detect_structure(candles: list, swing_length: int = 2) -> dict:
     highs" when the real extremes sat at ignored indices; the new method
     correctly read that same sequence as "unclear" instead).
 
+    MOMENTUM FALLBACK: confirmed live — a strong, genuinely trending market
+    can have TOO FEW swing pivots for the fractal method to confirm at all.
+    This is a well-documented property of fractal/swing detection (verified
+    against current sources): a strong, sustained trend has minimal
+    pullback, hence fewer reversals to confirm pivots from, than a choppier
+    market — multiple published fractal indicators explicitly recommend
+    pairing fractal detection with a momentum/trend-following check for
+    exactly this reason. Confirmed live: USDJPY sat with detect_structure
+    returning "unclear" for 29 straight minutes while the market was in a
+    real, confirmed downtrend — analyze_market_structure()'s own momentum
+    override (7-of-10 candle-direction check) correctly read "downtrend"
+    the entire time, but detect_structure() acts as an earlier pre-filter
+    and silently vetoed the signal before Gate 3 was ever reached. This
+    fallback reuses the SAME 7-of-10 threshold analyze_market_structure()
+    already established, so both functions agree consistently on the same
+    candles instead of disagreeing. Tested against three scenarios before
+    deploying: correctly activates on a strong sustained trend with
+    minimal pullback (the confirmed real case); does NOT falsely activate
+    on pure random noise; does not change behavior on a healthy zigzag
+    trend that the fractal method already detects correctly on its own.
+
     candles: newest-first (candles[0] = most recent close), same convention
     as every other function in this file.
     """
@@ -686,6 +707,26 @@ def detect_structure(candles: list, swing_length: int = 2) -> dict:
     # method had (it also compared two points), just now both points are
     # genuine confirmed pivots instead of arbitrary fixed indices.
     if len(swing_high_idxs) < 2 or len(swing_low_idxs) < 2:
+        # MOMENTUM FALLBACK — see docstring above. Only reached when the
+        # fractal method itself can't confirm enough pivots; a genuinely
+        # ambiguous/choppy market still correctly falls through to "unclear"
+        # below if momentum isn't decisive either.
+        _recent10 = candles[:10]
+        _bull_ct = sum(1 for c in _recent10 if c["close"] > c["open"])
+        _bear_ct = sum(1 for c in _recent10 if c["close"] < c["open"])
+        _cc = round(candles[0]["close"], 5)
+        if _bull_ct >= 7:
+            return {
+                "trend": "bullish", "bos": False, "choch": False, "bos_type": None,
+                "prev_high": _cc, "prev_low": _cc, "current": _cc,
+                "momentum_fallback": True,
+            }
+        elif _bear_ct >= 7:
+            return {
+                "trend": "bearish", "bos": False, "choch": False, "bos_type": None,
+                "prev_high": _cc, "prev_low": _cc, "current": _cc,
+                "momentum_fallback": True,
+            }
         return {"trend": "unclear", "bos": False, "choch": False}
 
     last_high = window[swing_high_idxs[0]]["high"]
@@ -2484,6 +2525,12 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # Structure and setup detection
         structure = detect_structure(candles)
         trend = structure.get("trend", "unclear")
+        if structure.get("momentum_fallback"):
+            logger.info(
+                f"[structure_momentum_fallback] {symbol} fractal pivots insufficient "
+                f"but 7-of-10 candle momentum confirmed {trend} — proceeding "
+                f"(this is the fix for the confirmed 29-minute USDJPY veto)"
+            )
         if trend == "unclear":
             _ms_structure = ms.get("structure", "ranging")
             if _ms_structure != "ranging":
