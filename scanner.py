@@ -1759,6 +1759,8 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     # ── UNICORN MODEL — optional quality upgrade, no hard gate ───────────────
     # Breaker block + FVG overlap = S-tier (highest probability) quality tag.
     # Non-breaker setups are completely unaffected — gate pass/fail unchanged.
+    _breaker_zone_low = None   # preserved for the FINAL entry sanity check further
+    _breaker_zone_high = None  # below — this label previously had no such check at all
     if _has_fvg and fvg:
         _breaker = detect_breaker_block(candles, direction)
         if _breaker:
@@ -1771,6 +1773,8 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
                 # with no numbers, so the person receiving it couldn't see where the
                 # zone actually was or judge whether the entry sat inside it.
                 gate_details['ob_fvg'] = f"🦄 UNICORN (Breaker+FVG): {_b_low:.5f}-{_b_high:.5f}"
+                _breaker_zone_low = _b_low
+                _breaker_zone_high = _b_high
                 logger.info(
                     f"[breaker] {symbol} UNICORN — breaker {_b_low}-{_b_high} overlaps "
                     f"FVG {_fvg_low}-{_fvg_high}"
@@ -3248,6 +3252,33 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     f"cited FVG {_gs_lo:.5f}-{_gs_hi:.5f} — clearing FVG label"
                 )
                 fvg = None
+
+        # ── UNICORN (BREAKER+FVG) ENTRY SANITY CHECK ────────────────────────────
+        # Confirmed live: a real dispatched XAUUSD signal cited "UNICORN
+        # (Breaker+FVG): 4449.60010-4452.29980" while the actual entry was
+        # 4400.000 — 49.6 points away, MORE than the entire 38-point SL distance.
+        # The UNICORN label (set far earlier, right after breaker detection) was
+        # never re-validated against the final entry the way the ob/fvg guards
+        # just above already do for their own zones — this is that same check,
+        # applied consistently to the breaker zone too.
+        if _breaker_zone_low is not None and "UNICORN" in gate_details.get("ob_fvg", ""):
+            _gs_spot = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+            _gs_pip  = get_pip_spec(symbol.upper()).get("pip", 0.0001)
+            _gs_tol  = _gs_pip * 2
+            _gs_lo   = _breaker_zone_low  + _gs_spot
+            _gs_hi   = _breaker_zone_high + _gs_spot
+            if not (_gs_lo - _gs_tol <= _sig_entry <= _gs_hi + _gs_tol):
+                logger.warning(
+                    f"[unicorn_entry_sanity] {symbol} FINAL entry {_sig_entry} outside "
+                    f"cited breaker zone {_gs_lo:.5f}-{_gs_hi:.5f} — clearing UNICORN label, "
+                    f"reverting to standard OB/FVG description"
+                )
+                if ob:
+                    gate_details['ob_fvg'] = f"OB {ob['low']:.5f}-{ob['high']:.5f}"
+                elif fvg:
+                    gate_details['ob_fvg'] = f"FVG {fvg.get('bottom',0):.5f}-{fvg.get('top',0):.5f}"
+                else:
+                    gate_details['ob_fvg'] = "no OB or FVG found"
 
         # ── ENTRY LIMIT VALIDITY SANITY CHECK ────────────────────────────────────
         # All non-ORB signals are limit orders. For a Sell Limit, entry must sit ABOVE
