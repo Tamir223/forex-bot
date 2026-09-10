@@ -2867,7 +2867,13 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             # reduce lot size via the existing risk-based sizing, not shrink back
             # into the zone.
             _zone_lo = _zone_hi = None
-            if _has_displacement_fvg and (not ob or _ob_below_bar) and not fvg:
+            # If price sits inside a genuine displacement FVG, that FVG IS the
+            # entry's own zone (confirmed via is_price_in_displacement_fvg above) —
+            # use it regardless of whether an unrelated `ob` also happens to exist
+            # elsewhere. Same lesson as the UNICORN entry-sanity fix: a
+            # coincidentally-detected, unrelated zone should never override the
+            # zone the entry is actually anchored to.
+            if _has_displacement_fvg and not fvg:
                 _zone_lo = displacement.get("fvg_bottom")
                 _zone_hi = displacement.get("fvg_top")
             elif ob:
