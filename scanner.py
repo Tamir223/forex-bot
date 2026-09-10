@@ -1759,8 +1759,18 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     # ── UNICORN MODEL — optional quality upgrade, no hard gate ───────────────
     # Breaker block + FVG overlap = S-tier (highest probability) quality tag.
     # Non-breaker setups are completely unaffected — gate pass/fail unchanged.
-    _breaker_zone_low = None   # preserved for the FINAL entry sanity check further
-    _breaker_zone_high = None  # below — this label previously had no such check at all
+    # Breaker zone bounds are stored INSIDE gate_details (not as local variables)
+    # because check_tjr_gates() and scan_symbol() are separate functions — a
+    # local variable here would never be visible where the final entry sanity
+    # check runs. Confirmed live: an earlier version used local variables
+    # _breaker_zone_low/_breaker_zone_high, which caused a NameError on EVERY
+    # signal-build attempt (not just Unicorn ones) for two full days, since the
+    # sanity check unconditionally evaluated "is not None" on a name that was
+    # never in scan_symbol's scope at all. gate_details is already confirmed to
+    # cross this exact function boundary (it's read successfully at the sanity
+    # check via gate_details.get("ob_fvg", "")), so it's the correct carrier.
+    gate_details['_breaker_zone_low'] = None
+    gate_details['_breaker_zone_high'] = None
     if _has_fvg and fvg:
         _breaker = detect_breaker_block(candles, direction)
         if _breaker:
@@ -1773,8 +1783,8 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
                 # with no numbers, so the person receiving it couldn't see where the
                 # zone actually was or judge whether the entry sat inside it.
                 gate_details['ob_fvg'] = f"🦄 UNICORN (Breaker+FVG): {_b_low:.5f}-{_b_high:.5f}"
-                _breaker_zone_low = _b_low
-                _breaker_zone_high = _b_high
+                gate_details['_breaker_zone_low'] = _b_low
+                gate_details['_breaker_zone_high'] = _b_high
                 logger.info(
                     f"[breaker] {symbol} UNICORN — breaker {_b_low}-{_b_high} overlaps "
                     f"FVG {_fvg_low}-{_fvg_high}"
@@ -3267,6 +3277,13 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # never re-validated against the final entry the way the ob/fvg guards
         # just above already do for their own zones — this is that same check,
         # applied consistently to the breaker zone too.
+        # Reads from gate_details, not local variables — check_tjr_gates() and
+        # scan_symbol() are separate functions; a local variable set in one is
+        # never visible in the other. An earlier version tried to use local
+        # variables here and caused a NameError on every single signal build for
+        # two full days, not just Unicorn ones, since this line runs unconditionally.
+        _breaker_zone_low = gate_details.get('_breaker_zone_low')
+        _breaker_zone_high = gate_details.get('_breaker_zone_high')
         if _breaker_zone_low is not None and "UNICORN" in gate_details.get("ob_fvg", ""):
             _gs_spot = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
             _gs_pip  = get_pip_spec(symbol.upper()).get("pip", 0.0001)
