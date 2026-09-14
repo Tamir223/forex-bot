@@ -2247,6 +2247,14 @@ def format_unified_signal(symbol: str, direction: str,
 
     _tp1_r = abs(tp1 - entry) / sl_dist if sl_dist else 0.0
     _tp2_r = abs(tp2 - entry) / sl_dist if sl_dist else 0.0
+    # TP3 previously used a hardcoded "(5R)" string instead of computing the
+    # actual R-multiple the way TP1/TP2 already do above — confirmed live: a
+    # real dispatched USDJPY signal showed "(5R)" while the true distance was
+    # 3.57R (the SL/TP3 gap had shifted from whatever originally justified the
+    # hardcoded label, likely via repricing or the ATR floor). TP1 and TP2
+    # never had this problem specifically because they were already computed
+    # dynamically; TP3 just never got the same treatment.
+    _tp3_r = abs(tp3 - entry) / sl_dist if (sl_dist and tp3) else 0.0
 
     lines = [
         DIV,
@@ -2257,7 +2265,7 @@ def format_unified_signal(symbol: str, direction: str,
         f"🛑 SL:       {sl:.{_dp}f}  ({_sl_display})",
         f"🎯 TP1:      {tp1:.{_dp}f}  ({_tp1_r:.1f}R)",
         f"🎯 TP2:      {tp2:.{_dp}f}  ({_tp2_r:.1f}R)",
-    ] + ([f"🎯 TP3:      {tp3:.{_dp}f}  {'(Draw)' if draw else '(5R)'}"] if tp3 else []) + [
+    ] + ([f"🎯 TP3:      {tp3:.{_dp}f}  {'(Draw)' if draw else f'({_tp3_r:.1f}R)'}"] if tp3 else []) + [
         f"📦 Lots:     {lot_str}",
         f"⚡ Type:     {_type_str}",
     ] + _ote_lines + [
@@ -2790,6 +2798,13 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # Also apply OTE override when ob is C-tier (gate fail) — the displacement FVG
         # is the effective signal in that case and its OTE must drive the entry.
         _ob_c_tier = ob and not _min_ob_tier_ok(ob.get('tier', ''), symbol)
+        # Safe default BEFORE the conditional below — these are only assigned inside
+        # it, but a later final sanity check needs to reference them regardless of
+        # signal type. Learned the hard way from the UNICORN scoping bug: an
+        # unconditional later reference to a conditionally-assigned name crashes
+        # every signal build, not just displacement ones, if this default is missing.
+        _fvg_bot_disp = _fvg_top_disp = _ce_disp = None
+        _ote_lo_disp = _ote_hi_disp = None
         if _has_displacement_fvg and (not ob or _ob_c_tier) and not fvg:
             _is_pts_d = symbol.upper() in ("XAUUSD", "US30", "NAS100") or symbol.upper() in YFINANCE_FUTURES_MAP
             _dp_d = 3 if _is_pts_d else 5
@@ -2824,6 +2839,16 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _fvg_bot_disp = round(displacement['fvg_bottom'] + _spot_off_d, _dp_d)
             _fvg_top_disp = round(displacement['fvg_top'] + _spot_off_d, _dp_d)
             _ce_disp = round(displacement['fvg_mid'] + _spot_off_d, _dp_d)
+            # Capture whichever zone actually drove _sig_entry above (OTE if present,
+            # else it fell back to fvg_mid) — needed for the final sanity check to
+            # verify against the RIGHT range. Checking only the wide FVG bounds isn't
+            # precise enough: the real broken case (entry 153.549) sat inside the wide
+            # FVG (153.357-154.077) but well outside the actual OTE zone that was
+            # supposed to have driven it (153.770-153.883) — confirmed by direct test
+            # before finalizing this fix.
+            if displacement.get('ote_mid'):
+                _ote_lo_disp = round(displacement.get('ote_low', 0) + _spot_off_d, _dp_d)
+                _ote_hi_disp = round(displacement.get('ote_high', 0) + _spot_off_d, _dp_d)
             gate_details['ob_fvg'] = (
                 f"Displacement FVG {_fvg_bot_disp}-{_fvg_top_disp} | CE={_ce_disp} | "
                 f"OTE={round(displacement.get('ote_low', 0) + _spot_off_d, _dp_d)}"
@@ -3295,6 +3320,39 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     f"[unicorn_entry_sanity] {symbol} FINAL entry {_sig_entry} outside "
                     f"cited breaker zone {_gs_lo:.5f}-{_gs_hi:.5f} — clearing UNICORN label, "
                     f"reverting to standard OB/FVG description"
+                )
+                if ob:
+                    gate_details['ob_fvg'] = f"OB {ob['low']:.5f}-{ob['high']:.5f}"
+                elif fvg:
+                    gate_details['ob_fvg'] = f"FVG {fvg.get('bottom',0):.5f}-{fvg.get('top',0):.5f}"
+                else:
+                    gate_details['ob_fvg'] = "no OB or FVG found"
+
+        # ── DISPLACEMENT FVG ENTRY SANITY CHECK ──────────────────────────────────
+        # Confirmed live: a real dispatched USDJPY signal cited "Displacement FVG
+        # 153.35699-154.077 | CE=153.717 | OTE=153.76991-153.88313" while the
+        # actual entry was 153.54899 — 16.8 pips from the cited CE. Checking
+        # against the wide FVG range alone is NOT precise enough (153.549 sits
+        # inside 153.357-154.077, so that check would have missed this exact
+        # case — confirmed by direct test before finalizing) — the OTE zone
+        # (when present) is what actually drove the entry calculation per the
+        # override logic above, so that's the correct range to verify against.
+        # Same underlying cause as the OB/FVG/UNICORN sanity checks: _sig_entry
+        # can be overwritten again later by staleness/repricing logic without
+        # this description ever being refreshed to match.
+        if _fvg_bot_disp is not None and "Displacement FVG" in gate_details.get("ob_fvg", ""):
+            _gs_spot = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
+            _gs_pip  = get_pip_spec(symbol.upper()).get("pip", 0.0001)
+            _gs_tol  = _gs_pip * 2
+            if _ote_lo_disp is not None:
+                _gs_lo, _gs_hi = _ote_lo_disp, _ote_hi_disp
+            else:
+                _gs_lo, _gs_hi = _ce_disp - _gs_pip * 5, _ce_disp + _gs_pip * 5
+            if not (_gs_lo - _gs_tol <= _sig_entry <= _gs_hi + _gs_tol):
+                logger.warning(
+                    f"[displacement_entry_sanity] {symbol} FINAL entry {_sig_entry} outside "
+                    f"cited OTE/CE range {_gs_lo:.5f}-{_gs_hi:.5f} — clearing description, "
+                    f"reverting to standard OB/FVG label"
                 )
                 if ob:
                     gate_details['ob_fvg'] = f"OB {ob['low']:.5f}-{ob['high']:.5f}"
