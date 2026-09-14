@@ -2915,6 +2915,20 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 _zone_lo, _zone_hi = ob["low"], ob["high"]
             elif fvg:
                 _zone_lo, _zone_hi = fvg.get("bottom", fvg.get("low")), fvg.get("top", fvg.get("high"))
+            # LAST-RESORT FALLBACK — confirmed live: a real USDJPY signal had ob
+            # rejected ("wrong side + too far"), fvg downgraded to C-tier ("Weak
+            # FVG... gate fail"), and _has_displacement_fvg false (entry came from
+            # a generic "15M entry" fallback, not tied to any zone) — so NONE of
+            # the three branches above found a zone, the guard silently skipped
+            # entirely, and the dispatched SL landed inside a real, detected
+            # displacement FVG (154.472-154.88901) that was still shown in the
+            # message text but never checked against. A stop got hit that was
+            # never actually protected. If a genuine displacement FVG was
+            # detected at all — even one that didn't end up driving the entry —
+            # it's still real, known structure worth keeping the stop clear of.
+            if _zone_lo is None and displacement:
+                _zone_lo = displacement.get("fvg_bottom")
+                _zone_hi = displacement.get("fvg_top")
             if _zone_lo is not None and _zone_hi is not None:
                 _zone_buf = _swept_sl_buffer(symbol)
                 if direction == "BUY" and _sig_sl > (_zone_lo - _zone_buf) and _sig_sl < _zone_hi:
