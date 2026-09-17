@@ -2849,14 +2849,40 @@ def detect_orb_breakout(
 
     if direction == "BUY":
         sl_dist  = max(abs(entry_raw - orb_low), _min_sl_dist(sym))
-        sl_dist  = min(sl_dist, _max_sl_dist(sym))
+        # NOT capped by _max_sl_dist here -- the whole point of "SL = opposite side
+        # of the opening range" (rule #3 above) is that the range's own structure
+        # determines the stop distance. Capping it defeats that purpose and can
+        # pull the stop back INSIDE the range on a wide range day, directly
+        # contradicting this function's own documented design. Confirmed live: a
+        # real 34-pip-wide USDJPY range produced a genuinely correct 39.5-pip
+        # opposite-side distance, silently capped to the generic 20-pip
+        # MAX_SL_DISTANCE["USDJPY"] ceiling, landing the SL 14.5 pips inside the
+        # range instead of beyond it -- vulnerable to a completely ordinary
+        # retracement that ICT/ORB research does not consider a failed breakout.
+        # Same precedent already established elsewhere in this file (the XAUUSD
+        # zone-clearance override): when a structurally-required stop distance
+        # exceeds the generic cap, the structural distance wins and risk-based
+        # lot sizing absorbs it, rather than shrinking the stop into invalid
+        # territory.
+        if sl_dist > _max_sl_dist(sym):
+            logger.warning(
+                f"[orb] {sym} opposite-side SL distance {round(sl_dist,5)} exceeds "
+                f"max_sl_dist {_max_sl_dist(sym)} -- keeping the structural distance "
+                f"(range-derived), NOT capping it; lot sizing will absorb this"
+            )
         sl_raw   = entry_raw - sl_dist
         tp1_raw  = entry_raw + range_width * 2.0
         tp2_raw  = entry_raw + range_width * 3.0
         state["long_fired"]  = True
     else:
         sl_dist  = max(abs(orb_high - entry_raw), _min_sl_dist(sym))
-        sl_dist  = min(sl_dist, _max_sl_dist(sym))
+        # Same reasoning as the BUY branch above -- see that comment.
+        if sl_dist > _max_sl_dist(sym):
+            logger.warning(
+                f"[orb] {sym} opposite-side SL distance {round(sl_dist,5)} exceeds "
+                f"max_sl_dist {_max_sl_dist(sym)} -- keeping the structural distance "
+                f"(range-derived), NOT capping it; lot sizing will absorb this"
+            )
         sl_raw   = entry_raw + sl_dist
         tp1_raw  = entry_raw - range_width * 2.0
         tp2_raw  = entry_raw - range_width * 3.0
