@@ -3428,6 +3428,38 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
             return None
 
+        # PARTIAL-CONSUMPTION CHECK — the FINAL STALENESS RE-CHECK below only
+        # catches a signal once price has FULLY crossed TP1 (100% of the move
+        # already gone). Confirmed live: a real EURUSD SELL dispatched with live
+        # price already at 1.14 against entry=1.14207/tp1=1.13893 — 66% of the
+        # entire entry-to-TP1 distance had already happened BEFORE the message
+        # even reached the person, yet it passed, because live price was still
+        # technically short of the hard TP1 line. Verified against trading
+        # research on "chasing": entering (or here, dispatching) after most of a
+        # move has already run is a well-documented way a stated R:R silently
+        # collapses well before full staleness — one source: "a setup that was
+        # 3:1 at the original entry is 0.5:1 by the time you chase it." Threshold
+        # set at 50% for direct consistency with the existing check's own 100%
+        # (full TP1 breach) threshold — half the move already gone is treated the
+        # same way the system already treats all of it being gone.
+        if _sig_tp1 and _sig_sl and _sig_entry != _sig_tp1:
+            _total_dist = abs(_sig_tp1 - _sig_entry)
+            if direction == "SELL":
+                _consumed = _sig_entry - _cp_final
+            else:
+                _consumed = _cp_final - _sig_entry
+            _pct_consumed = _consumed / _total_dist if _total_dist else 0.0
+            if _pct_consumed >= 0.5:
+                logger.warning(
+                    f"[entry_validation] {symbol} entry {_sig_entry} already "
+                    f"{_pct_consumed*100:.0f}% consumed toward tp1={_sig_tp1} vs live "
+                    f"{_cp_final} — blocking rather than dispatching a setup whose "
+                    f"stated R:R has already largely collapsed"
+                )
+                _last_signal_time[_sym_key] = _time.monotonic()
+                _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+                return None
+
         # FINAL STALENESS RE-CHECK — the "correct side" check above only confirms
         # direction (entry above/below current price for SELL/BUY); it never checks
         # DISTANCE. A repriced entry can be on the correct side yet already far past
