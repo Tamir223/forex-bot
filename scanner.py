@@ -1804,7 +1804,20 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
                 # Show the actual breaker zone on the signal — previously just a text tag
                 # with no numbers, so the person receiving it couldn't see where the
                 # zone actually was or judge whether the entry sat inside it.
-                gate_details['ob_fvg'] = f"🦄 UNICORN (Breaker+FVG): {_b_low:.5f}-{_b_high:.5f}"
+                #
+                # OFFSET BUG, confirmed live: this label never applied _disp_off, unlike
+                # the Displacement FVG label a few lines above which correctly does. A
+                # real XAUUSD signal showed "UNICORN...4217.9-4225.8" (raw futures
+                # values) while entry was 4189.55 -- looking like a 28-point mismatch.
+                # But unicorn_entry_sanity (which DOES apply the offset when validating)
+                # correctly found entry genuinely inside the real, spot-converted zone
+                # (4187.9-4195.8) and did not fire. The trade logic was right the whole
+                # time; only the displayed numbers were wrong. Fixed by applying the
+                # same _disp_off conversion already used for every other zone label.
+                gate_details['ob_fvg'] = (
+                    f"🦄 UNICORN (Breaker+FVG): {round(_b_low + _disp_off, _dp)}"
+                    f"-{round(_b_high + _disp_off, _dp)}"
+                )
                 gate_details['_breaker_zone_low'] = _b_low
                 gate_details['_breaker_zone_high'] = _b_high
                 logger.info(
