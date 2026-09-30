@@ -2483,6 +2483,39 @@ async def scan_orb_symbol(symbol: str) -> dict | None:
     return None
 
 
+def _safe_ob_fvg_label(ob: dict | None, fvg: dict | None, sig_entry: float, symbol: str) -> str:
+    """
+    Builds a fallback OB/FVG description, validated against the final entry
+    before use. Confirmed live: the previous version of every fallback site
+    (unicorn_entry_sanity, displacement_entry_sanity) blindly used `ob` or
+    `fvg` whenever present, with no check that either was actually near the
+    final entry. A real XAUUSD signal showed "OB 4205.4-4215.0" as its
+    fallback label while entry was 4180.2 -- 25 points away -- because `ob`
+    was a leftover gate-evaluation-time reference, unrelated to the "15M
+    entry fallback" mechanism that actually produced the entry.
+
+    Tolerance uses _min_sl_dist(symbol), not a small multiple of the raw
+    "pip" unit. An earlier version used 5x pip, which for XAUUSD (pip=0.01)
+    gave a 0.05-point tolerance -- far too tight, since gold routinely has
+    legitimate multi-point gaps between a raw OB boundary and where entry
+    actually lands (zone-clearance adjustments, spot/futures conversion).
+    That tolerance would have rejected plenty of genuinely valid OBs, not
+    just the real mismatched one. _min_sl_dist is already an established,
+    per-symbol-calibrated "meaningful distance" elsewhere in this file
+    (12.0 points for XAUUSD, documented as "gold needs room") -- a much
+    better-justified basis for "is this zone roughly relevant" than an
+    arbitrary multiple of a unit too fine-grained for the purpose.
+    """
+    _tol = _min_sl_dist(symbol)
+    if ob and (ob['low'] - _tol) <= sig_entry <= (ob['high'] + _tol):
+        return f"OB {ob['low']:.5f}-{ob['high']:.5f}"
+    if fvg:
+        _fb, _ft = fvg.get('bottom', 0), fvg.get('top', 0)
+        if (_fb - _tol) <= sig_entry <= (_ft + _tol):
+            return f"FVG {_fb:.5f}-{_ft:.5f}"
+    return f"entry {sig_entry:.5f} (no matching OB/FVG zone found)"
+
+
 async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
     """
     Run full scan on one symbol. Returns alert dict if setup found, None otherwise.
@@ -3358,9 +3391,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     f"reverting to standard OB/FVG description"
                 )
                 if ob:
-                    gate_details['ob_fvg'] = f"OB {ob['low']:.5f}-{ob['high']:.5f}"
+                    gate_details['ob_fvg'] = _safe_ob_fvg_label(ob, fvg, _sig_entry, symbol)
                 elif fvg:
-                    gate_details['ob_fvg'] = f"FVG {fvg.get('bottom',0):.5f}-{fvg.get('top',0):.5f}"
+                    gate_details['ob_fvg'] = _safe_ob_fvg_label(ob, fvg, _sig_entry, symbol)
                 else:
                     gate_details['ob_fvg'] = "no OB or FVG found"
 
@@ -3417,9 +3450,9 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                     f"reverting to standard OB/FVG label"
                 )
                 if ob:
-                    gate_details['ob_fvg'] = f"OB {ob['low']:.5f}-{ob['high']:.5f}"
+                    gate_details['ob_fvg'] = _safe_ob_fvg_label(ob, fvg, _sig_entry, symbol)
                 elif fvg:
-                    gate_details['ob_fvg'] = f"FVG {fvg.get('bottom',0):.5f}-{fvg.get('top',0):.5f}"
+                    gate_details['ob_fvg'] = _safe_ob_fvg_label(ob, fvg, _sig_entry, symbol)
                 else:
                     gate_details['ob_fvg'] = "no OB or FVG found"
 
