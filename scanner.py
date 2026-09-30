@@ -2162,10 +2162,17 @@ def format_unified_signal(symbol: str, direction: str,
     else:
         _sl_display = f"{round(sl_dist * 10000, 1)} pips"
 
-    # Order type
-    if ob:
+    # Order type — must check the SAME conditions build_auto_signal's entry
+    # logic actually used (ob/fvg TYPE matching direction), not bare existence.
+    _ob_type_matches = ob and ob.get("type") == (
+        "bullish_ob" if direction == "BUY" else "bearish_ob"
+    )
+    _fvg_type_matches = fvg and fvg.get("type") == (
+        "bullish_fvg" if direction == "BUY" else "bearish_fvg"
+    )
+    if _ob_type_matches:
         _type_str = "OB Retracement / LIMIT ORDER"
-    elif fvg:
+    elif _fvg_type_matches:
         _type_str = "FVG Fill / LIMIT ORDER"
     elif gates and gates.get('ob_fvg'):
         _type_str = "Displacement FVG / LIMIT ORDER"
@@ -3596,6 +3603,47 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # Audit log — captures grade/tier so outcomes can be reconstructed from
         # journalctl without parsing the Telegram message (which isn't logged).
         _gd_str = gate_details.get('ob_fvg', '') if gate_details else ''
+
+        # ── ZONE CONFLUENCE REQUIREMENT ───────────────────────────────────────────
+        # Confirmed live: a real XAUUSD signal dispatched with entry=4180.2 and
+        # Type="OB Retracement" while entry matched no real OB's midpoint at all --
+        # it had fallen through build_auto_signal's `else: entry = price` branch,
+        # meaning the ENTIRE trade had no structural basis whatsoever, just raw
+        # market price at scan time. This system already enforces exactly this
+        # requirement for ORB signals (scan_orb_symbol blocks dispatch with "no
+        # OB/FVG confluence and no Asia-level sweep") -- this extends the same
+        # requirement to the regular (non-ORB) path, which never had it.
+        #
+        # Verified against current ICT/SMC research (checked before implementing):
+        # "ICT and SMC setups share one sequence: liquidity sweep, then a
+        # structure shift (MSS/CHOCH/BOS), then entry in an unmitigated order
+        # block or FVG" (ForexTradeLab) -- entry within a real zone is stated as
+        # part of the shared, required sequence, not an optional refinement.
+        # "Be ruthless in your structural analysis -- it is the foundation of
+        # your trade thesis" (FXNX) -- structure is described as foundational,
+        # not decorative. "Traders using SMC don't blindly enter on patterns.
+        # They wait for price to return to the Order Block" (Pocketoption) --
+        # directly describes the discipline this check now enforces.
+        #
+        # This relies on gate_details['ob_fvg'] being an honest, accurate
+        # description of whatever confluence (if any) was actually found --
+        # which tonight's earlier fixes (unicorn_entry_sanity,
+        # displacement_entry_sanity, _safe_ob_fvg_label) specifically made
+        # reliable. Checks for both honest-fallback strings that indicate no
+        # real zone exists.
+        _no_genuine_confluence = (
+            not _gd_str
+            or "no OB or FVG found" in _gd_str
+            or "no matching OB/FVG zone found" in _gd_str
+        )
+        if _no_genuine_confluence:
+            logger.info(
+                f"[scanner] {symbol} blocked — entry {_sig_entry} has no genuine "
+                f"OB/FVG/Displacement/UNICORN confluence (ob_fvg={_gd_str!r}) — "
+                f"same requirement already enforced for ORB signals, extended here"
+            )
+            return None
+
         if 'UNICORN' in _gd_str:
             _dispatch_grade = 'Unicorn'
         elif ob:
