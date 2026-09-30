@@ -3376,15 +3376,41 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         # Same underlying cause as the OB/FVG/UNICORN sanity checks: _sig_entry
         # can be overwritten again later by staleness/repricing logic without
         # this description ever being refreshed to match.
-        if _fvg_bot_disp is not None and "Displacement FVG" in gate_details.get("ob_fvg", ""):
+        #
+        # SECOND CONFIRMED CASE, deeper than the first: a real XAUUSD signal
+        # showed this same "Displacement FVG...OTE=..." text while entry was
+        # 17 points below the entire OTE zone — but _fvg_bot_disp was still
+        # None, because THIS label was set all the way back in check_tjr_gates()
+        # (a separate function, at gate-evaluation time, based on price at that
+        # earlier moment) rather than by the scan_symbol()-level OTE-override
+        # branch this check originally watched. The signal then took the "15M
+        # entry fallback" path, which never touches gate_details['ob_fvg'] at
+        # all — so the early, now-stale label survived untouched to dispatch
+        # with no sanity check ever seeing it. Fix: derive the comparison zone
+        # directly from the raw `displacement` object whenever the branch-
+        # specific variables are unset but a "Displacement FVG" label is
+        # present and displacement data exists — this covers BOTH code paths
+        # that can produce this label, not just the one already handled.
+        if "Displacement FVG" in gate_details.get("ob_fvg", "") and (
+            _fvg_bot_disp is not None or displacement
+        ):
             _gs_spot = FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)
             _gs_pip  = get_pip_spec(symbol.upper()).get("pip", 0.0001)
             _gs_tol  = _gs_pip * 2
+            _gs_dp   = 3 if symbol.upper() in ("XAUUSD", "US100", "US30", "US500") else 5
             if _ote_lo_disp is not None:
                 _gs_lo, _gs_hi = _ote_lo_disp, _ote_hi_disp
-            else:
+            elif _ce_disp is not None:
                 _gs_lo, _gs_hi = _ce_disp - _gs_pip * 5, _ce_disp + _gs_pip * 5
-            if not (_gs_lo - _gs_tol <= _sig_entry <= _gs_hi + _gs_tol):
+            elif displacement and displacement.get('ote_low'):
+                _gs_lo = round(displacement.get('ote_low', 0) + _gs_spot, _gs_dp)
+                _gs_hi = round(displacement.get('ote_high', 0) + _gs_spot, _gs_dp)
+            elif displacement and displacement.get('fvg_mid'):
+                _fallback_ce = round(displacement.get('fvg_mid', 0) + _gs_spot, _gs_dp)
+                _gs_lo, _gs_hi = _fallback_ce - _gs_pip * 5, _fallback_ce + _gs_pip * 5
+            else:
+                _gs_lo = _gs_hi = None
+            if _gs_lo is not None and not (_gs_lo - _gs_tol <= _sig_entry <= _gs_hi + _gs_tol):
                 logger.warning(
                     f"[displacement_entry_sanity] {symbol} FINAL entry {_sig_entry} outside "
                     f"cited OTE/CE range {_gs_lo:.5f}-{_gs_hi:.5f} — clearing description, "
