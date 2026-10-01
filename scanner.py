@@ -1920,41 +1920,38 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
 
     # ── CONTINUATION/REVERSAL RISK TIERING ──────────────────────────────────────
     # Research: BOS continuation = 55-65% win rate vs CHoCH reversal = ~45% win rate
-    # in SMC backtests on forex majors, 1,000+ trades (lunefi.com).
-    # CHoCH + moderate displacement (2 candles) → downgrade OB tier one full level.
-    # CHoCH + strong displacement (3+ candles) → no penalty (clear institutional flip).
+    # in SMC backtests on forex majors, 1,000+ trades (lunefi.com) -- re-verified
+    # directly against lunefi.com's own published text before this change: confirmed
+    # accurate, not a stale or misremembered citation.
+    #
+    # CHANGED from a tier-downgrade (which could still pass if the original tier was
+    # high enough) to a HARD BLOCK for CHoCH + moderate displacement specifically.
+    # Per user decision: not comfortable holding lower-conviction reversal setups,
+    # regardless of what tier they started at. Strong-displacement CHoCH (3+ candles,
+    # "clear institutional flip") is explicitly NOT touched by this -- research does
+    # not flag that case as lower-reliability; FXNX: "Once price creates a CHoCH and
+    # then follows it up with a BOS... you have a confirmed trend" and "CHOCH is
+    # generally more reliable in higher timeframes" / larger displacement moves are
+    # the higher-conviction version of this same signal, not the weak one.
     _structure_risk_note = ""
     if _is_choch and gates.get('bos') and ob:
         _orig_tier = ob.get('tier', '')
-        _tier_order = ["S-tier", "A-tier", "B-tier", "C-tier"]
         if _bos_quality == "moderate":
-            _orig_idx = _tier_order.index(_orig_tier) if _orig_tier in _tier_order else len(_tier_order) - 1
-            _new_idx  = min(_orig_idx + 1, len(_tier_order) - 1)
-            _eff_tier = _tier_order[_new_idx]
             logger.info(
-                f"[structure_risk] {symbol} {direction} CHoCH reversal with {_bos_quality}"
-                f" displacement — {_orig_tier} downgraded to {_eff_tier}"
-                f" per continuation/reversal reliability research"
+                f"[structure_risk] {symbol} {direction} blocked — CHoCH reversal with "
+                f"moderate displacement ({_orig_tier}) — per research (BOS ~55-65% win "
+                f"rate vs CHoCH ~45%, lunefi.com) and user decision not to trade "
+                f"lower-conviction reversal setups, regardless of tier"
             )
-            # Re-evaluate Gate 5 with the downgraded effective tier
-            _has_ob_eff = _min_ob_tier_ok(_eff_tier, symbol)
-            if _is_liquidity_run:
-                gates['ob_fvg'] = (_has_ob_eff and _has_fvg) or _has_displacement_fvg
-            else:
-                gates['ob_fvg'] = _has_ob_eff or _has_fvg or _has_displacement_fvg
+            gates['ob_fvg'] = False
             _ob_lo_r = round(ob['low']  + _disp_off, _dp)
             _ob_hi_r = round(ob['high'] + _disp_off, _dp)
-            if _eff_tier == 'C-tier':
-                gate_details['ob_fvg'] = (
-                    f"{_ob_lo_r}-{_ob_hi_r} ({_orig_tier}→C-tier CHoCH reversal downgrade — gate fail)"
-                )
-            else:
-                gate_details['ob_fvg'] = (
-                    f"{_ob_lo_r}-{_ob_hi_r} ({_orig_tier}→{_eff_tier} CHoCH reversal downgrade)"
-                )
+            gate_details['ob_fvg'] = (
+                f"{_ob_lo_r}-{_ob_hi_r} ({_orig_tier} CHoCH reversal, moderate displacement — blocked)"
+            )
             _structure_risk_note = (
-                "⚠️ Reversal signal (CHoCH) — historically lower reliability than"
-                " continuation (BOS) setups, especially with moderate displacement"
+                "⚠️ Reversal signal (CHoCH) blocked — moderate displacement reversals"
+                " excluded per lower-reliability research (lunefi.com) and account risk preference"
             )
         elif _bos_quality == "strong":
             logger.info(
