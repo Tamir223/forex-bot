@@ -2133,11 +2133,23 @@ def detect_displacement(candles: list, direction: str, symbol: str = "") -> dict
     Detect a strong displacement move in the last 20 candles.
     Displacement = 5+ consecutive same-direction candles, leaving an FVG behind.
 
+    MAGNITUDE CHECK ADDED — same fix applied to score_bos_quality() for the
+    identical reason: 5+ consecutive candles was previously sufficient
+    regardless of how small each candle's move was. A candidate window that
+    meets the candle-count requirement but not 2x this symbol's calibrated
+    ATR baseline (PIP_SPECS min_atr) is skipped, and the search continues to
+    other windows in the lookback range rather than returning a technically-
+    qualifying but magnitude-weak "displacement."
+
     Returns displacement dict with fvg_top, fvg_bottom, fvg_mid (CE level),
     start_price, end_price, candle_count, direction. Returns None if not found.
     """
     if not candles or len(candles) < 10:
         return None
+
+    _sym_u = symbol.upper() if symbol else ""
+    _min_atr_baseline = get_pip_spec(_sym_u).get("min_atr", 0.0007) if _sym_u else 0.0007
+    _min_disp_range = _min_atr_baseline * 2
 
     for start_idx in range(0, min(15, len(candles) - 5)):
         consecutive = 0
@@ -2160,6 +2172,13 @@ def detect_displacement(candles: list, direction: str, symbol: str = "") -> dict
                     start_price = disp_candles[-1]['open']
                     end_price   = disp_candles[0]['close']
                     disp_range  = end_price - start_price
+                    if disp_range < _min_disp_range:
+                        logger.info(
+                            f"[displacement_magnitude] {symbol} {consecutive} consecutive candles "
+                            f"met count but range {disp_range:.5f} is below 2x ATR baseline "
+                            f"({_min_disp_range:.5f}) — skipping, not genuine institutional displacement"
+                        )
+                        continue
                     ote_high = end_price - (disp_range * 0.62)
                     ote_low  = end_price - (disp_range * 0.79)
                     return {
@@ -2181,6 +2200,13 @@ def detect_displacement(candles: list, direction: str, symbol: str = "") -> dict
                     start_price = disp_candles[-1]['open']
                     end_price   = disp_candles[0]['close']
                     disp_range  = start_price - end_price
+                    if disp_range < _min_disp_range:
+                        logger.info(
+                            f"[displacement_magnitude] {symbol} {consecutive} consecutive candles "
+                            f"met count but range {disp_range:.5f} is below 2x ATR baseline "
+                            f"({_min_disp_range:.5f}) — skipping, not genuine institutional displacement"
+                        )
+                        continue
                     ote_high = end_price + (disp_range * 0.79)
                     ote_low  = end_price + (disp_range * 0.62)
                     return {
