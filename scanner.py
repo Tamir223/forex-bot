@@ -42,6 +42,7 @@ from scanner_improvements import (
     ORB_KILL_ZONES_FOR_SYMBOL,
     TP1_MULTIPLIER,
     _tp1_mult,
+    _SWEEP_PIERCE_BUFFER,
 )
 import requests
 import yfinance as yf
@@ -409,10 +410,23 @@ def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> 
             and asia.get("low", 0) > 0):
         asia_high = asia["high"]
         asia_low  = asia["low"]
+        # MAGNITUDE CHECK ADDED — every sibling sweep function in this file
+        # (detect_liquidity_sweep, detect_weekly_level_sweep,
+        # detect_round_number_sweep) already requires a minimum pierce distance
+        # via _SWEEP_PIERCE_BUFFER, specifically because a bare "wick above/below,
+        # close back inside" check with no magnitude floor lets a single-pip (or
+        # sub-pip) wick qualify identically to a genuine, meaningful sweep. The
+        # XAUUSD entry's own comment confirms this exact problem was already
+        # found and fixed for the sibling functions: "previously 0, any wick
+        # qualified." This check was the one sweep path that never received the
+        # same fix -- and it's also the FIRST, highest-priority check in the
+        # fallback chain, so it likely fires more often than the others.
+        _fallback_pip = get_pip_spec(sym).get("pip", 0.0)
+        _min_pierce = _SWEEP_PIERCE_BUFFER.get(sym, _fallback_pip)
         for c in candles[:15]:
-            if direction == "SELL" and c["high"] > asia_high and c["close"] < asia_high:
+            if direction == "SELL" and c["high"] > asia_high + _min_pierce and c["close"] < asia_high:
                 return True, round(asia_high + FUTURES_SPOT_OFFSET.get(sym, 0), 5), "judas_swing"
-            if direction == "BUY"  and c["low"]  < asia_low  and c["close"] > asia_low:
+            if direction == "BUY"  and c["low"]  < asia_low  - _min_pierce and c["close"] > asia_low:
                 return True, round(asia_low  + FUTURES_SPOT_OFFSET.get(sym, 0), 5), "judas_swing"
     else:
         if asia.get("high", 0) == 0 or asia.get("low", 0) == 0:
