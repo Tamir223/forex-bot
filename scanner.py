@@ -1006,6 +1006,22 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
             _dp = 3
         else:
             _dp = 5
+        # MAGNITUDE CHECK ADDED — same gap found and fixed for score_bos_quality,
+        # detect_displacement, and the Asia sweep check tonight. The _disp_ratio
+        # check below is RELATIVE ONLY (middle candle's close vs candle1's OWN
+        # range) -- a tiny, near-doji candle1 can produce a ratio >= 0.5 even
+        # when the absolute gap is microscopic. Verified against research:
+        # LuxAlgo -- "Raw three-candle gaps print constantly, so most tools
+        # require a minimum size (ATR- or percentage-based)... before a gap
+        # makes the chart." A dedicated FVG indicator's own stated default:
+        # "Minimum FVG Size: 0.10 ATR. This prevents insignificant gaps from
+        # being displayed simply because a technical three-candle imbalance
+        # exists." Uses 0.10x (not the 2x used for BOS/displacement) since a
+        # gap's width is a narrower metric than a full displacement range --
+        # matching the research-cited default rather than reusing an
+        # unrelated multiplier.
+        _min_atr_baseline = get_pip_spec(_sym_u).get("min_atr", 0.0007) if _sym_u else 0.0007
+        _min_gap_size = _min_atr_baseline * 0.10
         for i in range(len(candles) - 2):
             c1 = candles[i+2]   # oldest of three
             c2 = candles[i+1]   # middle
@@ -1014,6 +1030,13 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
             # Bullish FVG
             if c1["high"] < c3["low"]:
                 gap_size = c3["low"] - c1["high"]
+                if gap_size < _min_gap_size:
+                    logger.info(
+                        f"[fvg_magnitude] {symbol} bullish gap {gap_size:.5f} below "
+                        f"minimum {_min_gap_size:.5f} (0.10x ATR baseline) — skipping, "
+                        f"technically-valid ratio but insignificant absolute size"
+                    )
+                    continue
                 _top = round(c3["low"], 5)
                 _bot = round(c1["high"], 5)
                 # Displacement-strength: how far c2 closed beyond c1's high, relative to c1's range
@@ -1045,6 +1068,13 @@ def detect_fvg(candles: list, symbol: str = "") -> dict | None:
             # Bearish FVG
             if c1["low"] > c3["high"]:
                 gap_size = c1["low"] - c3["high"]
+                if gap_size < _min_gap_size:
+                    logger.info(
+                        f"[fvg_magnitude] {symbol} bearish gap {gap_size:.5f} below "
+                        f"minimum {_min_gap_size:.5f} (0.10x ATR baseline) — skipping, "
+                        f"technically-valid ratio but insignificant absolute size"
+                    )
+                    continue
                 _top = round(c1["low"], 5)
                 _bot = round(c3["high"], 5)
                 # Displacement-strength: how far c2 closed below c1's low, relative to c1's range
