@@ -24,24 +24,39 @@ logger = logging.getLogger(__name__)
 # which is the only value the scanner actually reads at runtime.
 
 PIP_SPECS = {
-    "EURUSD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.00022},  # 12 pips; min_atr p25 of 6,563 real readings (was 0.00035, sat between p50/p75 — blocked 64%)
-    "GBPUSD": {"pip": 0.0001, "min_sl": 0.0015, "min_atr": 0.00042},  # 15 pips — most volatile forex
-    "AUDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.00035},  # 10 pips
-    "NZDUSD": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.00035},  # 10 pips
-    "USDCAD": {"pip": 0.0001, "min_sl": 0.0012, "min_atr": 0.00049},  # 12 pips
-    "USDCHF": {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.00049},  # 10 pips
-    "USDJPY": {"pip": 0.01,   "min_sl": 0.08,   "min_atr": 0.12, "max_lots": 0.50},    # 8 pips JPY; min_atr p25 of 13,108 real readings (was 0.035, blocked only 1.1% — effectively no filter)
-    "EURJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.08},
-    "GBPJPY": {"pip": 0.01,   "min_sl": 0.15,   "min_atr": 0.10},
-    "XAUUSD": {"pip": 0.01,   "min_sl": 12.0,   "min_atr": 8.046},   # 12 points — gold needs room;
-                                                                     # min_atr 8.046 = p25 of 13,114
-                                                                     # real ATR_CALIBRATION_LOG readings
-                                                                     # (15.0 blocked 100%, max=12.793)
-    "XAGUSD": {"pip": 0.001,  "min_sl": 0.05,   "min_atr": 0.03},
-    "US100":  {"pip": 1.0, "min_sl": 80.0,  "min_atr": 20.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 80,  "max_sl_pips": 300, "digits": 2, "unit": "pts"},
-    "US30":   {"pip": 1.0, "min_sl": 60.0,  "min_atr": 17.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 60,  "max_sl_pips": 250, "digits": 2, "unit": "pts"},
-    "US500":  {"pip": 0.1, "min_sl":  8.0,  "min_atr":  0.7, "pip_size": 0.1, "pip_value": 0.5, "min_sl_pips": 20,  "max_sl_pips": 150, "digits": 2, "unit": "pts"},
-    "USOIL":  {"pip": 0.01, "min_sl": 0.40, "min_atr": 0.20},
+    # "min_sl" fields REMOVED from every entry below -- confirmed, during a
+    # system-wide audit, that this key is NEVER read anywhere in either file
+    # (verified with a clean grep across both scanner.py and
+    # scanner_improvements.py, zero matches). MIN_SL_DISTANCE (scanner.py)
+    # is the sole authoritative source for minimum SL distance. This field
+    # wasn't just unused -- it was a real, demonstrated confusion trap: the
+    # XAUUSD entry specifically showed a stale 12.0 here while
+    # MIN_SL_DISTANCE["XAUUSD"] had already been correctly recalibrated to
+    # 30.0 ("gold needs room... previous 12pt min was too tight"). This
+    # exact discrepancy caused a real mistake earlier tonight when a
+    # tolerance fix was built against this stale value instead of the
+    # authoritative one. Removed everywhere, not just for XAUUSD, since the
+    # same confusion risk exists for any pair whose two copies could drift
+    # apart in the future, even ones currently agreeing by coincidence
+    # (EURUSD and USDJPY's copies happened to still match MIN_SL_DISTANCE
+    # at the time of this cleanup).
+    "EURUSD": {"pip": 0.0001, "min_atr": 0.00022},  # min_atr p25 of 6,563 real readings (was 0.00035, sat between p50/p75 — blocked 64%)
+    "GBPUSD": {"pip": 0.0001, "min_atr": 0.00042},  # most volatile forex
+    "AUDUSD": {"pip": 0.0001, "min_atr": 0.00035},
+    "NZDUSD": {"pip": 0.0001, "min_atr": 0.00035},
+    "USDCAD": {"pip": 0.0001, "min_atr": 0.00049},
+    "USDCHF": {"pip": 0.0001, "min_atr": 0.00049},
+    "USDJPY": {"pip": 0.01,   "min_atr": 0.12, "max_lots": 0.50},    # min_atr p25 of 13,108 real readings (was 0.035, blocked only 1.1% — effectively no filter)
+    "EURJPY": {"pip": 0.01,   "min_atr": 0.08},
+    "GBPJPY": {"pip": 0.01,   "min_atr": 0.10},
+    "XAUUSD": {"pip": 0.01,   "min_atr": 8.046},   # min_atr 8.046 = p25 of 13,114
+                                                    # real ATR_CALIBRATION_LOG readings
+                                                    # (15.0 blocked 100%, max=12.793)
+    "XAGUSD": {"pip": 0.001,  "min_atr": 0.03},
+    "US100":  {"pip": 1.0, "min_atr": 20.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 80,  "max_sl_pips": 300, "digits": 2, "unit": "pts"},
+    "US30":   {"pip": 1.0, "min_atr": 17.0, "pip_size": 1.0, "pip_value": 1.0, "min_sl_pips": 60,  "max_sl_pips": 250, "digits": 2, "unit": "pts"},
+    "US500":  {"pip": 0.1, "min_atr":  0.7, "pip_size": 0.1, "pip_value": 0.5, "min_sl_pips": 20,  "max_sl_pips": 150, "digits": 2, "unit": "pts"},
+    "USOIL":  {"pip": 0.01, "min_atr": 0.20},
 }
 
 _FOREX_PIP_SPEC_PAIRS = {k for k, v in PIP_SPECS.items() if v["pip"] <= 0.01 and k not in ("XAUUSD", "XAGUSD")}
@@ -84,7 +99,7 @@ def _tp1_mult(symbol: str) -> float:
 
 def get_pip_spec(symbol: str) -> dict:
     """Return pip spec for symbol, defaulting to standard 4dp forex if unknown."""
-    return PIP_SPECS.get(symbol.upper(), {"pip": 0.0001, "min_sl": 0.0010, "min_atr": 0.0007})
+    return PIP_SPECS.get(symbol.upper(), {"pip": 0.0001, "min_atr": 0.0007})
 
 
 # Max Asian range sizes (in pip units) above which the Judas Swing edge degrades.
