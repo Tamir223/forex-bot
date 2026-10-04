@@ -1821,15 +1821,16 @@ def check_premium_discount_zone(candles: list, entry: float, direction: str) -> 
 # ─── 20. KILL ZONE TIMING BONUS ──────────────────────────────────────────────
 
 # ── DST DISCLOSURE ────────────────────────────────────────────────────────────
-# All windows below are hardcoded UTC. No DST adjustment is applied here.
-# A _et_to_utc_minutes() helper (line ~98) exists and is used for news/FOMC
-# timing, but is NOT wired to this kill zone dict.
-# Consequence: every ET-anchored window below drifts by 1 hour between seasons:
-#   Summer (EDT, UTC-4): values listed are correct.
-#   Winter (EST, UTC-5): every ET-based window is 1 hour too early in UTC.
-# This is a known gap; proper DST-aware kill zones would require either
-# calling _et_to_utc_minutes() dynamically or maintaining two window sets.
-# Flagged as a future improvement — do not silently assume these are always right.
+# All windows below are hardcoded for EDT (summer, UTC-4). The narrow,
+# fixed-ET-clock-time windows (the 5 in _DST_SENSITIVE_ZONES, defined just
+# above is_kill_zone()) are now correctly shifted for EST/winter at check
+# time -- see that function. The wider windows (london, ny_open, evening,
+# london_close) are either not ET-anchored or already wide enough to
+# absorb the 1-hour seasonal shift on their own, and deliberately remain
+# untouched. xau_pre_ny and xau_pm are also deliberately untouched: they're
+# anchored to the gap between other UTC session boundaries, not to a fixed
+# ET time, so shifting them would conflict with the windows they're
+# positioned relative to.
 # ──────────────────────────────────────────────────────────────────────────────
 _KILL_ZONES = {
     'asian':               (23,  2),  # 23:00-02:00 UTC wraps midnight — JPY, AUD, NZD only
@@ -1911,19 +1912,42 @@ SECOND_LEG_WINDOWS = {
     # London second-leg already covered by existing 'london' window (06-10 UTC).
 }
 
+# DST FIX — the 5 zones below are anchored to a FIXED ET clock time (e.g.
+# "3:00-4:00 AM EDT", "10:30 AM London"), unlike the wider zones (london,
+# ny_open, asian, etc.) which are either not ET-anchored at all or already
+# wide enough to absorb the 1-hour seasonal shift on their own. xau_pre_ny
+# and xau_pm are deliberately excluded: their own comments show they're
+# anchored to the GAP BETWEEN other UTC session boundaries (london's end,
+# ny_open's start), not to a fixed ET time, so shifting them would
+# conflict with the very windows they're positioned relative to.
+# Verified shift direction with concrete numbers before implementing:
+# silver_bullet_london's summer-listed window (7,8) UTC = 3-4am EDT; in
+# winter the correct window is 8-9am UTC (3-4am EST = UTC-5). Subtracting
+# 1 from the real UTC hour before comparing against the unchanged tuple
+# correctly reproduces that shift without touching the tuples themselves.
+_DST_SENSITIVE_ZONES = {
+    'silver_bullet_london', 'silver_bullet_ny', 'silver_bullet_ny_pm',
+    'london_fix', 'london_fix_pm',
+}
+
 def is_kill_zone(symbol: str) -> tuple[bool, str]:
     """
     Check if current UTC time falls within the pair's ICT kill zone window.
     Returns (in_kill_zone, label_string).
     """
-    hour = datetime.now(timezone.utc).hour
+    _now = datetime.now(timezone.utc)
+    hour = _now.hour
+    _is_winter_est = not (3 <= _now.month <= 11)  # same convention as _et_to_utc_minutes
     valid_zones = _PAIR_KILL_ZONES.get(symbol.upper(), ['london', 'ny_open'])
     for zone in valid_zones:
         start, end = _KILL_ZONES[zone]
+        _check_hour = hour
+        if zone in _DST_SENSITIVE_ZONES and _is_winter_est:
+            _check_hour = (hour - 1) % 24
         if start > end:  # wraps midnight (e.g. asian: 23-02)
-            in_zone = hour >= start or hour < end
+            in_zone = _check_hour >= start or _check_hour < end
         else:
-            in_zone = start <= hour < end
+            in_zone = start <= _check_hour < end
         if in_zone:
             label = _KILL_ZONE_LABELS[zone]
             return True, f"Kill zone active — {label} — peak institutional activity"
