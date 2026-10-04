@@ -1416,11 +1416,13 @@ async def fetch_all_timeframes(symbol: str) -> dict:
                 }
                 threshold = _futures_thr.get(sym, _get_pip_spec(sym).get("min_atr", 0.0007))
                 atr_data = {"atr": atr_val, "is_low_volatility": atr_val < threshold}
-                # ATR_CALIBRATION_LOG — records every real reading for XAUUSD/EURUSD/USDJPY
+                # ATR_CALIBRATION_LOG — records every real reading for XAUUSD/EURUSD/USDJPY/USDCHF
                 # so the thresholds above (and PIP_SPECS' min_atr for the forex pairs) can be
                 # set from genuine observed data instead of estimation. Pull with:
                 #   journalctl -u apfee --since "3 days ago" | grep ATR_CALIBRATION_LOG
-                if sym in ("XAUUSD", "EURUSD", "USDJPY"):
+                # USDCHF added after it went live with a min_atr (0.00049) that has no
+                # calibration behind it -- no live readings existed to check it against.
+                if sym in ("XAUUSD", "EURUSD", "USDJPY", "USDCHF"):
                     logger.info(
                         f"ATR_CALIBRATION_LOG {sym} atr={atr_val:.5f} threshold={threshold:.5f} "
                         f"is_low_volatility={atr_val < threshold}"
@@ -1451,7 +1453,7 @@ async def fetch_all_timeframes(symbol: str) -> dict:
                             # this TD-fallback branch is reachable for EURUSD/USDJPY (not
                             # XAUUSD, excluded above), so it needs matching coverage or the
                             # real-data collection would have silent gaps.
-                            if sym in ("EURUSD", "USDJPY"):
+                            if sym in ("EURUSD", "USDJPY", "USDCHF"):
                                 logger.info(
                                     f"ATR_CALIBRATION_LOG {sym} atr={atr_val:.5f} "
                                     f"threshold={_td_threshold:.5f} is_low_volatility={atr_val < _td_threshold} (TD fallback)"
