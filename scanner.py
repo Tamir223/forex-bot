@@ -822,7 +822,28 @@ def detect_order_block(candles: list, trend: str, max_candles_back: int = None, 
         "XAUUSD": {"strong": 25.0,  "valid": 12.0},
         "USOIL":  {"strong": 0.60,  "valid": 0.30},  # dollar-scaled; 0.60=$0.60 per 15M candle
         "GBPUSD": {"strong": 0.0020, "valid": 0.0010},
-        "EURUSD": {"strong": 0.0015, "valid": 0.0008},
+        "EURUSD": {"strong": 0.0009, "valid": 0.0005},  # recalibrated: original 0.0015/0.0008 were
+                                                         # set against the pre-recalibration min_atr
+                                                         # (0.00035), giving ratios of 4.29x/2.29x ATR
+                                                         # at the time. When min_atr was later reduced
+                                                         # to 0.00022 (see PIP_SPECS comment), these raw
+                                                         # pip values were never updated, silently
+                                                         # drifting the ratio to 6.82x/3.64x -- a clear
+                                                         # outlier against every other pair in this dict
+                                                         # (next-highest was GBPUSD at 4.76x/2.38x).
+                                                         # Verified against research before changing:
+                                                         # ATR-relative OB-strength scoring is confirmed
+                                                         # standard practice (FibAlgo: "A 3x ATR
+                                                         # displacement scores higher than 1.1x"), with
+                                                         # typical cited ranges of 1.5-3x, occasionally
+                                                         # ~5x -- no source mandates one universal number
+                                                         # (it's described as a tunable parameter
+                                                         # everywhere), but the entire purpose of ATR-
+                                                         # normalizing is cross-instrument consistency,
+                                                         # which this pair's drifted ratio broke. New
+                                                         # values preserve the original 4.29x/2.29x ratio
+                                                         # against the current, correct min_atr, landing
+                                                         # EURUSD back alongside GBPUSD's position.
         "USDJPY": {"strong": 0.15,   "valid": 0.08},
         "USDCAD": {"strong": 0.0012, "valid": 0.0006},
         "AUDUSD": {"strong": 0.0012, "valid": 0.0006},
