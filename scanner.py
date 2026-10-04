@@ -70,7 +70,7 @@ FAST_INSTRUMENTS = {"USDJPY", "XAUUSD", "US100", "US30", "US500"}
 
 # Discord broadcast whitelist — scanner and Telegram are unaffected.
 # Only signals for these symbols are forwarded to send_to_discord().
-DISCORD_SYMBOL_WHITELIST = {"EURUSD", "XAUUSD", "USDJPY"}
+DISCORD_SYMBOL_WHITELIST = {"EURUSD", "XAUUSD", "USDJPY", "USDCHF"}
 
 
 logger = logging.getLogger(__name__)
@@ -458,19 +458,34 @@ def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> 
 BASE_URL = "https://api.twelvedata.com"
 
 SYMBOLS = [
-    'XAUUSD', 'EURUSD', 'USDJPY',
+    'XAUUSD', 'EURUSD', 'USDJPY', 'USDCHF',
+    # USDCHF re-enabled after a full pair-specific audit (same scrutiny as
+    # EURUSD/USDJPY/XAUUSD): OB-threshold ratio (2.04x ATR) sits cleanly
+    # within the normal cross-pair range (1.25x-4.76x), no stale-calibration
+    # issue found (unlike EURUSD's pre-fix drift). Zero DST exposure --
+    # kill zones are just 'london'/'ny_open', neither in the DST-sensitive
+    # set. Sweep buffer ratio matches its own documented comment exactly.
+    # CHF is a safe-haven currency, not commodity-correlated like
+    # AUD/CAD/NZD/GBP (which remain disabled below) -- research confirmed
+    # those four are macro/commodity-driven in a way that structurally
+    # mismatches a pure price-action/ICT strategy, a concern that does not
+    # apply to USDCHF the same way.
     # 'GBPUSD',  # disabled — 0.31 Sharpe (below 0.5 tradeability threshold) + documented
     #            # false-breakout tendency, independent of market regime (unlike EURUSD's
     #            # current low-volatility phase). Live sample too small to confirm/refute
     #            # (4 logged trades, 2-2, some trades went unlogged) — decision made on
     #            # the original walk-forward research, not live data.
-    # 'AUDUSD', 'USDCAD', 'NZDUSD', 'USDCHF', 'USOIL',  # disabled — narrowed to the pairs actually being watched
+    # 'AUDUSD', 'USDCAD', 'NZDUSD', 'USOIL',  # disabled — confirmed commodity/macro-correlated
+    #            # (research: AUD/CAD/NZD move together as a "commodity block", high-beta to
+    #            # risk sentiment) -- structural mismatch with a pure price-action strategy,
+    #            # not a detection-quality issue tonight's fixes would address.
     # 'US100', 'US30', 'US500',  # disabled — zero fills to date
 ]
 
 # Default watchlist — users can customize with /watch command
-DEFAULT_WATCHLIST = ["EURUSD", "USDJPY", "XAUUSD"]
+DEFAULT_WATCHLIST = ["EURUSD", "USDJPY", "XAUUSD", "USDCHF"]
 # Disabled: "GBPUSD" — see SYMBOLS comment above for the research backing
+# Disabled: "AUDUSD", "USDCAD", "NZDUSD" — confirmed commodity/macro-correlated, see SYMBOLS comment
 # Disabled: "US100", "US30", "US500" — zero fills to date; re-add here + SYMBOLS + _preferred_order to restore
 
 
