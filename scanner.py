@@ -1908,13 +1908,13 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     _is_choch = _bos_type == 'choch' or bool(structure.get('choch') or ms.get('choch'))
     _is_fast = symbol.upper() in FAST_INSTRUMENTS
     if _bos_ok:
-        _bos_quality, _bos_count, _bos_desc = score_bos_quality(candles, direction)
+        _bos_quality, _bos_count, _bos_desc = score_bos_quality(candles, direction, symbol=symbol)
         _bos_tf_label = "15M"
         if _bos_quality == "weak" and _is_fast:
             # 15M failed — try 5M for fast instruments
             _candles_5m = (data.get("candles_5m") or []) if data else []
             if _candles_5m:
-                _bos_quality_5m, _bos_count_5m, _ = score_bos_quality(_candles_5m, direction, timeframe="5M")
+                _bos_quality_5m, _bos_count_5m, _ = score_bos_quality(_candles_5m, direction, timeframe="5M", symbol=symbol)
                 if _bos_quality_5m != "weak":
                     _bos_quality = _bos_quality_5m
                     _bos_count = _bos_count_5m
@@ -2555,19 +2555,23 @@ def _safe_ob_fvg_label(ob: dict | None, fvg: dict | None, sig_entry: float, symb
     was a leftover gate-evaluation-time reference, unrelated to the "15M
     entry fallback" mechanism that actually produced the entry.
 
-    Tolerance uses _min_sl_dist(symbol), not a small multiple of the raw
-    "pip" unit. An earlier version used 5x pip, which for XAUUSD (pip=0.01)
-    gave a 0.05-point tolerance -- far too tight, since gold routinely has
-    legitimate multi-point gaps between a raw OB boundary and where entry
-    actually lands (zone-clearance adjustments, spot/futures conversion).
-    That tolerance would have rejected plenty of genuinely valid OBs, not
-    just the real mismatched one. _min_sl_dist is already an established,
-    per-symbol-calibrated "meaningful distance" elsewhere in this file
-    (12.0 points for XAUUSD, documented as "gold needs room") -- a much
-    better-justified basis for "is this zone roughly relevant" than an
-    arbitrary multiple of a unit too fine-grained for the purpose.
+    RE-APPLIED, second time, after being found reverted to its first,
+    incorrect draft during a system-wide audit. CORRECTED version: an
+    earlier draft of this function used _min_sl_dist(symbol) as tolerance
+    (30.0 points for XAUUSD) -- that was wrong in a more basic way than
+    just picking the wrong number. It answered "is this zone roughly in
+    the neighborhood" when the label itself makes a factual claim ("OB
+    4205.4-4215.0") that entry is BASED ON that exact zone. A "close
+    enough" label is still a false one if it names specific numbers entry
+    doesn't actually fall within. Confirmed live: with the 30-point
+    tolerance, the real 25-point-away case above was WRONGLY accepted and
+    displayed as if entry were inside it, when it plainly isn't. Every
+    other sanity check in this file (OTE, breaker zone, FVG) requires
+    genuine containment with only a tiny, noise-level buffer, not a
+    "reasonable trading distance" -- this matches that same standard.
     """
-    _tol = _min_sl_dist(symbol)
+    _pip = get_pip_spec(symbol.upper()).get("pip", 0.0001)
+    _tol = _pip * 2  # noise-level buffer only, matching every other sanity check in this file
     if ob and (ob['low'] - _tol) <= sig_entry <= (ob['high'] + _tol):
         return f"OB {ob['low']:.5f}-{ob['high']:.5f}"
     if fvg:

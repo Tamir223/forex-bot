@@ -2586,7 +2586,7 @@ def clear_daily_mitigation_state() -> None:
     logger.info("[mitigation] Daily state cleared — fresh start")
 
 
-def score_bos_quality(candles: list, direction: str, timeframe: str = "15M") -> tuple[str, int, str]:
+def score_bos_quality(candles: list, direction: str, timeframe: str = "15M", symbol: str = "") -> tuple[str, int, str]:
     """
     Assess BOS displacement quality by counting consecutive candles in the BOS direction.
     Window tightened to 6 candles (90 min on 15M) — a BOS older than that is stale;
@@ -2617,7 +2617,30 @@ def score_bos_quality(candles: list, direction: str, timeframe: str = "15M") -> 
     _strong_threshold = 4 if timeframe == "5M" else 3
 
     if consecutive >= _strong_threshold:
-        return "strong", consecutive, "✅ BOS: confirmed (strong displacement)"
+        # RE-APPLIED after being found missing from a fresh repo pull during a
+        # system-wide audit -- this magnitude check was deployed successfully
+        # earlier, then somehow reverted/lost before this zip was taken.
+        # Candle-count alone verifies directional persistence, not magnitude:
+        # 3 tiny 1-pip candles would score "strong" identically to 3 candles
+        # covering 40 pips. Verified against ICT/SMC research (LuxAlgo:
+        # "Counting candles misses the point of a read that is deliberately
+        # relative"; ICTKillzone: "minimum 2x the average recent candle").
+        # Uses 2x this system's own already-calibrated per-symbol ATR baseline.
+        _disp_candles = candles[:consecutive]
+        _total_range = max(c["high"] for c in _disp_candles) - min(c["low"] for c in _disp_candles)
+        _sym_u = symbol.upper() if symbol else ""
+        _min_atr_baseline = get_pip_spec(_sym_u).get("min_atr", 0.0007) if _sym_u else 0.0007
+        _magnitude_ok = _total_range >= (_min_atr_baseline * 2)
+        if _magnitude_ok:
+            return "strong", consecutive, "✅ BOS: confirmed (strong displacement)"
+        else:
+            logger.info(
+                f"[bos_magnitude] {symbol} {consecutive} consecutive candles met the count "
+                f"threshold but total range {_total_range:.5f} is below 2x the ATR baseline "
+                f"({_min_atr_baseline*2:.5f}) — downgraded from strong to moderate, directional "
+                f"persistence without confirmed institutional-scale magnitude"
+            )
+            return "moderate", consecutive, "⚠️ BOS: confirmed (moderate displacement)"
     if consecutive >= 2:
         return "moderate", consecutive, "⚠️ BOS: confirmed (moderate displacement)"
     return "weak", consecutive, "⚠️ BOS: confirmed (weak displacement — gate fail)"
