@@ -243,6 +243,26 @@ def _swept_sl_buffer(symbol: str) -> float:
     return 0.0005     # 5 pips standard forex
 
 
+# "block" = drop a repriced signal whose stop does not reach the swept level (default)
+# "shadow" = log the same event but still send the signal (evidence-first operation)
+# "off" = previous behavior. Change the value and restart; no other edit is needed.
+REPRICE_SWEEP_GATE_MODE = "block"
+# 0.0 = a repriced stop must reach the swept level itself. 1.0 = the full swept-level buffer the normal
+# path uses (stricter: on the first audit it would also have blocked a winning EURUSD signal).
+REPRICE_SWEEP_GATE_BUFFER_FRACTION = 0.0
+
+
+def _repriced_stop_beyond_sweep(symbol: str, direction: str, sl: float, swept_level: float) -> bool:
+    """True when a stop sits at or beyond the swept level (plus REPRICE_SWEEP_GATE_BUFFER_FRACTION of the
+    per-symbol buffer). A stop short of the swept level sits inside the sweep leg, so ordinary retracement
+    can take it out before the setup is actually invalidated."""
+    need = REPRICE_SWEEP_GATE_BUFFER_FRACTION * _swept_sl_buffer(symbol)
+    tol = get_pip_spec(symbol.upper()).get("pip", 0.0001) * 0.5
+    if direction == "SELL":
+        return sl >= swept_level + need - tol
+    return sl <= swept_level - need + tol
+
+
 # News-resumption alert state — fires once when a news block clears
 _news_was_blocked: bool = False
 _news_resume_sent: bool = False
@@ -3371,6 +3391,32 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 )
                 if _repriced:
                     _new_entry, _new_sl, _new_tp1, _new_tp2, _ref_type, _new_rr, _new_zone_lo, _new_zone_hi = _repriced
+                    # REPRICED-STOP SWEEP GATE. A repriced signal replaces the original zone AND the
+                    # stop. The normal path anchors the stop beyond the swept level; this branch
+                    # overwrites it with a zone+ATR stop that never sees the sweep, and the max-SL cap
+                    # cannot reach a sweep that sits farther from the entry than the cap allows.
+                    # Audit of the journal, Sep 30 - Oct 5, n=5 repriced episodes, EXPLORATORY: the 2 whose
+                    # stop ended up short of the swept level (entries 24-34 pips from it, past the 20-pip
+                    # USDJPY cap) were both stopped out within 30 minutes of filling; the 3 whose stop
+                    # cleared it went TP1, TP1, no fill. Against 13 normal episodes (0 inside the sweep)
+                    # Fisher p~0.065: suggestive, not conclusive. ICT sources place the stop beyond the
+                    # sweep and treat a stop that cannot go there as a setup that does not fit, not as a
+                    # reason to tighten it. Dropped like the "no fresh structure" case below. Never
+                    # changes a price. Mode "shadow" logs the event but still sends the signal.
+                    if (REPRICE_SWEEP_GATE_MODE in ("block", "shadow") and _swept_level
+                            and symbol.upper() not in ("US100", "US30", "US500", "NAS100", "SP500")
+                            and not _repriced_stop_beyond_sweep(symbol, direction, _new_sl, _swept_level)):
+                        logger.info(
+                            f"[reprice_gate] {symbol} {direction} "
+                            f"{'blocked' if REPRICE_SWEEP_GATE_MODE == 'block' else 'shadow'}: "
+                            f"repriced stop does not clear the swept level "
+                            f"swept={_swept_level} buffer={_swept_sl_buffer(symbol)} "
+                            f"entry={_new_entry} sl={_new_sl} tp1={_new_tp1} zone={_ref_type}"
+                        )
+                        if REPRICE_SWEEP_GATE_MODE == "block":
+                            _last_signal_time[_sym_key] = _time.monotonic()
+                            _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
+                            return None
                     logger.info(
                         f"[staleness] {symbol} original entry stale — re-priced via fresh "
                         f"{_ref_type} reference, entry={_new_entry} sl={_new_sl} "
