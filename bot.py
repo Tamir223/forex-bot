@@ -466,6 +466,28 @@ async def process_signal_queue():
             await asyncio.sleep(0.5)
 
 
+def _estimated_win_r(analysis):
+    """R a WIN is worth for this signal: its own TP1 distance over its stop distance (the same ratio claude.py shows as tp1_rr).
+    Falls back to 2.0 when the numbers are missing or implausible."""
+    r = None
+    try:
+        e = float(analysis.get("entry_zone"))
+        s = float(analysis.get("stop_loss"))
+        t = float(analysis.get("tp1"))
+        if abs(e - s) > 0:
+            r = abs(t - e) / abs(e - s)
+    except (TypeError, ValueError, AttributeError):
+        r = None
+    if r is None:
+        try:
+            r = float(str(analysis.get("tp1_rr")).strip().upper().rstrip("R"))
+        except (TypeError, ValueError, AttributeError):
+            r = None
+    if r is None or not (0.2 <= r <= 10.0):
+        return 2.0
+    return round(r, 2)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -503,7 +525,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             _state = state_from_json(_state_json) if _state_json else None
             _profile = gp(_state.firm_code if _state else get_user_firm(user.id))
             _account = _profile.account_size if _profile else 10000
-            pnl_est = round(analysis.get("risk_percent", 0.35) / 100 * _account * 2, 2)
+            pnl_est = round(analysis.get("risk_percent", 0.35) / 100 * _account * _estimated_win_r(analysis), 2)
             if trade_id:
                 update_trade_result(trade_id, "WIN", pnl_amount=pnl_est)
             if _state and _profile:

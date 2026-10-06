@@ -3049,7 +3049,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 _sw_sl_dist = max(abs(_sig_entry - _swept_raw_sl), _min_sl_dist(symbol))
                 _sw_sl_dist = min(_sw_sl_dist, _max_sl_dist(symbol))
                 _sig_sl  = round(_sig_entry - _sw_sl_dist, _dp_sw)
-                _sig_tp1 = round(_sig_entry + _sw_sl_dist * 2.0, _dp_sw)
+                # TP1 follows TP1_MULTIPLIER (single source of truth); TP2 and TP3 stay as fixed extensions.
+                _sig_tp1 = round(_sig_entry + _sw_sl_dist * _tp1_mult(symbol), _dp_sw)
                 _sig_tp2 = round(_sig_entry + _sw_sl_dist * 3.0, _dp_sw)
                 _sig_tp3 = round(_sig_entry + _sw_sl_dist * 5.0, _dp_sw)
             else:
@@ -3057,7 +3058,7 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
                 _sw_sl_dist = max(abs(_swept_raw_sl - _sig_entry), _min_sl_dist(symbol))
                 _sw_sl_dist = min(_sw_sl_dist, _max_sl_dist(symbol))
                 _sig_sl  = round(_sig_entry + _sw_sl_dist, _dp_sw)
-                _sig_tp1 = round(_sig_entry - _sw_sl_dist * 2.0, _dp_sw)
+                _sig_tp1 = round(_sig_entry - _sw_sl_dist * _tp1_mult(symbol), _dp_sw)
                 _sig_tp2 = round(_sig_entry - _sw_sl_dist * 3.0, _dp_sw)
                 _sig_tp3 = round(_sig_entry - _sw_sl_dist * 5.0, _dp_sw)
             logger.info(

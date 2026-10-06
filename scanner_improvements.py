@@ -86,6 +86,14 @@ _SWEEP_PIERCE_BUFFER: dict[str, float] = {
 # Sharpe below 0.5): reverted to 1.5R pending live fills. Not permanent judgments.
 TP1_MULTIPLIER: dict[str, float] = {
     "default": 2.0,
+    # Oct 2026: every forex primary target is 1.5R (owner decision). Gold, silver, indices and oil stay on the 2.0R default.
+    "EURUSD": 1.5,
+    "USDJPY": 1.5,
+    "USDCHF": 1.5,
+    "NZDUSD": 1.5,
+    "EURJPY": 1.5,
+    "GBPJPY": 1.5,
+    "XAUUSD": 2.0,   # explicit: gold keeps 2.0R
     "GBPUSD": 1.5,   # Sharpe 0.31; widest SL band (15-25 pip) compounds the misfit
     "AUDUSD": 1.5,   # Sharpe 0.09 — weakest pair tested, "weak across every strategy"
     "USDCAD": 1.5,   # Sharpe 0.14 — carry-cost-eroded, sub-threshold all windows
