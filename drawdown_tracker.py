@@ -6,6 +6,7 @@ TNL Trader — Phase 1
 import copy
 import json
 import logging
+import math
 from datetime import datetime, date, timezone, timedelta
 from typing import Optional
 from dataclasses import dataclass, asdict, field
@@ -141,6 +142,129 @@ def _rollover_day(state, profile, now=None):
     state.today_date = profile_today(profile, now).isoformat()
     state.today_pnl = 0.0
     state.trades_today = 0
+
+
+def _money(text):
+    try:
+        v = float(str(text).replace("$", "").replace(",", "").strip())
+    except ValueError:
+        return None
+    return v if math.isfinite(v) else None
+
+
+def parse_setbalance_args(args):
+    """/setbalance 10489.11 [midnight=10563.35] [days=18] -> (balance, midnight, days, error)"""
+    balance = midnight = days = None
+    for raw in args:
+        tok = str(raw).strip()
+        low = tok.lower()
+        if not tok:
+            continue
+        if low.startswith("midnight="):
+            if midnight is not None:
+                return None, None, None, "midnight was given twice"
+            midnight = _money(tok.split("=", 1)[1])
+            if midnight is None:
+                return None, None, None, "midnight must be a number, for example midnight=10563.35"
+        elif low.startswith("days="):
+            if days is not None:
+                return None, None, None, "days was given twice"
+            try:
+                days = int(tok.split("=", 1)[1])
+            except ValueError:
+                return None, None, None, "days must be a whole number, for example days=18"
+            if days < 0 or days > 1000:
+                return None, None, None, "days must be between 0 and 1000"
+        elif "=" in tok:
+            return None, None, None, "unknown option %s (use midnight= or days=)" % tok.split("=", 1)[0]
+        else:
+            if balance is not None:
+                return None, None, None, "give only one balance"
+            balance = _money(tok)
+            if balance is None:
+                return None, None, None, "%s is not a number" % tok
+    if balance is None:
+        return None, None, None, "give your account balance, for example /setbalance 10489.11"
+    return balance, midnight, days, None
+
+
+def balance_problem(profile, value, label="balance"):
+    """None when `value` is a plausible balance for this profile's account size, otherwise a short reason."""
+    if value is None or not math.isfinite(value):
+        return "that %s is not a number" % label
+    lo, hi = 0.5 * profile.account_size, 3.0 * profile.account_size
+    if value < lo or value > hi:
+        return ("a %s of $%s looks wrong for a $%s account (I accept $%s to $%s). Check for a typo."
+                % (label, "{:,.2f}".format(value), "{:,.0f}".format(profile.account_size), "{:,.0f}".format(lo), "{:,.0f}".format(hi)))
+    return None
+
+
+def loss_floor(state, profile):
+    """The balance at which the max-loss rule is breached (same formulas as _check_max_loss)."""
+    dd = profile.drawdown_type
+    if dd == DrawdownType.STATIC:
+        return state.starting_balance - profile.max_total_loss
+    if dd == DrawdownType.TRAILING:
+        return state.peak_equity - profile.max_total_loss
+    if dd == DrawdownType.EOD:
+        return state.today_start_balance - profile.max_total_loss
+    return state.starting_balance - state.starting_balance * profile.max_total_loss_pct
+
+
+def apply_balance(state, profile, balance, midnight_balance=None, trading_days=None, now=None):
+    """Set the tracker to the real account balance. Without midnight_balance the day's start balance is
+    assumed to equal the current balance (nothing traded yet today). Breach and target flags are recomputed
+    from the new numbers, so a stale or mistyped value can be corrected by running the command again."""
+    today = profile_today(profile, now).isoformat()
+    if state.today_date != today:
+        state.trades_today = 0
+    base = balance if midnight_balance is None else midnight_balance
+    state.current_balance = round(balance, 2)
+    state.total_pnl = round(balance - state.starting_balance, 2)
+    if balance > state.peak_equity:
+        state.peak_equity = round(balance, 2)
+    state.today_date = today
+    state.today_start_balance = round(base, 2)
+    state.today_pnl = round(balance - base, 2)
+    if trading_days is not None:
+        state.trading_days = int(trading_days)
+    state.daily_pnl_history[today] = state.today_pnl
+    state.is_breached = False
+    state.breach_reason = ""
+    state.profit_hit = False
+    warnings = []
+    warnings += _check_max_loss(state, profile)
+    warnings += _check_daily_loss(state, profile)
+    warnings += _check_profit_target(state, profile)
+    return state, warnings
+
+
+def _signed(x):
+    return ("+" if x >= 0 else "-") + "$" + "{:,.2f}".format(abs(x))
+
+
+def setbalance_summary(state, profile):
+    floor = loss_floor(state, profile)
+    target = profile.profit_target
+    pct = (state.total_pnl / target * 100.0) if target else 0.0
+    lines = [
+        "✅ *Tracker synced to your real balance*",
+        "",
+        "Balance: $%s (started at $%s)" % ("{:,.2f}".format(state.current_balance), "{:,.0f}".format(state.starting_balance)),
+        "Profit so far: %s of $%s target (%d%%), $%s to go"
+        % (_signed(state.total_pnl), "{:,.0f}".format(target), int(round(pct)), "{:,.2f}".format(max(target - state.total_pnl, 0.0))),
+        "Max loss floor: $%s, $%s of room" % ("{:,.2f}".format(floor), "{:,.2f}".format(state.current_balance - floor)),
+    ]
+    if profile.max_daily_loss > 0:
+        used = max(0.0, -state.today_pnl)
+        lines.append("Daily loss limit: $%s from today's start balance $%s, $%s of room left"
+                     % ("{:,.0f}".format(profile.max_daily_loss), "{:,.2f}".format(state.today_start_balance),
+                        "{:,.2f}".format(max(profile.max_daily_loss - used, 0.0))))
+    lines.append("Trading days: %d (minimum %d)" % (state.trading_days, profile.min_trading_days))
+    lines.append("")
+    lines.append("This tracks closed results only. Prop firms usually count open trades, commissions and swaps in the "
+                 "daily limit too. If you have traded since the day started, add midnight=<your balance at the start of the day>.")
+    return "\n".join(lines)
 
 
 def _check_max_loss(state, profile):

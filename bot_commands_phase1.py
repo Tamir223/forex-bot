@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 
 from prop_firm_profiles import get_profile, get_profile_menu, get_profile_summary, PROFILES
 from datetime import date
-from drawdown_tracker import new_state, state_to_json, state_from_json, record_trade, get_status_report, _rollover_day, profile_today
+from drawdown_tracker import new_state, state_to_json, state_from_json, record_trade, get_status_report, _rollover_day, profile_today, parse_setbalance_args, balance_problem, apply_balance, setbalance_summary
 from database import get_user_by_chat_id, set_user_firm, get_user_firm, save_challenge_state, load_challenge_state, reset_challenge_state, get_recent_trades, get_conn
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,42 @@ async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🚀 *Challenge Started!*\n\n📋 Firm: {profile.name}\n💰 Account: ${profile.account_size:,.0f}\n🎯 Target: ${profile.profit_target:,.0f}\n🛡 Max Loss: ${profile.max_total_loss:,.0f}\n📅 Min Days: {profile.min_trading_days}\n\nUse /status to check progress.\nUse /logtrade to record outcomes.\n\nGood luck! 🎯",
         parse_mode="Markdown"
     )
+
+
+async def cmd_setbalance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = get_user_by_chat_id(str(update.effective_user.id))
+    if not user:
+        await update.message.reply_text("❌ No active subscription.")
+        return
+    balance, midnight, days, err = parse_setbalance_args(context.args or [])
+    if err:
+        await update.message.reply_text(
+            "❌ " + err + "\n\nUsage: /setbalance 10489.11\nOptional: midnight=10563.35 (your balance at the start of the "
+            "trading day) and days=18 (trading days so far)."
+        )
+        return
+    state_json = load_challenge_state(user.id)
+    if state_json:
+        state = state_from_json(state_json)
+        profile = get_profile(state.firm_code)
+    else:
+        profile = get_profile(get_user_firm(user.id))
+        state = new_state(user.id, profile) if profile else None
+    if not profile or state is None:
+        await update.message.reply_text("❌ No firm set. Use /setfirm first.")
+        return
+    for label, value in (("balance", balance), ("midnight balance", midnight)):
+        if value is not None:
+            problem = balance_problem(profile, value, label)
+            if problem:
+                await update.message.reply_text("❌ " + problem)
+                return
+    state, warnings = apply_balance(state, profile, balance, midnight, days)
+    save_challenge_state(user.id, state.firm_code, state_to_json(state))
+    msg = setbalance_summary(state, profile)
+    if warnings:
+        msg += "\n\n" + "\n\n".join(warnings)
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):

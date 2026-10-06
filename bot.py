@@ -34,7 +34,7 @@ from bot_commands_phase1 import (
     cmd_firmlist, cmd_setfirm, cmd_firm,
     cmd_challenge, cmd_status, cmd_logtrade,
     cmd_history, cmd_resetfirm, callback_reset,
-    cmd_watch, cmd_scan, cmd_bias
+    cmd_watch, cmd_scan, cmd_bias, cmd_setbalance
 )
 
 logger = logging.getLogger(__name__)
@@ -912,6 +912,7 @@ async def start_bot():
     app.add_handler(CommandHandler("logtrade", cmd_logtrade))
     app.add_handler(CommandHandler("history", cmd_history))
     app.add_handler(CommandHandler("resetfirm", cmd_resetfirm))
+    app.add_handler(CommandHandler("setbalance", cmd_setbalance))
     app.add_handler(CommandHandler("watch", cmd_watch))
     app.add_handler(CommandHandler("scan", cmd_scan))
     app.add_handler(CommandHandler("bias", cmd_bias))
