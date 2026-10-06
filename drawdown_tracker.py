@@ -3,6 +3,7 @@ drawdown_tracker.py — Multi-Firm Drawdown Engine
 TNL Trader — Phase 1
 """
 
+import copy
 import json
 import logging
 from datetime import datetime, date, timezone, timedelta
@@ -57,8 +58,43 @@ class DrawdownState:
     daily_loss_warn_sent: dict = field(default_factory=dict)
 
 
-def new_state(user_id: int, profile: PropFirmProfile) -> DrawdownState:
-    today = date.today().isoformat()
+def _last_sunday(year, month):
+    last_day = date(year, month + 1, 1) - timedelta(days=1)
+    return last_day - timedelta(days=(last_day.weekday() + 1) % 7)
+
+
+def _cet_offset_hours(now_utc):
+    """Central European Time is UTC+1; summer time (UTC+2) runs from the last Sunday of March 01:00 UTC
+    to the last Sunday of October 01:00 UTC. Used only if the system time zone database is missing."""
+    y = now_utc.year
+    start = datetime(y, 3, _last_sunday(y, 3).day, 1, tzinfo=timezone.utc)
+    end = datetime(y, 10, _last_sunday(y, 10).day, 1, tzinfo=timezone.utc)
+    return 2 if start <= now_utc < end else 1
+
+
+def profile_today(profile, now=None):
+    """The firm's current trading day. FTMO resets its daily loss at 00:00 CE(S)T, so its day is the Prague
+    calendar day. Profiles without a day_tz keep the previous behavior (the server date).
+    `now` is for tests; production callers leave it out."""
+    tz = getattr(profile, "day_tz", "UTC") or "UTC"
+    if now is None and tz == "UTC":
+        return date.today()
+    now = datetime.now(timezone.utc) if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    now = now.astimezone(timezone.utc)
+    if tz == "UTC":
+        return now.date()
+    try:
+        from zoneinfo import ZoneInfo
+        return now.astimezone(ZoneInfo(tz)).date()
+    except Exception:
+        if tz == "Europe/Prague":
+            return (now + timedelta(hours=_cet_offset_hours(now))).date()
+        return now.date()
+
+def new_state(user_id: int, profile: PropFirmProfile, now=None) -> DrawdownState:
+    today = profile_today(profile, now).isoformat()
     return DrawdownState(
         user_id=user_id, firm_code=profile.short_code,
         account_size=profile.account_size, starting_balance=profile.account_size,
@@ -75,11 +111,11 @@ def state_from_json(data: str) -> DrawdownState:
     return DrawdownState(**json.loads(data))
 
 
-def record_trade(state: DrawdownState, profile: PropFirmProfile, pnl: float):
+def record_trade(state: DrawdownState, profile: PropFirmProfile, pnl: float, now=None):
     warnings = []
-    today = date.today().isoformat()
+    today = profile_today(profile, now).isoformat()
     if state.today_date != today:
-        _rollover_day(state, profile)
+        _rollover_day(state, profile, now)
     state.current_balance += pnl
     state.total_pnl += pnl
     state.today_pnl += pnl
@@ -96,13 +132,13 @@ def record_trade(state: DrawdownState, profile: PropFirmProfile, pnl: float):
     return state, warnings
 
 
-def _rollover_day(state, profile):
+def _rollover_day(state, profile, now=None):
     # FTMO STATIC: daily loss limit is calculated from previous day's closing balance.
     # Update today_start_balance on every day rollover so the daily cap tracks correctly
     # as your balance grows or shrinks through the challenge.
     if profile.drawdown_type in (DrawdownType.EOD, DrawdownType.STATIC):
         state.today_start_balance = state.current_balance
-    state.today_date = date.today().isoformat()
+    state.today_date = profile_today(profile, now).isoformat()
     state.today_pnl = 0.0
     state.trades_today = 0
 
@@ -262,7 +298,12 @@ def check_daily_loss_warnings(state: DrawdownState, profile: PropFirmProfile) ->
     return messages
 
 
-def check_signal_allowed(state: DrawdownState, profile: PropFirmProfile, is_news: bool = False, is_overnight: bool = False, is_weekend: bool = False):
+def check_signal_allowed(state: DrawdownState, profile: PropFirmProfile, is_news: bool = False, is_overnight: bool = False, is_weekend: bool = False, now=None):
+    # A new trading day resets today's P&L. Judge on a rolled copy so yesterday's loss cannot block today's
+    # signals just because nothing has triggered the rollover yet. The stored state is left untouched.
+    if state.today_date != profile_today(profile, now).isoformat():
+        state = copy.deepcopy(state)
+        _rollover_day(state, profile, now)
     if state.is_breached:
         return False, f"🚫 Challenge is already breached — {state.breach_reason}"
     if is_news and not profile.news_trading_allowed:

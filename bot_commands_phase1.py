@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 
 from prop_firm_profiles import get_profile, get_profile_menu, get_profile_summary, PROFILES
 from datetime import date
-from drawdown_tracker import new_state, state_to_json, state_from_json, record_trade, get_status_report, _rollover_day
+from drawdown_tracker import new_state, state_to_json, state_from_json, record_trade, get_status_report, _rollover_day, profile_today
 from database import get_user_by_chat_id, set_user_firm, get_user_firm, save_challenge_state, load_challenge_state, reset_challenge_state, get_recent_trades, get_conn
 
 logger = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Roll over daily stats if this is a new day so today's values start at zero
-    if state.today_date != date.today().isoformat():
+    if state.today_date != profile_today(profile).isoformat():
         _rollover_day(state, profile)
         save_challenge_state(user.id, state.firm_code, state_to_json(state))
 

@@ -48,6 +48,7 @@ class PropFirmProfile:
     website: str
     phase_name: str
     notes: str = ""
+    day_tz: str = "UTC"  # time zone whose midnight starts the trading day (FTMO: Europe/Prague)
 
 
 PROFILES = {}
@@ -64,11 +65,12 @@ _register(PropFirmProfile(
     drawdown_type=DrawdownType.STATIC, min_trading_days=4,
     max_lot_size=None, max_contracts=None,
     instruments=[InstrumentType.FOREX, InstrumentType.CRYPTO],
-    allow_overnight=True, allow_weekend=False, news_trading_allowed=False,
+    allow_overnight=True, allow_weekend=True, news_trading_allowed=True,
     consistency_rule=False, consistency_pct=0.0, two_percent_rule=False,
     trail_from_high_watermark=False,
     website="ftmo.com", phase_name="FTMO Challenge",
-    notes="Static drawdown from starting balance. No weekend holding."
+    notes="2-Step Challenge, Standard account. Static 10% max loss from the starting balance, 5% daily loss from the 00:00 CE(S)T balance, measured on equity. Weekend holding and news trading are allowed during the Challenge and Verification; the funded FTMO Account restricts both.",
+    day_tz="Europe/Prague"
 ))
 
 _register(PropFirmProfile(
@@ -79,11 +81,12 @@ _register(PropFirmProfile(
     drawdown_type=DrawdownType.STATIC, min_trading_days=4,
     max_lot_size=None, max_contracts=None,
     instruments=[InstrumentType.FOREX, InstrumentType.CRYPTO],
-    allow_overnight=True, allow_weekend=False, news_trading_allowed=False,
+    allow_overnight=True, allow_weekend=True, news_trading_allowed=True,
     consistency_rule=False, consistency_pct=0.0, two_percent_rule=False,
     trail_from_high_watermark=False,
     website="ftmo.com", phase_name="FTMO Challenge",
-    notes="Static drawdown from starting balance. No weekend holding."
+    notes="2-Step Challenge, Standard account. Static 10% max loss from the starting balance, 5% daily loss from the 00:00 CE(S)T balance, measured on equity. Weekend holding and news trading are allowed during the Challenge and Verification; the funded FTMO Account restricts both.",
+    day_tz="Europe/Prague"
 ))
 
 _register(PropFirmProfile(
