@@ -2633,6 +2633,29 @@ def clear_daily_mitigation_state() -> None:
     logger.info("[mitigation] Daily state cleared — fresh start")
 
 
+_last_bos_mag_log: dict = {}   # {(SYMBOL, count, range): monotonic_float} - log dedup for [bos_magnitude]
+
+
+def _bos_log_skip(*args, **kwargs):
+    return None
+
+
+def _bos_magnitude_log_due(symbol: str, count: int, total_range: float, window: float = 300.0) -> bool:
+    """True when this downgrade has not been logged in the last window seconds. The same downgrade is read
+    again on every scan (about every 30 seconds) for as long as the candles stay the same, so only the first
+    line in each window is kept. The downgrade itself is never affected, only the log line."""
+    import time as _bt
+    now = _bt.monotonic()
+    key = (symbol.upper(), int(count), round(float(total_range), 3))
+    last = _last_bos_mag_log.get(key)
+    if last is not None and now - last < window:
+        return False
+    _last_bos_mag_log[key] = now
+    if len(_last_bos_mag_log) > 200:
+        for _k in [_k for _k, _v in _last_bos_mag_log.items() if now - _v >= window]:
+            del _last_bos_mag_log[_k]
+    return True
+
 def score_bos_quality(candles: list, direction: str, timeframe: str = "15M", symbol: str = "") -> tuple[str, int, str]:
     """
     Assess BOS displacement quality by counting consecutive candles in the BOS direction.
@@ -2681,7 +2704,8 @@ def score_bos_quality(candles: list, direction: str, timeframe: str = "15M", sym
         if _magnitude_ok:
             return "strong", consecutive, "✅ BOS: confirmed (strong displacement)"
         else:
-            logger.info(
+            _bos_log_fn = logger.info if _bos_magnitude_log_due(_sym_u, consecutive, _total_range) else _bos_log_skip
+            _bos_log_fn(
                 f"[bos_magnitude] {symbol} {consecutive} consecutive candles met the count "
                 f"threshold but total range {_total_range:.5f} is below 2x the ATR baseline "
                 f"({_min_atr_baseline*2:.5f}) — downgraded from strong to moderate, directional "

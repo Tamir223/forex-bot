@@ -105,6 +105,38 @@ _direction_lock: dict = {}  # {symbol: {"direction": str, "locked_until": float}
 _last_signal_time: dict = {}   # {symbol_upper: monotonic_float} — signal dedup cooldown
 _last_swept_level: dict = {}   # {symbol_upper: float} — last swept level that fired a signal
 _last_signal_entry: dict = {}  # {symbol: float}
+
+# Repeat guard (Oct 2026). The same-level cooldown only lasts 5 minutes, so a setup that did not change
+# could fire again and again (one gold sell went out three times while its BOS candle count grew), and
+# every copy is another order. A setup counts as unchanged when the direction, the swept level and the
+# entry zone all match the last signal that was actually sent. A different zone or a new swept level is
+# a new setup and passes. Seconds to hold an unchanged setup back; 0 turns the guard off (old behavior).
+# Change the number and restart; no other edit is needed.
+REPEAT_SUPPRESS_SEC = 3600
+_last_sent_setup: dict = {}   # {SYMBOL: {direction, level, entry, t}} - recorded when a signal is returned
+_last_repeat_log: dict = {}   # {SYMBOL: monotonic_float} - log dedup
+
+
+def _is_repeat_setup(prev, direction: str, level: float, entry: float, now: float,
+                     level_tol: float, entry_tol: float, window: float = None) -> bool:
+    """True when the last signal that was sent is the same setup as this one: same direction, same swept
+    level and same entry zone, and it went out less than the window ago. Any doubt (no record, a bad
+    number) gives False, so a signal is never held back by mistake."""
+    _w = REPEAT_SUPPRESS_SEC if window is None else window
+    try:
+        if prev["direction"] != direction:
+            return False
+        if now - prev["t"] >= _w:
+            return False
+        if not (abs(float(level) - float(prev["level"])) <= level_tol):
+            return False
+        if not (abs(float(entry) - float(prev["entry"])) <= entry_tol):
+            return False
+    except (KeyError, TypeError, ValueError):
+        return False
+    return True
+
+
 _fetch_fail_times: dict = {}   # {symbol_upper: [monotonic_ts, ...]} — yfinance failure tracking
 _last_breaker_log: dict = {}   # {(symbol, b_low, b_high): monotonic_float} — breaker no-FVG log dedup
 _fvg_pending_holds: dict = {}  # {(symbol, fvg_key): monotonic_float} — log dedup for FVG LTF hold state
@@ -217,6 +249,28 @@ def _min_ob_tier_ok(tier: str, symbol: str) -> bool:
         return False
     _min = MIN_OB_TIER.get(symbol.upper(), MIN_OB_TIER["default"])
     return _TIER_RANK.get(tier, 99) <= _TIER_RANK.get(_min, 2)
+
+
+# Failed-tier order block handling (Oct 2026).
+# Gate 5 is "OB or FVG", and an OB below its minimum tier does not count. When a valid FVG
+# carries the gate instead, that failed OB used to keep setting the entry, the type label and
+# the stored grade, so a signal could read "7/7 Gates Confirmed" next to "C-tier - gate fail".
+# "demote": the failed OB is dropped and the FVG that passed drives the whole signal.
+# "legacy": previous behavior. Change the value and restart; no other edit is needed.
+OB_FAIL_MODE = "demote"
+_last_ob_demote_log: dict = {}   # {(symbol, ob_low, ob_high): monotonic_float} - log dedup
+
+
+def _ob_demoted(ob, fvg_ok: bool, is_liquidity_run: bool, symbol: str, mode: str = None) -> bool:
+    """True when an OB exists but fails its minimum tier AND a valid FVG passed Gate 5 in its place.
+    Liquidity runs keep the old path (they need OB and FVG together, so a failed OB never carries them).
+    """
+    _mode = OB_FAIL_MODE if mode is None else mode
+    if _mode != "demote":
+        return False
+    if not ob or not fvg_ok or is_liquidity_run:
+        return False
+    return not _min_ob_tier_ok(ob.get('tier', ''), symbol)
 
 
 def _max_sl_dist(symbol: str) -> float:
@@ -1841,6 +1895,7 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         gates['ob_fvg'] = _has_confluence or _has_displacement_fvg
     else:
         gates['ob_fvg'] = _has_ob or _has_fvg or _has_displacement_fvg
+    gate_details['_ob_demoted'] = _ob_demoted(ob, _has_fvg, _is_liquidity_run, symbol)
 
     _disp_off = FUTURES_SPOT_OFFSET.get(_sym_upper, 0)
     _dp = 3 if _is_pts else 5
@@ -1852,6 +1907,16 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
             f" | OTE={round(displacement.get('ote_low', 0) + _disp_off, _dp)}"
             f"-{round(displacement.get('ote_high', 0) + _disp_off, _dp)}"
         )
+    elif gate_details['_ob_demoted']:
+        # A below-minimum-tier OB exists but a valid FVG passed Gate 5. Describe the zone that
+        # actually passed; the failed OB is dropped from the signal in scan_symbol.
+        _fb = fvg.get("display_bottom", round(fvg["bottom"] + _disp_off, _dp))
+        _ft = fvg.get("display_top",    round(fvg["top"]    + _disp_off, _dp))
+        _fvg_strength = fvg.get('strength', '')
+        if _fvg_strength:
+            gate_details["ob_fvg"] = f"FVG {_fb}-{_ft} (fresh, {_fvg_strength})"
+        else:
+            gate_details["ob_fvg"] = f"FVG {_fb}-{_ft} (fresh)"
     elif ob:
         _ob_lo = round(ob['low']  + _disp_off, _dp)
         _ob_hi = round(ob['high'] + _disp_off, _dp)
@@ -2883,6 +2948,22 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
 
         # ── 5M ENTRY REFINEMENT ──────────────────────────────────────────────────
         candles_5m = _data.get("candles_5m", [])
+        # Failed-tier OB: a valid FVG passed Gate 5 in its place, so the FVG drives this signal.
+        # Dropping the OB here keeps the entry, SL zone checks, type label, stored grade and the
+        # FVG lower-timeframe confirmation rule consistent with the gate that actually passed.
+        if gate_details.get('_ob_demoted') and ob:
+            _od_key = (symbol.upper(), ob.get('low'), ob.get('high'))
+            _od_now = _time.monotonic()
+            if _od_key not in _last_ob_demote_log or _od_now - _last_ob_demote_log[_od_key] >= 300:
+                _od_lo = ob.get("low")
+                _od_hi = ob.get("high")
+                _od_tier = ob.get("tier", "?")
+                logger.info(
+                    f"[ob_demote] {symbol} {direction} OB {_od_lo}-{_od_hi} ({_od_tier}) is below the minimum tier; "
+                    f"the FVG that passed Gate 5 drives entry, label and grade instead"
+                )
+                _last_ob_demote_log[_od_key] = _od_now
+            ob = None
         # C-tier OBs fail gate 5; if displacement FVG is the effective signal, skip the
         # 5M OB refinement — it would anchor entry to the discarded OB, not the OTE zone.
         _ob_eligible_5m = ob and _min_ob_tier_ok(ob.get('tier', ''), symbol)
@@ -3725,6 +3806,24 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             f"[entry_validation] {symbol} {direction} entry {_sig_entry} valid vs live {_cp_final} — passing"
         )
 
+        # Repeat guard: the same setup that was already sent is not sent again (see REPEAT_SUPPRESS_SEC).
+        _rg_prev = _last_sent_setup.get(_sym_key)
+        _rg_pip = get_pip_spec(_sym_key).get("pip", 0.0001)
+        _rg_sl = _min_sl_dist(symbol)
+        _rg_now = _time.monotonic()
+        if _is_repeat_setup(
+            _rg_prev, direction, _swept_level if _swept_level else 0.0, _sig_entry, _rg_now,
+            max(_rg_pip * 3, _rg_sl * 0.5), max(_rg_pip * 3, _rg_sl * 0.25),
+        ):
+            _rg_last = _last_repeat_log.get(_sym_key)
+            if _rg_last is None or _rg_now - _rg_last >= 300:
+                _rg_age = (_rg_now - _rg_prev["t"]) / 60
+                logger.info(
+                    f"[repeat_guard] {symbol} {direction} entry {_sig_entry} is the setup already sent "
+                    f"{_rg_age:.1f} min ago (swept level {_swept_level}); not sending it again"
+                )
+                _last_repeat_log[_sym_key] = _rg_now
+            return None
         # Record signal time for dedup cooldown
         _last_signal_time[_sym_key] = _time.monotonic()
         _last_swept_level[_sym_key] = _swept_level if _swept_level else 0.0
@@ -3789,6 +3888,12 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             f"entry={_sig_entry} sl={_sig_sl} tp1={_sig_tp1} "
             f"tp2={_sig_tp2} tp3={_sig_tp3 or 0.0}"
         )
+        _last_sent_setup[_sym_key] = {
+            "direction": direction,
+            "level": _swept_level if _swept_level else 0.0,
+            "entry": _sig_entry,
+            "t": _time.monotonic(),
+        }
 
         return {
             "symbol": symbol,
