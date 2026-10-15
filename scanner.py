@@ -1498,7 +1498,9 @@ async def fetch_all_timeframes(symbol: str) -> dict:
                     # still a limited sample: re-verify in 1-2 weeks once more session
                     # variety (weekend gaps, high-impact news, holiday sessions) has
                     # accumulated. Do not treat 8.046 as final.
-                    "XAUUSD": 8.046,
+                    # Oct 2026: 8.046 blocked 76% of in-window gold readings and 100% of 06-11 UTC. Now 6.4 =
+                    # the lower of the 12 week and 28 day in-window p25. Must equal PIP_SPECS XAUUSD min_atr in scanner_improvements.py.
+                    "XAUUSD": 6.4,
                 }
                 threshold = _futures_thr.get(sym, _get_pip_spec(sym).get("min_atr", 0.0007))
                 atr_data = {"atr": atr_val, "is_low_volatility": atr_val < threshold}

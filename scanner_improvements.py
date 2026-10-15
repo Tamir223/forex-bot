@@ -45,11 +45,11 @@ PIP_SPECS = {
     "AUDUSD": {"pip": 0.0001, "min_atr": 0.00035},
     "NZDUSD": {"pip": 0.0001, "min_atr": 0.00035},
     "USDCAD": {"pip": 0.0001, "min_atr": 0.00049},
-    "USDCHF": {"pip": 0.0001, "min_atr": 0.00049},
-    "USDJPY": {"pip": 0.01,   "min_atr": 0.12, "max_lots": 0.50},    # min_atr p25 of 13,108 real readings (was 0.035, blocked only 1.1% — effectively no filter)
+    "USDCHF": {"pip": 0.0001, "min_atr": 0.00043},   # min_atr 0.00043 = lower of the 12 week and 28 day in-window p25 (Oct 2026). Was 0.00049, which sat at p44 of the bot readings and blocked 44% of in-window scans.
+    "USDJPY": {"pip": 0.01,   "min_atr": 0.063, "max_lots": 0.50},    # min_atr 0.063 = lower of the 12 week and 28 day in-window p25 (Oct 2026). Was 0.12, which sat at p88 of the bot readings and blocked 88% of in-window scans.
     "EURJPY": {"pip": 0.01,   "min_atr": 0.08},
     "GBPJPY": {"pip": 0.01,   "min_atr": 0.10},
-    "XAUUSD": {"pip": 0.01,   "min_atr": 8.046},   # min_atr 8.046 = p25 of 13,114
+    "XAUUSD": {"pip": 0.01,   "min_atr": 6.4},   # min_atr 6.4 = lower of the 12 week and 28 day in-window p25 (Oct 2026). Was 8.046, which blocked 76% of in-window bot readings and all of 06-11 UTC. Keep equal to _futures_thr in scanner.py.
                                                     # real ATR_CALIBRATION_LOG readings
                                                     # (15.0 blocked 100%, max=12.793)
     "XAGUSD": {"pip": 0.001,  "min_atr": 0.03},
