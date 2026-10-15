@@ -120,6 +120,22 @@ _last_repeat_log: dict = {}   # {SYMBOL: monotonic_float} - log dedup
 # symbol, for the log only. Nothing reads it to decide anything.
 _last_sweep_kind: dict = {}   # {SYMBOL: asia_range|weekly|round_number|liquidity_run|recent_swing|none}
 
+# Sweep label (Oct 15 2026). The signal text used to say Judas Swing for every sweep that was not a liquidity run,
+# whatever the real source. Now the label follows the source. Only the text changes, no gate reads it.
+# An unknown source keeps the old label.
+_SWEEP_LABELS = {
+    "asia_range": "Judas Swing",
+    "weekly": "Weekly level sweep",
+    "round_number": "Round number sweep",
+    "recent_swing": "Recent swing sweep",
+}
+
+
+def _sweep_label_for(kind, sweep_type) -> str:
+    if sweep_type == "liquidity_run":
+        return "liquidity run"
+    return _SWEEP_LABELS.get(kind, "Judas Swing")
+
 
 def _is_repeat_setup(prev, direction: str, level: float, entry: float, now: float,
                      level_tol: float, entry_tol: float, window: float = None) -> bool:
@@ -1875,7 +1891,7 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         _draw_pips = draw.get('distance_pips', 0)
         _draw_type = draw.get('type', '')
         _draw_detail = f" → draw: {_draw_type} ({_draw_pips:.0f}p)"
-    _sweep_label = "liquidity run" if _sweep_type == "liquidity_run" else "Judas Swing"
+    _sweep_label = _sweep_label_for(_last_sweep_kind.get(_sym_upper, "none"), _sweep_type)
     gate_details['sweep'] = (
         (f"{_sweep_label} at {_swept_level:.{_swept_dp}f}" + _draw_detail) if (_sweep_ok and _swept_level) else
         f"no liquidity sweep{_draw_detail}"
@@ -2368,8 +2384,11 @@ def format_unified_signal(symbol: str, direction: str,
     _swept_dp = 3 if _is_pts else 5
     _swept_str = f"{swept_level:.{_swept_dp}f}" if swept_level else "recent high/low"
     _is_liq_run = bool(gate_details) and gate_details.get('sweep_type') == 'liquidity_run'
+    _sweep_lbl = _sweep_label_for((gate_details or {}).get('sweep_kind', 'none'), 'liquidity_run' if _is_liq_run else 'judas_swing')
     _sweep_line = (f"🔄 Liquidity Run: through {_swept_str}"
-                   if _is_liq_run else f"✅ Judas Swing: swept at {_swept_str}")
+                   if _is_liq_run else
+                   f"✅ Judas Swing: swept at {_swept_str}" if _sweep_lbl == "Judas Swing" else
+                   f"✅ {_sweep_lbl} at {_swept_str}")
 
     # OB / FVG condition lines
     _cond_lines = [
