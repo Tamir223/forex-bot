@@ -115,6 +115,10 @@ _last_signal_entry: dict = {}  # {symbol: float}
 REPEAT_SUPPRESS_SEC = 3600
 _last_sent_setup: dict = {}   # {SYMBOL: {direction, level, entry, t}} - recorded when a signal is returned
 _last_repeat_log: dict = {}   # {SYMBOL: monotonic_float} - log dedup
+# Sweep kind (Oct 2026). Gate 4 reports only judas_swing, liquidity_run or none, but the sweep can come from the
+# Asia range, the previous week, a round number, a liquidity run or a recent swing. This records which one, per
+# symbol, for the log only. Nothing reads it to decide anything.
+_last_sweep_kind: dict = {}   # {SYMBOL: asia_range|weekly|round_number|liquidity_run|recent_swing|none}
 
 
 def _is_repeat_setup(prev, direction: str, level: float, entry: float, now: float,
@@ -477,6 +481,7 @@ def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> 
     'liquidity_run' (closes through without reversing = trend continuation, lower prob).
     """
     sym = symbol.upper()
+    _last_sweep_kind[sym] = "none"
     today = datetime.now(timezone.utc).date()
     asia = _asia_levels.get(sym, {})
     if (asia.get("date") == str(today)
@@ -499,8 +504,10 @@ def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> 
         _min_pierce = _SWEEP_PIERCE_BUFFER.get(sym, _fallback_pip)
         for c in candles[:15]:
             if direction == "SELL" and c["high"] > asia_high + _min_pierce and c["close"] < asia_high:
+                _last_sweep_kind[sym] = "asia_range"
                 return True, round(asia_high + FUTURES_SPOT_OFFSET.get(sym, 0), 5), "judas_swing"
             if direction == "BUY"  and c["low"]  < asia_low  - _min_pierce and c["close"] > asia_low:
+                _last_sweep_kind[sym] = "asia_range"
                 return True, round(asia_low  + FUTURES_SPOT_OFFSET.get(sym, 0), 5), "judas_swing"
     else:
         if asia.get("high", 0) == 0 or asia.get("low", 0) == 0:
@@ -510,22 +517,27 @@ def _detect_asia_sweep_or_recent(symbol: str, candles: list, direction: str) -> 
     weekly_swept, weekly_level, weekly_label = detect_weekly_level_sweep(candles, direction, symbol)
     if weekly_swept:
         logger.info(f"[sweep] {sym} {weekly_label}")
+        _last_sweep_kind[sym] = "weekly"
         return True, weekly_level, "judas_swing"
 
     # Round number sweep — wick through + close back = Judas Swing
     round_swept, round_level, round_label = detect_round_number_sweep(candles, direction, symbol)
     if round_swept:
         logger.info(f"[sweep] {sym} {round_label}")
+        _last_sweep_kind[sym] = "round_number"
         return True, round_level, "judas_swing"
 
     # Liquidity run — closes THROUGH the level (no reversal close); lower probability
     run_detected, run_level = detect_liquidity_run(candles, direction, symbol)
     if run_detected:
         logger.info(f"[sweep] {sym} liquidity run through {run_level:.5f}")
+        _last_sweep_kind[sym] = "liquidity_run"
         return True, run_level, "liquidity_run"
 
     # Final fallback — standard recent-swing sweep (wick through + close back = Judas Swing)
     swept, level = detect_liquidity_sweep(candles, direction, symbol)
+    if swept:
+        _last_sweep_kind[sym] = "recent_swing"
     return swept, level, "judas_swing" if swept else "none"
 
 
@@ -1867,6 +1879,7 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
         f"no liquidity sweep{_draw_detail}"
     )
     gate_details['sweep_type'] = _sweep_type
+    gate_details['sweep_kind'] = _last_sweep_kind.get(_sym_upper, "none")
 
     # GATE 5 — OB or FVG present; C-tier OBs fail; Weak FVGs (C-tier after penalty) fail;
     # liquidity runs require OB+FVG confluence
@@ -3886,7 +3899,8 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
         logger.info(
             f"[signal_dispatch] {symbol} {direction} grade={_dispatch_grade} "
             f"entry={_sig_entry} sl={_sig_sl} tp1={_sig_tp1} "
-            f"tp2={_sig_tp2} tp3={_sig_tp3 or 0.0}"
+            f"tp2={_sig_tp2} tp3={_sig_tp3 or 0.0} "
+            f"sweep={gate_details.get('sweep_kind', 'none')}"
         )
         _last_sent_setup[_sym_key] = {
             "direction": direction,
