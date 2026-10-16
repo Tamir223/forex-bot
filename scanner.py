@@ -2037,7 +2037,9 @@ async def check_tjr_gates(symbol: str, candles: list, ob: dict, fvg: dict,
     _d1_candles = (data.get("candles_daily") or []) if data else []
     if _d1_candles and current_price:
         _pd_ok, _pd_msg = check_premium_discount_zone(_d1_candles, current_price, direction)
-        if _pd_ok:
+        if _pd_ok and not _pd_msg:
+            _pd_label = ""   # neutral zone, opposite zone or no data: print nothing
+        elif _pd_ok:
             _pd_label = "✅ Discount zone" if direction == "BUY" else "✅ Premium zone"
         else:
             _pd_label = "⚠️ Premium zone (caution)" if direction == "BUY" else "⚠️ Discount zone (caution)"
@@ -3917,11 +3919,18 @@ async def scan_symbol(symbol: str, active_signals: list = None) -> dict | None:
             _dispatch_grade = 'Displacement'
         else:
             _dispatch_grade = 'Structure'
+        # Oct 16 2026: gold is scanned on GC=F futures and shifted to spot by a fixed offset. Log both numbers on every
+        # dispatched signal so the real futures-to-spot gap can be compared with the MT5 chart. Log text only.
+        _basis_note = ""
+        if FUTURES_SPOT_OFFSET.get(symbol.upper(), 0):
+            _basis_note = (f" spot_est={current_price} fut_close={candles[0]['close'] if candles else 0.0} "
+                           f"offset={FUTURES_SPOT_OFFSET.get(symbol.upper(), 0)}")
         logger.info(
             f"[signal_dispatch] {symbol} {direction} grade={_dispatch_grade} "
             f"entry={_sig_entry} sl={_sig_sl} tp1={_sig_tp1} "
             f"tp2={_sig_tp2} tp3={_sig_tp3 or 0.0} "
             f"sweep={gate_details.get('sweep_kind', 'none')}"
+            f"{_basis_note}"
         )
         _last_sent_setup[_sym_key] = {
             "direction": direction,
